@@ -8,15 +8,18 @@ export interface RenderedCommandSuggestion extends SlashCommandSuggestion {
 }
 
 export function CommandSuggestions({
-  suggestions
+  suggestions,
+  notice
 }: {
   suggestions: RenderedCommandSuggestion[]
+  notice?: string
 }): React.JSX.Element | null {
-  if (suggestions.length === 0) return null
+  if (suggestions.length === 0 && !notice) return null
   const groups = groupSuggestions(suggestions)
 
   return (
     <Box marginTop={1} flexDirection="column">
+      {notice ? <Text color={animeTheme.textDim}>  {notice}</Text> : null}
       {groups.map((group) => (
         <Box key={group.category} flexDirection="column">
           <Text color={animeTheme.textDim}>  {group.category}</Text>

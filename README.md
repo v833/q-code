@@ -1,6 +1,6 @@
 # q-code
 
-基于 AI SDK 的命令行 Agent 框架，支持工具调用、可后台运行的 Shell 长任务、Plan Mode、Task V2 持久化任务图、上下文自动压缩、会话持久化、跨对话项目记忆、Skills 渐进式披露、后台 SubAgent、Worktree 隔离、Agent Teams 多智能体协作和 MCP 扩展。
+基于 AI SDK 的命令行 Agent 框架，支持工具调用、可后台运行的 Shell 长任务、Plan Mode、Task V2 持久化任务图、上下文自动压缩、会话持久化、`@file` 文件引用、跨对话项目记忆、Skills 渐进式披露、后台 SubAgent、Worktree 隔离、Agent Teams 多智能体协作和 MCP 扩展。
 
 ## 技术栈
 
@@ -110,6 +110,7 @@ cp .env.example .env
 | `Q_CODE_AUDIT_MAX_QUEUE_SIZE`  | ❌   | 审计写入内存队列上限，默认 1000                              |
 | `Q_CODE_AUDIT_PII`             | ❌   | 默认不写 prompt/tool 原文；设为 `full` 才写入原文             |
 | `Q_CODE_CRASH_GUARD`           | ❌   | 崩溃保护开关，默认开启；设为 `false` 可关闭全局兜底 handler  |
+| `Q_CODE_MENTION_ALLOW_ABS`     | ❌   | 设为 true 后允许 `@file` 引用绝对路径；默认只允许当前目录内路径 |
 | `Q_CODE_SHELL_TIMEOUT_MS`      | ❌   | `f` 同步命令默认超时，默认 60000ms                           |
 | `Q_CODE_SHELL_TIMEOUT_MAX_MS`  | ❌   | `f.timeoutMs` 上限，默认 1800000ms（30 分钟）                 |
 | `Q_CODE_SHELL_MAX_BUFFER`      | ❌   | `f` 同步输出内存阈值，默认 4194304（4MB），超出后落盘 spill   |
@@ -163,6 +164,22 @@ pnpm run continue       # 恢复上次会话
 
 默认在交互式 TTY 中启动 Ink TUI；非 TTY、`--classic` 或 `Q_CODE_TUI=0` 会回退到传统 readline。TUI 将 Agent 输出、工具调用、上下文占用、任务进度、后台 Agent 和 token 用量统一渲染为事件流，支持 `Shift+Enter`/`Ctrl+J` 多行输入、`Ctrl+R` 历史搜索、`Esc` 清空/恢复输入、忙时 `Ctrl+C` 中断当前任务和 Markdown 代码块/列表/表格展示。输入区使用真实终端光标锚定输入法候选窗，避免 macOS IME 跑到屏幕角落。
 
+### @file 文件引用
+
+在 TUI 输入框中输入 `@` 后跟文件名片段，会出现基于仓库文件索引的 fuzzy 候选；使用方向键切换，`Tab` 插入当前候选。例如输入 `@rou` 可以补全到匹配的源码或文档路径。
+
+提交消息时，`@file` 会把文件内容注入本轮用户上下文，并写入 `user.mention` 审计事件。支持以下形式：
+
+```text
+请解释 @src/runtime/cli-info.ts
+只看一行 @src/runtime/cli-info.ts:42
+只看范围 @src/runtime/cli-info.ts:10-30
+定位正则 @src/runtime/cli-info.ts:#getEarlyCliCommand
+路径含空格 @"My Project/notes.md"
+```
+
+默认只允许引用当前工作目录内的文件，并会校验 symlink 指向的真实路径；绝对路径如 `@/etc/passwd` 会被阻止，确需引用绝对路径时设置 `Q_CODE_MENTION_ALLOW_ABS=true`。单个引用最多注入 50KB，单轮全部引用合计最多 200KB，超出时会截断或明确提示丢弃。文件候选优先使用 git 索引，非 git 目录会回退递归扫描；超过 20000 个文件时候选会裁剪并在 TUI 中提示。
+
 ### npm 发布
 
 仓库已配置为可发布的 npm CLI 包：
@@ -214,6 +231,7 @@ src/
 │       └── memory-types.ts# 记忆类型定义与引导指令
 ├── session/
 │   └── store.ts          # JSONL 会话持久化
+├── mentions/             # @file 文件引用解析、索引、fuzzy 补全和上下文注入
 ├── skills/               # SKILL.md 加载、渐进式披露、条件激活
 ├── agents/
 │   ├── bootstrap.ts      # SubAgent 启动加载

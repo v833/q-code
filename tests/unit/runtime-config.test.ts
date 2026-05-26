@@ -11,6 +11,7 @@ const ENV_KEYS = [
   'Q_CODE_GITLAB_TOKEN',
   'Q_CODE_GITLAB_PROJECT_ID',
   'Q_CODE_GITLAB_KB_PREFIX',
+  'Q_CODE_MENTION_ALLOW_ABS',
   'Q_CODE_SHELL_TIMEOUT_MS',
   'Q_CODE_SHELL_TIMEOUT_MAX_MS',
   'Q_CODE_SHELL_MAX_BUFFER',
@@ -153,7 +154,10 @@ describe('runtime config', () => {
         'token_budget = 12345',
         '[q_code]',
         'debug = true',
+        'mention_allow_abs = true',
         'shell_timeout_ms = 90000',
+        '[mention]',
+        'allow_abs = false',
         '[gitlab_kb]',
         'url = "https://gitlab.example.com/group/project"',
         'token = "glpat-test"',
@@ -173,6 +177,7 @@ describe('runtime config', () => {
     expect(process.env.OPENAI_MODEL).toBe('alias-model')
     expect(process.env.TOKEN_BUDGET).toBe('12345')
     expect(process.env.Q_CODE_DEBUG).toBe('true')
+    expect(process.env.Q_CODE_MENTION_ALLOW_ABS).toBe('false')
     expect(process.env.Q_CODE_SHELL_TIMEOUT_MS).toBe('90000')
     expect(process.env.Q_CODE_SHELL_TIMEOUT_MAX_MS).toBe('120000')
     expect(process.env.Q_CODE_SHELL_MAX_BUFFER).toBe('2097152')

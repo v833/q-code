@@ -53,6 +53,7 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     audit_max_queue_size: 'Q_CODE_AUDIT_MAX_QUEUE_SIZE',
     audit_pii: 'Q_CODE_AUDIT_PII',
     crash_guard: 'Q_CODE_CRASH_GUARD',
+    mention_allow_abs: 'Q_CODE_MENTION_ALLOW_ABS',
     shell_timeout_ms: 'Q_CODE_SHELL_TIMEOUT_MS',
     shell_timeout_max_ms: 'Q_CODE_SHELL_TIMEOUT_MAX_MS',
     shell_max_buffer: 'Q_CODE_SHELL_MAX_BUFFER',
@@ -65,6 +66,9 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     max_buffer: 'Q_CODE_SHELL_MAX_BUFFER',
     allow_abs_cwd: 'Q_CODE_SHELL_ALLOW_ABS_CWD',
     kill_bg_on_exit: 'Q_CODE_SHELL_KILL_BG_ON_EXIT'
+  },
+  mention: {
+    allow_abs: 'Q_CODE_MENTION_ALLOW_ABS'
   },
   audit: {
     enabled: 'Q_CODE_AUDIT_ENABLED',

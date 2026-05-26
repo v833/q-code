@@ -171,6 +171,12 @@ import {
   createUserPromptPayload,
   getAuditLogger
 } from './observability/audit'
+import {
+  createFileMentionIndex,
+  createUserMentionPayload,
+  expandFileMentions,
+  type FileMentionIndex
+} from './mentions'
 
 const packageVersion = getPackageVersion()
 const earlyCliCommand = getEarlyCliCommand(process.argv.slice(2))
@@ -903,6 +909,9 @@ async function main() {
       category: 'Skills'
     }))
   ]
+  const fileMentionIndex: FileMentionIndex | undefined = useTui
+    ? await createFileMentionIndex(activeStore.cwd)
+    : undefined
 
   if (useTui) {
     registry.setQuiet(true)
@@ -915,6 +924,7 @@ async function main() {
       cwd: activeStore.cwd,
       initialEvents: pendingTerminalEvents,
       slashCommands: buildSlashCommandSuggestions(),
+      fileMentionIndex,
       onSubmit: handleInput,
       onInterrupt: interruptActiveTurn,
       onExit: closeCli
@@ -1045,7 +1055,31 @@ async function main() {
   }
 
   async function runAgentTurn(userContent: string): Promise<void> {
-    const userMsg: ModelMessage = { role: 'user', content: userContent }
+    const mentionExpansion = expandFileMentions(userContent, { cwd: activeStore.cwd })
+    if (mentionExpansion.results.length > 0) {
+      getAuditLogger().emit(
+        'user.mention',
+        createUserMentionPayload(mentionExpansion),
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } }
+      )
+
+      if (mentionExpansion.included.length > 0) {
+        print(
+          `\n  [@file] 已注入 ${mentionExpansion.included.length} 个文件，合计 ${mentionExpansion.totalBytes} bytes`
+        )
+      }
+      for (const warning of mentionExpansion.warnings) {
+        print(`\n  [@file] ${warning}`)
+      }
+
+      const activated = activateConditionalSkillsForPaths(mentionExpansion.paths, activeStore.cwd)
+      if (activated.length > 0) {
+        print(`\n  [Skills] 条件激活: ${activated.join(', ')}`)
+        emitTerminal({ type: 'slash_commands', commands: buildSlashCommandSuggestions() })
+      }
+    }
+
+    const userMsg: ModelMessage = { role: 'user', content: mentionExpansion.prompt }
     await runAgentTurnWithMessages([userMsg], userContent)
   }
 

@@ -12,6 +12,7 @@ import {
   newline,
   recallNext,
   recallPrevious,
+  replaceRange,
   searchHistoryPrevious,
   submitInput
 } from './input'
@@ -29,6 +30,14 @@ import {
   filterSlashCommandSuggestions,
   type SlashCommandSuggestion
 } from '../slash'
+import {
+  createEmptyFileMentionIndex,
+  fileMentionIndexNotice,
+  findFileMentionAtCursor,
+  formatFileMentionTarget,
+  searchFileMentionIndex,
+  type FileMentionIndex
+} from '../mentions'
 
 const ASSISTANT_STREAM_FLUSH_MS = 80
 const CLEAR_TERMINAL = '\u001B[2J\u001B[3J\u001B[H'
@@ -42,6 +51,7 @@ export interface TerminalAppProps {
   sessionId?: string
   cwd?: string
   slashCommands?: SlashCommandSuggestion[]
+  fileMentionIndex?: FileMentionIndex
 }
 
 export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
@@ -65,11 +75,27 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
   const hasStreamingAssistant = state.activeAssistantId !== undefined
   const slashCommands =
     state.slashCommands.length > 0 ? state.slashCommands : props.slashCommands ?? []
+  const fileMentionIndex = useMemo(
+    () => props.fileMentionIndex ?? createEmptyFileMentionIndex(props.cwd ?? process.cwd()),
+    [props.cwd, props.fileMentionIndex]
+  )
+  const fileMentionAtCursor = useMemo(
+    () => findFileMentionAtCursor(input.value, input.cursor),
+    [input.cursor, input.value]
+  )
+  const filteredFileMentions = useMemo(
+    () =>
+      fileMentionAtCursor
+        ? searchFileMentionIndex(fileMentionIndex, fileMentionAtCursor.query)
+        : [],
+    [fileMentionAtCursor, fileMentionIndex]
+  )
   const filteredSlashCommands = useMemo(
     () => filterSlashCommandSuggestions(input.value, slashCommands),
     [input.value, slashCommands]
   )
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(-1)
+  const [selectedFileMentionIndex, setSelectedFileMentionIndex] = useState(-1)
   const renderedSlashCommands = useMemo(
     () =>
       filteredSlashCommands.map((item, index) => ({
@@ -78,7 +104,20 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
       })),
     [filteredSlashCommands, selectedCommandIndex]
   )
-  const showSlashCommands = filteredSlashCommands.length > 0
+  const renderedFileMentions = useMemo(
+    () =>
+      filteredFileMentions.map((item, index) => ({
+        name: `@${item.path}`,
+        description: 'Tab 插入文件引用',
+        usage: `@${item.path}`,
+        category: '@file',
+        isSelected: index === selectedFileMentionIndex
+      })),
+    [filteredFileMentions, selectedFileMentionIndex]
+  )
+  const showFileMentions = fileMentionAtCursor !== null && filteredFileMentions.length > 0
+  const showSlashCommands = fileMentionAtCursor === null && filteredSlashCommands.length > 0
+  const suggestionNotice = fileMentionAtCursor ? fileMentionIndexNotice(fileMentionIndex) : undefined
 
   useEffect(() => {
     const flushAssistantDelta = () => {
@@ -146,6 +185,11 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
   }, [filteredSlashCommands.length, selectedCommandIndex, showSlashCommands])
 
   useEffect(() => {
+    if (!showFileMentions) setSelectedFileMentionIndex(-1)
+    if (selectedFileMentionIndex >= filteredFileMentions.length) setSelectedFileMentionIndex(-1)
+  }, [filteredFileMentions.length, selectedFileMentionIndex, showFileMentions])
+
+  useEffect(() => {
     const rememberRawInput = (data: Buffer | string) => {
       lastRawInput.current = Buffer.isBuffer(data) ? data.toString() : data
     }
@@ -184,6 +228,33 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
     if (key.ctrl && value === 'r') {
       setInput((current) => searchHistoryPrevious(current))
       return
+    }
+
+    if (showFileMentions && fileMentionAtCursor) {
+      if (key.upArrow) {
+        setSelectedFileMentionIndex((current) =>
+          current <= 0 ? filteredFileMentions.length - 1 : current - 1
+        )
+        return
+      }
+      if (key.downArrow) {
+        setSelectedFileMentionIndex((current) =>
+          current >= filteredFileMentions.length - 1 ? 0 : current + 1
+        )
+        return
+      }
+      if (key.tab || (key.return && selectedFileMentionIndex >= 0)) {
+        const selected = filteredFileMentions[
+          selectedFileMentionIndex >= 0 ? selectedFileMentionIndex : 0
+        ]
+        if (selected) {
+          setInput((current) =>
+            replaceRange(current, fileMentionAtCursor.start, fileMentionAtCursor.end, `${formatFileMentionTarget(selected.path)} `)
+          )
+          setSelectedFileMentionIndex(-1)
+          return
+        }
+      }
     }
 
     if (showSlashCommands) {
@@ -285,7 +356,10 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
         <Header title={props.title ?? 'q-code'} sessionId={props.sessionId} cwd={props.cwd} />
         <ConversationView items={liveItems} />
         <StatusBar state={state} isBusy={isBusy} hasStreamingAssistant={hasStreamingAssistant} />
-        <CommandSuggestions suggestions={renderedSlashCommands} />
+        <CommandSuggestions
+          suggestions={showFileMentions ? renderedFileMentions : renderedSlashCommands}
+          notice={suggestionNotice}
+        />
         <InputPrompt
           value={input.value}
           cursor={input.cursor}

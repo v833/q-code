@@ -66,6 +66,24 @@ export function newline(state: InputState): InputState {
   return insertText(state, '\n')
 }
 
+export function replaceRange(
+  state: InputState,
+  start: number,
+  end: number,
+  text: string
+): InputState {
+  const chars = splitChars(state.value)
+  const safeStart = Math.max(0, Math.min(chars.length, start))
+  const safeEnd = Math.max(safeStart, Math.min(chars.length, end))
+  const insertChars = splitChars(text)
+  return {
+    ...clearTransientInputState(state),
+    value: `${chars.slice(0, safeStart).join('')}${text}${chars.slice(safeEnd).join('')}`,
+    cursor: safeStart + insertChars.length,
+    historyIndex: undefined
+  }
+}
+
 export function submitInput(state: InputState): { input: string; state: InputState } {
   const input = state.value.trimEnd()
   const history = input.trim()

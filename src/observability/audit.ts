@@ -17,6 +17,7 @@ export type AuditEventName =
   | "session.end"
   | "session.resume"
   | "user.prompt"
+  | "user.mention"
   | "mode.change"
   | "agent.step.start"
   | "agent.step.end"

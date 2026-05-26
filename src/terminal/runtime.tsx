@@ -3,6 +3,7 @@ import { render, type Instance } from 'ink'
 import { InMemoryTerminalEventBus, type TerminalEvent, type TerminalEventBus } from './events'
 import { TerminalApp } from './App'
 import type { SlashCommandSuggestion } from '../slash'
+import type { FileMentionIndex } from '../mentions'
 
 export interface TerminalRuntimeOptions {
   title?: string
@@ -10,6 +11,7 @@ export interface TerminalRuntimeOptions {
   cwd?: string
   initialEvents?: TerminalEvent[]
   slashCommands?: SlashCommandSuggestion[]
+  fileMentionIndex?: FileMentionIndex
   onSubmit: (input: string) => Promise<void> | void
   onInterrupt?: () => Promise<void> | void
   onExit: () => Promise<void> | void
@@ -33,6 +35,7 @@ export function startTerminalRuntime(options: TerminalRuntimeOptions): TerminalR
       sessionId={options.sessionId}
       cwd={options.cwd}
       slashCommands={options.slashCommands}
+      fileMentionIndex={options.fileMentionIndex}
       onSubmit={options.onSubmit}
       onInterrupt={options.onInterrupt}
       onExit={options.onExit}
