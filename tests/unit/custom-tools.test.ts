@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setupTempHome, type TempHome } from '../_helpers/temp-home'
@@ -214,7 +214,7 @@ describe('custom tool loader', () => {
       ok: true,
       content: {
         value: 'hello',
-        cwd: toolDir,
+        cwd: realpathSync(toolDir),
         sessionId: 's1',
         version: true
       }

@@ -73,14 +73,14 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
 - `src/slash/`：斜杠命令注册表、解析、suggestions、formatHelp（`/help` 输出由此驱动）。
 - `src/hooks/`：Pre/Post tool-use Hooks 的配置加载、matcher、command-runner 与 DefaultHookRunner。
 - `src/observability/`：NDJSON 审计日志（`audit.ts`）与 `q-code audit verify|tail` 子命令实现（`audit-cli.ts`）。
-- `src/runtime/`：早期 CLI 子命令路由（help/version/update/audit）、`getPackageVersion`、`runCliUpdate`、`installCrashGuard` 与崩溃报告生成。
+- `src/runtime/`：早期 CLI 子命令路由（help/version/update/audit）、颜色环境 bootstrap、`getPackageVersion`、`runCliUpdate`、`installCrashGuard` 与崩溃报告生成。
 - `src/config/`：`runtime-config.ts` 负责加载 `~/.q-code/config.toml`、`<cwd>/.q-code/config.toml`、`.env`，统一映射到 `process.env`（支持多 section/alias）。
 - `src/session/`：`SessionStore`（JSONL append-only、原子写入、cache 模式与 usage 记录持久化）。
 - `src/mentions/`：`@file` 文件引用解析、git/递归文件索引、fuzzy 排序、路径安全校验、文件内容截断和本轮上下文注入。
 - `src/usage/`：token 归一化、定价、cache 策略、`UsageTracker` 与 `/usage` 渲染。
 - `src/infra/`：企业 AI 基建配置同步（base URL / token / sync 状态 / 知识候选上报）。
 - `src/gitlab-kb/`：GitLab Wiki 知识库读取/搜索/发布（`/gitlab-kb` 命令背后逻辑）。
-- `src/terminal/`：Ink TUI、输入状态机、事件流、Markdown 渲染、表格、主题（`theme/`）、布局/光标 utils。
+- `src/terminal/`：Ink TUI、输入状态机、事件流、Markdown 渲染、表格、主题（`theme/`）、代码高亮、布局/光标 utils。
 - `src/utils/`：通用工具（logger、原子写、字符串、环境变量布尔判定等）。
 - `tests/unit/`：低成本单元测试。
 - `tests/integration/`：跨模块行为验证（agent-loop、session-recovery、task-graph、audit-trail、team-flow 等）。
@@ -107,6 +107,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
 - `@file` mention 默认只能引用当前工作目录内文件，并必须校验 symlink 解析后的真实路径；绝对路径必须显式设置 `Q_CODE_MENTION_ALLOW_ABS=true`，并写 `user.mention` 审计事件。单文件/总附件预算变更需同步 README 和 `src/mentions/file-mentions.ts` 常量。
 - Shell 工具默认只能在当前 `cwd` 内执行；跳出目录必须显式设置 `Q_CODE_SHELL_ALLOW_ABS_CWD=true`。长命令优先使用 `timeoutMs` 或 `background=true`，超大输出通过 `<Q_CODE_HOME>/shell-spills` 恢复全文，后台 job 元数据写 `<Q_CODE_HOME>/shell-jobs`。
 - 自定义工具目录固定为 `~/.q-code/tools/<name>/` 与 `<cwd>/.q-code/tools/<name>/`；项目级覆盖用户级，用户级覆盖内置工具。每个工具目录必须提供 `schema.json`，其结构为 `Omit<ToolDefinition, 'isEnabled' | 'execute'> & { execute: string }`，其中 `execute` 会在该工具目录下作为 shell 命令运行。
+- Skills 目录支持 `~/.q-code/skills/<name>/SKILL.md`、`~/.agents/skills/<name>/SKILL.md`、`<cwd>/.q-code/skills/<name>/SKILL.md` 与 `<cwd>/.agents/skills/<name>/SKILL.md`；同名优先级为项目级 `.agents/skills` > 项目级 `.q-code/skills` > 用户级 `.agents/skills` > 用户级 `.q-code/skills`。
 - 新增 Slash 命令通过 `createSlashCommandRegistry` + `command(...)` 注册（见 `src/index.ts::createBuiltinSlashCommands`），并填好 `category`、`aliases`、`usage`，以便 `/help` 输出友好。
 - 新增 Hook 事件类型时同步更新 `src/hooks/events.ts` 与 `src/hooks/types.ts` 的导出，并在 `tests/unit/hooks.test.ts` 加覆盖。
 - 新增企业相关能力（Infra / GitLab KB / 审计 PII 模式）必须保持可禁用：环境变量缺省值不能让首次启动失败。

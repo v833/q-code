@@ -60,6 +60,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/turndown": "^5.0.6",
     "ai": "^6.0.174",
+    "cli-highlight": "^2.1.11",
     "dotenv": "^17.4.2",
     "fast-glob": "^3.3.3",
     "ignore": "^7.0.5",

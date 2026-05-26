@@ -51,6 +51,7 @@ describe('cli info', () => {
     expect(help).toContain('-v, --version')
     expect(help).toContain('q-code update')
     expect(help).toContain('--continue')
+    expect(help).toContain('--no-color')
     expect(help).toContain('--debug')
     expect(help).toContain('~/.q-code/config.toml')
   })

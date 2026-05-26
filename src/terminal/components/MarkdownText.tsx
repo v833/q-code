@@ -2,6 +2,11 @@ import React, { useMemo } from 'react'
 import { Box, Text, useStdout } from 'ink'
 import { parseMarkdown, type MarkdownBlock } from '../markdown'
 import { renderMarkdownTable } from '../table-renderer'
+import {
+  highlightCode,
+  isNoColorEnabled,
+  resolveHighlightThemeMode
+} from '../utils/highlight'
 
 export const MARKDOWN_PARSE_CHAR_LIMIT = 12000
 const STREAMING_MAX_CHARS = 2600
@@ -39,7 +44,7 @@ export function MarkdownText({
   return (
     <Box flexDirection="column" flexShrink={1}>
       {blocks.map((block, index) => (
-        <MarkdownBlockView key={index} block={block} dim={dim} streaming={streaming} />
+        <MarkdownBlockView key={index} block={block} dim={dim} />
       ))}
     </Box>
   )
@@ -47,12 +52,10 @@ export function MarkdownText({
 
 function MarkdownBlockView({
   block,
-  dim,
-  streaming
+  dim
 }: {
   block: MarkdownBlock
   dim: boolean
-  streaming: boolean
 }): React.JSX.Element {
   switch (block.type) {
     case 'heading':
@@ -82,17 +85,38 @@ function MarkdownBlockView({
         <Box
           flexDirection="column"
           borderStyle="single"
-          borderColor={streaming ? 'gray' : 'blue'}
+          borderColor="blue"
           paddingX={1}
           flexShrink={1}
         >
           {block.language ? <Text color="gray">{block.language}</Text> : null}
-          <Text color="green" wrap="truncate-end">{block.code || ' '}</Text>
+          <CodeBlockText code={block.code || ' '} language={block.language} />
         </Box>
       )
     case 'rule':
       return <Text dimColor>────────────────────────────────</Text>
   }
+}
+
+function CodeBlockText({
+  code,
+  language
+}: {
+  code: string
+  language?: string
+}): React.JSX.Element {
+  const themeMode = resolveHighlightThemeMode()
+  const noColor = isNoColorEnabled()
+  const highlightedCode = useMemo(
+    () => highlightCode(code, language, { theme: themeMode, noColor }),
+    [code, language, themeMode, noColor]
+  )
+
+  if (noColor) {
+    return <Text wrap="truncate-end">{code}</Text>
+  }
+
+  return <Text wrap="truncate-end">{highlightedCode}</Text>
 }
 
 function MarkdownTable({

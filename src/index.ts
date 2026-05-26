@@ -1,3 +1,4 @@
+import './runtime/color-bootstrap'
 import { type ModelMessage } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { getRequiredEnv, normalizeBaseURL } from './utils'
@@ -1755,7 +1756,9 @@ async function main() {
       print('\nSkills (0 loaded)')
       print('  没有找到 Skills。可添加到:')
       print(`  ${process.env.Q_CODE_HOME?.trim() || '~/.q-code'}/skills/<name>/SKILL.md`)
+      print('  ~/.agents/skills/<name>/SKILL.md')
       print('  .q-code/skills/<name>/SKILL.md')
+      print('  .agents/skills/<name>/SKILL.md')
       return
     }
 

@@ -14,6 +14,14 @@ export function getQCodeHome(): string {
   return process.env.Q_CODE_HOME?.trim() || path.join(os.homedir(), '.q-code')
 }
 
+export function getUserAgentsSkillsDir(): string {
+  return path.join(os.homedir(), '.agents', 'skills')
+}
+
+export function getProjectAgentsSkillsDir(cwd: string): string {
+  return path.join(path.resolve(cwd), '.agents', 'skills')
+}
+
 export function getUserSkillsDir(): string {
   return path.join(getQCodeHome(), 'skills')
 }
@@ -89,15 +97,23 @@ async function loadFromOneDir(dir: string, source: SkillSource): Promise<LoadedF
 }
 
 export async function loadAllSkills(cwd: string): Promise<LoadAllSkillsResult> {
-  const [userResult, projectResult] = await Promise.all([
-    loadFromOneDir(getUserSkillsDir(), 'user'),
-    loadFromOneDir(getProjectSkillsDir(cwd), 'project')
-  ])
+  const [userQCodeResult, userAgentsResult, projectQCodeResult, projectAgentsResult] =
+    await Promise.all([
+      loadFromOneDir(getUserSkillsDir(), 'user'),
+      loadFromOneDir(getUserAgentsSkillsDir(), 'user'),
+      loadFromOneDir(getProjectSkillsDir(cwd), 'project'),
+      loadFromOneDir(getProjectAgentsSkillsDir(cwd), 'project')
+    ])
 
   const seenRealPaths = new Set<string>()
   const byName = new Map<string, Skill>()
 
-  for (const skill of [...userResult.skills, ...projectResult.skills]) {
+  for (const skill of [
+    ...userQCodeResult.skills,
+    ...userAgentsResult.skills,
+    ...projectQCodeResult.skills,
+    ...projectAgentsResult.skills
+  ]) {
     if (seenRealPaths.has(skill.filePath)) continue
     seenRealPaths.add(skill.filePath)
     byName.set(skill.name, skill)
@@ -105,7 +121,12 @@ export async function loadAllSkills(cwd: string): Promise<LoadAllSkillsResult> {
 
   return {
     skills: [...byName.values()],
-    warnings: [...userResult.warnings, ...projectResult.warnings]
+    warnings: [
+      ...userQCodeResult.warnings,
+      ...userAgentsResult.warnings,
+      ...projectQCodeResult.warnings,
+      ...projectAgentsResult.warnings
+    ]
   }
 }
 

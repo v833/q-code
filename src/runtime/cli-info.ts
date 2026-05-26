@@ -66,6 +66,7 @@ export function formatCliHelp(version: string): string {
     '      --plan                Start directly in Plan Mode',
     '      --agent-teams         Enable Agent Teams',
     '      --classic             Use the classic readline UI',
+    '      --no-color            Disable ANSI highlighting and color output',
     '      --debug               Show startup diagnostics in the terminal',
     '      --dump-system-prompt  Print the full system prompt and exit',
     '',
