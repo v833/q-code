@@ -31,6 +31,7 @@ export interface TranscriptItem {
 /** 工具类 transcript 条目的附加元数据（预览、恢复提示等）。 */
 export interface TranscriptItemMeta {
   toolName?: string
+  intermediateAssistant?: boolean
   resultLength?: number
   resultShape?: string
   contextCost?: string
@@ -191,8 +192,9 @@ export function terminalReducer(state: TerminalState, event: TerminalEvent): Ter
     case 'tool_call': {
       const title = event.name
       const text = formatToolInput(event.input)
+      const stateWithClosedAssistant = closeActiveAssistantStream(state)
       const next = appendItem(
-        { ...state, status: 'running_tool', statusText: `Running ${event.name}` },
+        { ...stateWithClosedAssistant, status: 'running_tool', statusText: `Running ${event.name}` },
         {
           kind: 'tool',
           role: 'tool',
@@ -438,6 +440,26 @@ function appendItem(
     ...state,
     nextId: state.nextId + 1,
     transcript
+  }
+}
+
+function closeActiveAssistantStream(state: TerminalState): TerminalState {
+  if (!state.activeAssistantId) return state
+  return {
+    ...state,
+    activeAssistantId: undefined,
+    transcript: state.transcript.map((item) =>
+      item.id === state.activeAssistantId
+        ? {
+            ...item,
+            isStreaming: false,
+            meta: {
+              ...item.meta,
+              intermediateAssistant: true
+            }
+          }
+        : item
+    )
   }
 }
 

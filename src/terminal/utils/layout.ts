@@ -14,7 +14,7 @@ export function hideCompletedTurnTools(items: TranscriptItem[]): TranscriptItem[
   let turn: TranscriptItem[] = []
 
   const flushTurn = () => {
-    const hasFinalAssistant = turn.some((item) => item.role === 'assistant' && item.isStreaming !== true)
+    const hasFinalAssistant = turn.some(isFinalAssistantItem)
     for (const item of turn) {
       if (hasFinalAssistant && item.kind === 'tool') continue
       visible.push(item)
@@ -94,7 +94,15 @@ function isLiveTurn(items: TranscriptItem[]): boolean {
   if (!hasUser) return false
   if (items.some((item) => item.role === 'assistant' && item.isStreaming === true)) return true
   if (items.some((item) => item.kind === 'tool' && item.status === 'running')) return true
-  return !items.some((item) => item.role === 'assistant' && item.isStreaming !== true)
+  return !items.some(isFinalAssistantItem)
+}
+
+function isFinalAssistantItem(item: TranscriptItem): boolean {
+  return (
+    item.role === 'assistant' &&
+    item.isStreaming !== true &&
+    item.meta?.intermediateAssistant !== true
+  )
 }
 
 /** 估算单条 transcript 占用的终端行数（上限 10）。 */

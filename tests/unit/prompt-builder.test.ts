@@ -69,6 +69,8 @@ describe('PromptBuilder System Prompt 管道', () => {
     it('coreRules 输出非空', () => {
       const out = coreRules()(baseCtx())
       expect(out).toBeTruthy()
+      expect(out).toContain('可公开的进度说明')
+      expect(out).toContain('不要暴露隐藏推理链')
     })
 
     it('modeContext 区分 plan 与 normal 模式', () => {

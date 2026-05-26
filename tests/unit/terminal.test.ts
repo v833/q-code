@@ -62,6 +62,46 @@ describe('terminal state reducer', () => {
     expect(state.activeAssistantId).toBeUndefined()
   })
 
+  it('closes the current assistant stream when a tool call starts', () => {
+    let state = createInitialTerminalState()
+    state = terminalReducer(state, { type: 'assistant_delta', text: '我先看入口文件。' })
+    state = terminalReducer(state, {
+      type: 'tool_call',
+      name: 'read_file',
+      toolCallId: 'call-1',
+      input: { path: 'src/index.ts' }
+    })
+    state = terminalReducer(state, {
+      type: 'tool_result',
+      name: 'read_file',
+      toolCallId: 'call-1',
+      output: 'ok',
+      resultLength: 2
+    })
+    state = terminalReducer(state, { type: 'assistant_delta', text: '入口确认了，我继续看渲染链路。' })
+
+    expect(state.transcript).toHaveLength(3)
+    expect(state.transcript[0]).toMatchObject({
+      role: 'assistant',
+      text: '我先看入口文件。',
+      isStreaming: false,
+      meta: {
+        intermediateAssistant: true
+      }
+    })
+    expect(state.transcript[1]).toMatchObject({
+      kind: 'tool',
+      title: 'read_file',
+      status: 'done'
+    })
+    expect(state.transcript[2]).toMatchObject({
+      role: 'assistant',
+      text: '入口确认了，我继续看渲染链路。',
+      isStreaming: true
+    })
+    expect(state.activeAssistantId).toBe(state.transcript[2]?.id)
+  })
+
   it('replaces an active assistant stream with a final assistant message', () => {
     let state = createInitialTerminalState()
     state = terminalReducer(state, { type: 'assistant_delta', text: 'partial' })
@@ -659,6 +699,37 @@ describe('terminal layout helpers', () => {
 
     const visible = hideCompletedTurnTools(items)
     expect(visible.map((item) => item.id)).toEqual(['1', '4'])
+  })
+
+  it('keeps tool calls visible while only intermediate assistant text exists', () => {
+    const items = [
+      transcriptItem('1', 'message', 'user', '查一下 skills'),
+      {
+        ...transcriptItem('2', 'message', 'assistant', '我先定位 skills 加载入口。'),
+        isStreaming: false,
+        meta: { intermediateAssistant: true }
+      },
+      transcriptItem('3', 'tool', 'tool', 'Input: {"pattern":"loadSkills"}\nResult: ok')
+    ]
+
+    const visible = hideCompletedTurnTools(items)
+    expect(visible.map((item) => item.id)).toEqual(['1', '2', '3'])
+  })
+
+  it('hides completed tool calls after the final assistant answer', () => {
+    const items = [
+      transcriptItem('1', 'message', 'user', '查一下 skills'),
+      {
+        ...transcriptItem('2', 'message', 'assistant', '我先定位 skills 加载入口。'),
+        isStreaming: false,
+        meta: { intermediateAssistant: true }
+      },
+      transcriptItem('3', 'tool', 'tool', 'Input: {"pattern":"loadSkills"}\nResult: ok'),
+      transcriptItem('4', 'message', 'assistant', '最终回答')
+    ]
+
+    const visible = hideCompletedTurnTools(items)
+    expect(visible.map((item) => item.id)).toEqual(['1', '2', '4'])
   })
 
   it('keeps assistant text visible while it is still streaming', () => {
