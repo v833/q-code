@@ -68,6 +68,19 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     shell_kill_bg_on_exit: 'Q_CODE_SHELL_KILL_BG_ON_EXIT',
     theme: 'Q_CODE_THEME'
   },
+  langfuse: {
+    enabled: 'Q_CODE_LANGFUSE_ENABLED',
+    public_key: 'LANGFUSE_PUBLIC_KEY',
+    secret_key: 'LANGFUSE_SECRET_KEY',
+    base_url: 'LANGFUSE_BASE_URL',
+    record_io: 'Q_CODE_LANGFUSE_RECORD_IO',
+    sample_rate: 'Q_CODE_LANGFUSE_SAMPLE_RATE',
+    environment: 'Q_CODE_LANGFUSE_ENVIRONMENT',
+    release: 'Q_CODE_LANGFUSE_RELEASE',
+    flush_at: 'Q_CODE_LANGFUSE_FLUSH_AT',
+    flush_interval_seconds: 'Q_CODE_LANGFUSE_FLUSH_INTERVAL_SECONDS',
+    timeout_seconds: 'Q_CODE_LANGFUSE_TIMEOUT_SECONDS'
+  },
   shell: {
     timeout_ms: 'Q_CODE_SHELL_TIMEOUT_MS',
     timeout_max_ms: 'Q_CODE_SHELL_TIMEOUT_MAX_MS',

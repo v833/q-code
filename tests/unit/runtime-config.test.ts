@@ -7,6 +7,17 @@ import { applyRuntimeConfig, getRuntimeConfigPaths } from '../../src/config/runt
 const ENV_KEYS = [
   'Q_CODE_HOME',
   'Q_CODE_DEBUG',
+  'Q_CODE_LANGFUSE_ENABLED',
+  'LANGFUSE_PUBLIC_KEY',
+  'LANGFUSE_SECRET_KEY',
+  'LANGFUSE_BASE_URL',
+  'Q_CODE_LANGFUSE_RECORD_IO',
+  'Q_CODE_LANGFUSE_SAMPLE_RATE',
+  'Q_CODE_LANGFUSE_ENVIRONMENT',
+  'Q_CODE_LANGFUSE_RELEASE',
+  'Q_CODE_LANGFUSE_FLUSH_AT',
+  'Q_CODE_LANGFUSE_FLUSH_INTERVAL_SECONDS',
+  'Q_CODE_LANGFUSE_TIMEOUT_SECONDS',
   'Q_CODE_GITLAB_URL',
   'Q_CODE_GITLAB_TOKEN',
   'Q_CODE_GITLAB_PROJECT_ID',
@@ -157,6 +168,18 @@ describe('runtime config', () => {
         'theme = "light"',
         'mention_allow_abs = true',
         'shell_timeout_ms = 90000',
+        '[langfuse]',
+        'enabled = true',
+        'public_key = "pk-test"',
+        'secret_key = "sk-test"',
+        'base_url = "http://langfuse.example.com"',
+        'record_io = false',
+        'sample_rate = 0.5',
+        'environment = "dev"',
+        'release = "test-release"',
+        'flush_at = 3',
+        'flush_interval_seconds = 2',
+        'timeout_seconds = 4',
         '[mention]',
         'allow_abs = false',
         '[gitlab_kb]',
@@ -179,6 +202,17 @@ describe('runtime config', () => {
     expect(process.env.TOKEN_BUDGET).toBe('12345')
     expect(process.env.Q_CODE_DEBUG).toBe('true')
     expect(process.env.Q_CODE_THEME).toBe('light')
+    expect(process.env.Q_CODE_LANGFUSE_ENABLED).toBe('true')
+    expect(process.env.LANGFUSE_PUBLIC_KEY).toBe('pk-test')
+    expect(process.env.LANGFUSE_SECRET_KEY).toBe('sk-test')
+    expect(process.env.LANGFUSE_BASE_URL).toBe('http://langfuse.example.com')
+    expect(process.env.Q_CODE_LANGFUSE_RECORD_IO).toBe('false')
+    expect(process.env.Q_CODE_LANGFUSE_SAMPLE_RATE).toBe('0.5')
+    expect(process.env.Q_CODE_LANGFUSE_ENVIRONMENT).toBe('dev')
+    expect(process.env.Q_CODE_LANGFUSE_RELEASE).toBe('test-release')
+    expect(process.env.Q_CODE_LANGFUSE_FLUSH_AT).toBe('3')
+    expect(process.env.Q_CODE_LANGFUSE_FLUSH_INTERVAL_SECONDS).toBe('2')
+    expect(process.env.Q_CODE_LANGFUSE_TIMEOUT_SECONDS).toBe('4')
     expect(process.env.Q_CODE_MENTION_ALLOW_ABS).toBe('false')
     expect(process.env.Q_CODE_SHELL_TIMEOUT_MS).toBe('90000')
     expect(process.env.Q_CODE_SHELL_TIMEOUT_MAX_MS).toBe('120000')

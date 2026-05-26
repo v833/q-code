@@ -5,7 +5,7 @@
  * 步骤级重试、token 预算与 `stopAfterToolNames` 早停。工具经 `ToolRegistry`
  * 包装审计与 Hooks；步骤事件写入 NDJSON 审计（`agent.step.start` / `end`）。
  */
-import { streamText, type LanguageModelUsage, type ModelMessage } from 'ai'
+import { streamText, type LanguageModelUsage, type ModelMessage, type TelemetrySettings } from 'ai'
 import { detect, recordCall, recordResult, resetHistory } from './loop-detection'
 import { isRetryable, calculateDelay, sleep } from './retry'
 import {
@@ -124,6 +124,7 @@ export interface AgentLoopOptions {
   onToolEvent?: (event: AgentToolEvent) => void
   onToolResult?: (event: AgentToolResultEvent) => void
   onToolProgress?: (event: AgentToolProgressEvent) => void
+  telemetry?: (context: { step: number }) => TelemetrySettings | undefined
   stopAfterToolNames?: string[]
   abortSignal?: AbortSignal
   sessionId?: string
@@ -282,6 +283,7 @@ export async function agentLoop(
           messages,
           maxOutputTokens: outputTokenLimit,
           maxRetries: 0,
+          ...(options.telemetry ? { experimental_telemetry: options.telemetry({ step }) } : {}),
           ...(abortSignal ? { abortSignal } : {}),
           onError: () => {}
         })
