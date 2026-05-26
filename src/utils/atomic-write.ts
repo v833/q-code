@@ -1,3 +1,8 @@
+/**
+ * 原子文件写入：先写唯一 tmp 路径、fsync，再 rename 覆盖目标文件。
+ *
+ * Windows 上对 EPERM/EACCES/EBUSY 的 rename 做有限次重试。
+ */
 import {
   closeSync,
   fsyncSync,
@@ -26,10 +31,22 @@ const RENAME_MAX_RETRY_DELAY_MS = 250
  * 可以避免两个写入者互相踩到对方的 tmp 文件（同一路径的并发写本来会由别处的
  * 进程内锁避免，这里只是再加一层防御）。
  */
+/**
+ * 原子写入 JSON（pretty-print 两空格缩进）。
+ *
+ * @param filePath - 目标文件路径
+ * @param value - 可 `JSON.stringify` 的值
+ */
 export async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
   await writeTextAtomic(filePath, JSON.stringify(value, null, 2))
 }
 
+/**
+ * 原子写入 UTF-8 文本（tmp + fsync + rename）。
+ *
+ * @param filePath - 目标文件路径
+ * @param content - 完整文件内容
+ */
 export async function writeTextAtomic(filePath: string, content: string): Promise<void> {
   const tmpPath = createTempPath(filePath)
   const handle = await open(tmpPath, 'w')
@@ -55,10 +72,22 @@ export async function writeTextAtomic(filePath: string, content: string): Promis
  * 同步版本，给必须保持同步的调用路径使用（例如在 process.on('exit')
  * 里触发的处理逻辑）。
  */
+/**
+ * `writeJsonAtomic` 的同步版本。
+ *
+ * @param filePath - 目标文件路径
+ * @param value - 可 `JSON.stringify` 的值
+ */
 export function writeJsonAtomicSync(filePath: string, value: unknown): void {
   writeTextAtomicSync(filePath, JSON.stringify(value, null, 2))
 }
 
+/**
+ * `writeTextAtomic` 的同步版本，供 `process.on('exit')` 等同步路径使用。
+ *
+ * @param filePath - 目标文件路径
+ * @param content - 完整文件内容
+ */
 export function writeTextAtomicSync(filePath: string, content: string): void {
   const tmpPath = createTempPath(filePath)
   const fd = openSync(tmpPath, 'w')

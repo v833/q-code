@@ -81,10 +81,22 @@ describe('shell tool process management', () => {
   })
 
   it('blocks dangerous commands and warns on pipe-to-shell downloads', () => {
-    expect(lintShellCommand('rm -rf /')).toMatchObject({
-      blocked: true,
-      code: 'dangerous_command'
-    })
+    for (const command of [
+      'rm -rf /',
+      'rm -fr /',
+      'rm -r -f /',
+      'rm -f -r /',
+      'rm --recursive --force /',
+      'rm -rf /*',
+      'sudo rm -rf /'
+    ]) {
+      expect(lintShellCommand(command)).toMatchObject({
+        blocked: true,
+        code: 'dangerous_command'
+      })
+    }
+    expect(lintShellCommand('rm -rf ./tmp')).toMatchObject({ blocked: false })
+    expect(lintShellCommand('rm -r /')).toMatchObject({ blocked: false })
     expect(lintShellCommand(':(){ :|:& };:')).toMatchObject({
       blocked: true,
       code: 'dangerous_command'

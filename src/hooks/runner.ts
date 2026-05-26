@@ -1,3 +1,6 @@
+/**
+ * 默认 Hook 运行器：顺序执行已注册定义，聚合 block/modify 决策并写审计。
+ */
 import { runCommandHook } from './command-runner'
 import { matchesHook } from './matcher'
 import type {
@@ -12,6 +15,7 @@ import { createHookDecisionPayload, getAuditLogger } from '../observability/audi
 
 const CONTINUE: HookHandlerResult = { action: 'continue' }
 
+/** 实现 {@link HookRunner}，支持 command 与 in-process handler 两类定义。 */
 export class DefaultHookRunner implements HookRunner {
   private definitions: HookDefinition[]
 

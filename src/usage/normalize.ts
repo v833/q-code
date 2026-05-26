@@ -1,6 +1,13 @@
+/**
+ * 将各供应商/API 的 usage 对象归一化为统一的 `NormalizedUsage`。
+ */
 import type { TokenUsage } from '../context/token-budget'
 import type { NormalizedUsage } from './types'
 
+/**
+ * 从任意 usage 形状提取 input/output/cache 分项；兼容 AI SDK 与多供应商字段名。
+ * @param usage 原始 usage 对象或 undefined
+ */
 export function normalizeUsage(usage: unknown): NormalizedUsage {
   const record = isRecord(usage) ? usage : {}
   const cacheReadTokens = firstNumber(
@@ -61,14 +68,17 @@ export function normalizeUsage(usage: unknown): NormalizedUsage {
   }
 }
 
+/** 将 `TokenUsage` 转为 `NormalizedUsage`（cache 字段置零）。 */
 export function normalizeTokenUsage(usage: TokenUsage | undefined): NormalizedUsage {
   return normalizeUsage(usage)
 }
 
+/** 快捷读取归一化后的 cache 读取 token 数。 */
 export function readCacheReadTokens(usage: unknown): number {
   return normalizeUsage(usage).cacheReadTokens
 }
 
+/** 快捷读取归一化后的 cache 写入 token 数。 */
 export function readCacheWriteTokens(usage: unknown): number {
   return normalizeUsage(usage).cacheWriteTokens
 }

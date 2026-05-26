@@ -1,6 +1,10 @@
+/**
+ * Plan Mode 工具：enter_plan_mode、plan_write、exit_plan_mode。
+ */
 import { buildFullPlanModeText } from '../context/plan-attachments'
 import type { ToolDefinition, ToolVisibilityMode } from './registry'
 
+/** Plan 工具依赖的运行时控制器（模式切换与计划文件读写）。 */
 export interface PlanToolController {
   getMode: () => ToolVisibilityMode
   setMode: (mode: ToolVisibilityMode) => void
@@ -10,6 +14,7 @@ export interface PlanToolController {
   markPlanReady: (summary: string) => void
 }
 
+/** 创建 Plan Mode 相关工具数组。 */
 export function createPlanTools(controller: PlanToolController): ToolDefinition[] {
   return [
     createEnterPlanModeTool(controller),

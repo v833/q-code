@@ -1,3 +1,6 @@
+/**
+ * 状态栏：Agent 状态、可选详情（上下文条、用量、进度、后台 Agent、JIT 提示）。
+ */
 import React from 'react'
 import { Box, Text } from 'ink'
 import type { TerminalState } from '../state'
@@ -5,6 +8,7 @@ import { statusLabel } from '../utils/format'
 import { animeTheme, statusColor } from '../theme/index'
 import { ContextMeter } from './ContextMeter'
 
+/** 主状态栏组件。 */
 export function StatusBar({
   state,
   isBusy,

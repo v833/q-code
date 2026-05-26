@@ -1,3 +1,7 @@
+/**
+ * Ink TUI 根组件：订阅 {@link TerminalEventBus}、管理 transcript 静态/动态分区、
+ * 处理键盘输入（含斜杠补全、中断、历史）并回调 `onSubmit` / `onInterrupt` / `onExit`。
+ */
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { Box, Static, useApp, useInput, useStdin, useStdout } from 'ink'
 import type { TerminalEventBus } from './events'
@@ -42,18 +46,30 @@ import {
 const ASSISTANT_STREAM_FLUSH_MS = 80
 const CLEAR_TERMINAL = '\u001B[2J\u001B[3J\u001B[H'
 
+/** {@link TerminalApp} 的 props：事件总线与用户输入/生命周期回调。 */
 export interface TerminalAppProps {
+  /** 终端事件总线，驱动 transcript 与状态栏更新。 */
   bus: TerminalEventBus
+  /** 用户按 Enter 提交非空输入时调用。 */
   onSubmit: (input: string) => Promise<void> | void
+  /** 忙碌时 Ctrl+C 首次按下时调用，用于中断当前 Agent 轮次。 */
   onInterrupt?: () => Promise<void> | void
+  /** 空闲时 Ctrl+C 或忙碌时连按 Ctrl+C 时调用，随后退出 Ink。 */
   onExit: () => Promise<void> | void
+  /** 顶栏标题，默认 `q-code`。 */
   title?: string
+  /** 当前会话 ID，显示在顶栏。 */
   sessionId?: string
+  /** 工作目录，顶栏以压缩路径展示。 */
   cwd?: string
+  /** 斜杠命令补全候选；运行中可被 `slash_commands` 事件覆盖。 */
   slashCommands?: SlashCommandSuggestion[]
   fileMentionIndex?: FileMentionIndex
 }
 
+/**
+ * q-code 默认 TUI：Static 区渲染已落盘 transcript，动态区含输入框与状态栏。
+ */
 export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
   const [state, dispatch] = useReducer(terminalReducer, undefined, createInitialTerminalState)
   const [input, setInput] = useState(() => createInputState())

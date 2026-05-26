@@ -1,3 +1,9 @@
+/**
+ * Agent Teams 队友邮箱：按成员持久化 JSON 消息数组，支持并发安全的
+ * 追加、未读排空与格式化为首轮 user 消息附件。
+ *
+ * 路径：`~/.q-code/teams/<team>/inboxes/<member>.json`
+ */
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { writeJsonAtomic } from '../utils/atomic-write'
@@ -52,6 +58,7 @@ async function withInboxLock<T>(inboxPath: string, fn: () => Promise<T>): Promis
   }
 }
 
+/** 某成员 inbox 文件的绝对路径。 */
 export function getInboxPath(agentName: string, teamName: string): string {
   return path.join(getTeamDir(teamName), 'inboxes', `${sanitizeName(agentName)}.json`)
 }
@@ -154,14 +161,15 @@ export function formatMailboxAttachment(messages: TeammateMessage[]): string {
   })
   return [
     '<teammate-messages>',
-    'The following message(s) were sent to you by other team members while you were idle.',
-    'Treat them as authoritative team coordination input — like user instructions.',
+    '以下消息由其他队友在你空闲期间发送。',
+    '请将其视为与 user 指令同级的团队协调输入。',
     '',
     ...blocks,
     '</teammate-messages>'
   ].join('\n')
 }
 
+/** 转义 XML 属性值中的双引号。 */
 function escapeAttr(value: string): string {
   return value.replace(/"/g, '&quot;')
 }

@@ -1,6 +1,10 @@
+/**
+ * 状态栏文案本地化与按 {@link TerminalStatus} 映射颜色。
+ */
 import type { TerminalStatus } from '../events'
 import { animeTheme } from './palette'
 
+/** 将英文/内部状态文案转为中文状态栏展示。 */
 export function statusMood(status: TerminalStatus, text: string): string {
   if (status === 'running_tool') {
     return text.replace(/^Running\s+/, '魔法道具启动: ')
@@ -13,6 +17,7 @@ export function statusMood(status: TerminalStatus, text: string): string {
   return '待机中'
 }
 
+/** 按状态返回 Ink 颜色名。 */
 export function statusColor(status: TerminalStatus): string {
   if (status === 'running_tool') return animeTheme.duck
   if (status === 'thinking') return animeTheme.candy

@@ -1,7 +1,11 @@
+/**
+ * Skill 工具：模型通过 `Skill` 加载 SKILL.md 工作流正文。
+ */
 import { buildSkillPromptText, SKILL_NAME_RE } from '../skills/invocation'
 import { findSkill, getModelVisibleSkills } from '../skills/registry'
 import type { ToolDefinition } from './registry'
 
+/** Skill 工具所需的 sessionId 提供者。 */
 export interface SkillToolController {
   getSessionId: () => string
 }
@@ -11,6 +15,7 @@ interface SkillInput {
   args?: string
 }
 
+/** 创建 `Skill` 工具定义。 */
 export function createSkillTool(controller: SkillToolController): ToolDefinition {
   return {
     name: 'Skill',

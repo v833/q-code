@@ -1,3 +1,6 @@
+/**
+ * 内置通用子 Agent（`subagent_type: general-purpose`）。
+ */
 import type { AgentDefinition } from '../types'
 
 const SYSTEM_PROMPT = `你是 q-code 的 general-purpose 子 Agent。
@@ -13,6 +16,7 @@ const SYSTEM_PROMPT = `你是 q-code 的 general-purpose 子 Agent。
 - 返回简短、事实化、可执行的结果摘要。
 - 不要复述完整过程，不要输出无关寒暄。`
 
+/** 默认通用子 Agent；未限制工具列表（由主会话可用集 + 全局禁用表过滤）。 */
 export const GENERAL_PURPOSE_AGENT: AgentDefinition = {
   agentType: 'general-purpose',
   whenToUse:

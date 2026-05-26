@@ -1,13 +1,21 @@
+/**
+ * 项目记忆类型定义与 system prompt 中的记忆使用指引文案。
+ */
+
+/** 支持的记忆 frontmatter 类型枚举。 */
 export const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference'] as const
 
+/** 单条记忆的分类。 */
 export type MemoryType = (typeof MEMORY_TYPES)[number]
 
+/** Markdown 记忆文件 frontmatter 必填字段。 */
 export interface MemoryFrontmatter {
   name: string
   description: string
   type: MemoryType
 }
 
+/** `MEMORY.md` 索引中的一条记忆条目元数据。 */
 export interface MemoryEntry {
   fileName: string
   filePath: string
@@ -15,10 +23,12 @@ export interface MemoryEntry {
   hook: string
 }
 
+/** 判断字符串是否为合法 `MemoryType`。 */
 export function isMemoryType(value: unknown): value is MemoryType {
   return typeof value === 'string' && MEMORY_TYPES.includes(value as MemoryType)
 }
 
+/** 生成「记忆类型」说明段落（用于 system prompt）。 */
 export function buildMemoryTypeGuidance(): string[] {
   return [
     '## 记忆类型',
@@ -32,6 +42,7 @@ export function buildMemoryTypeGuidance(): string[] {
   ]
 }
 
+/** 生成「何时访问记忆」说明段落。 */
 export function buildMemoryAccessGuidance(): string[] {
   return [
     '## 何时访问记忆',
@@ -42,6 +53,7 @@ export function buildMemoryAccessGuidance(): string[] {
   ]
 }
 
+/** 生成「使用记忆前校验」说明段落。 */
 export function buildMemoryValidationGuidance(): string[] {
   return [
     '## 使用记忆前的校验',
@@ -51,6 +63,7 @@ export function buildMemoryValidationGuidance(): string[] {
   ]
 }
 
+/** 生成「不应保存的内容」说明段落。 */
 export function buildMemoryExclusionGuidance(): string[] {
   return [
     '## 不应保存的内容',
@@ -61,6 +74,7 @@ export function buildMemoryExclusionGuidance(): string[] {
   ]
 }
 
+/** 生成「记忆与会话历史边界」说明段落。 */
 export function buildMemoryPersistenceBoundaryGuidance(): string[] {
   return [
     '## 记忆边界',

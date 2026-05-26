@@ -1,3 +1,8 @@
+/**
+ * 企业 AI 基建配置同步编排。
+ *
+ * 调用管理端解析配置包，按 checksum 跳过未变化包，落地 MCP/规则/Skills 并更新本地状态。
+ */
 import { InfraApiClient } from './client'
 import { loadInfraConfig, loadInfraUserInfo } from './config'
 import { collectRepoInfo } from './git-info'
@@ -5,6 +10,13 @@ import { readInfraState, writeInfraState } from './state'
 import { applyInfraConfigPackage } from './writers'
 import type { InfraConfig, InfraSkillPackage, InfraState, InfraSyncResult } from './types'
 
+/**
+ * 与 Infra 管理端同步企业配置包并写入项目 `.q-code`。
+ *
+ * @param cwd - 项目工作目录
+ * @param options.force - 为 true 时即使 checksum 未变也重新下载 Skills 并落地
+ * @returns 同步结果（含最终状态与用户可读 message）
+ */
 export async function syncInfraConfig(cwd: string, options: { force?: boolean } = {}): Promise<InfraSyncResult> {
   const config = loadInfraConfig()
   const now = new Date().toISOString()
@@ -136,7 +148,7 @@ async function downloadSkills(
     try {
       packages.push(await client.downloadSkill(skill.downloadUrl))
     } catch {
-      // Skill 下载失败不应阻断配置包落地；管理端状态里会保留缺失版本。
+      // Skill 下载失败不阻断配置包落地；状态里会保留缺失版本
     }
   }
   return packages

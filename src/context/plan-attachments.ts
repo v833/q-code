@@ -1,11 +1,17 @@
+/**
+ * Plan Mode 内部 user 消息附件：周期性注入完整/精简提醒，以及退出 Plan Mode 的标记消息。
+ */
 import type { ModelMessage } from 'ai'
 
+/** Plan Mode 提醒消息内容前缀。 */
 export const PLAN_ATTACHMENT_MARKER = '[plan_mode_attachment]'
+/** 退出 Plan Mode 消息内容前缀。 */
 export const PLAN_EXIT_MARKER = '[plan_mode_exit]'
 
 const TURNS_BETWEEN_ATTACHMENTS = 5
 const FULL_REMINDER_EVERY_N = 5
 
+/** 生成首次或周期性「完整」Plan Mode 规则与计划文件路径说明。 */
 export function buildFullPlanModeText(planFilePath: string): string {
   return [
     PLAN_ATTACHMENT_MARKER,
@@ -46,6 +52,7 @@ export function buildFullPlanModeText(planFilePath: string): string {
   ].join('\n')
 }
 
+/** 生成周期性「精简」Plan Mode 提醒。 */
 export function buildSparsePlanModeText(planFilePath: string): string {
   return [
     PLAN_ATTACHMENT_MARKER,
@@ -57,6 +64,10 @@ export function buildSparsePlanModeText(planFilePath: string): string {
   ].join('\n')
 }
 
+/**
+ * 生成退出 Plan Mode 后的 user 消息正文。
+ * @param planExists 为 true 时在文末附带计划文件路径
+ */
 export function buildPlanModeExitText(planFilePath: string, planExists: boolean): string {
   const lines = [
     PLAN_EXIT_MARKER,
@@ -72,6 +83,10 @@ export function buildPlanModeExitText(planFilePath: string, planExists: boolean)
   return lines.join('\n')
 }
 
+/**
+ * 根据自上次附件以来的人类轮次，决定是否需要注入 Plan Mode 提醒消息。
+ * @returns 需要注入时的 user 消息，否则 null
+ */
 export function getPlanModeAttachment(
   messages: readonly ModelMessage[],
   planFilePath: string
@@ -91,6 +106,7 @@ export function getPlanModeAttachment(
   return { role: 'user', content: text }
 }
 
+/** 生成退出 Plan Mode 时注入的 user 消息。 */
 export function getPlanModeExitAttachment(
   planFilePath: string,
   planAlreadyExists: boolean
@@ -98,6 +114,7 @@ export function getPlanModeExitAttachment(
   return { role: 'user', content: buildPlanModeExitText(planFilePath, planAlreadyExists) }
 }
 
+/** 判断是否为 Plan Mode 内部注入的 user 消息（附件或退出）。 */
 export function isPlanInternalMessage(message: ModelMessage): boolean {
   if (message.role !== 'user' || typeof message.content !== 'string') return false
   return (

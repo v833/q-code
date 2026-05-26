@@ -1,3 +1,6 @@
+/**
+ * 将 {@link MarkdownBlock} 表格块格式化为带框线的等宽终端表格字符串。
+ */
 import type { MarkdownBlock, TableAlignment } from './markdown'
 import {
   clipDisplayWidth,
@@ -7,6 +10,7 @@ import {
   stringDisplayWidth
 } from './utils/string-width'
 
+/** 已格式化的表格各段文本（顶/头/分隔/行/底及省略提示）。 */
 export type RenderedMarkdownTable = {
   top: string
   header: string
@@ -19,6 +23,9 @@ export type RenderedMarkdownTable = {
 const MIN_COLUMN_WIDTH = 3
 const MAX_COLUMN_WIDTH = 64
 
+/**
+ * 按列宽与对齐方式渲染 GFM 表格块为 Unicode 框线表格。
+ */
 export function renderMarkdownTable(block: Extract<MarkdownBlock, { type: 'table' }>): RenderedMarkdownTable {
   const widths = computeColumnWidths(block)
   return {

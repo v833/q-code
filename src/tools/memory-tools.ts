@@ -1,3 +1,6 @@
+/**
+ * 项目记忆写入工具：memory_write 写入 `.q-code/memdir`。
+ */
 import { isMemoryType } from '../context/memory/memory-types'
 import { writeProjectMemory } from '../context/memory/memdir'
 import type { ToolDefinition, ToolExecutionContext } from './registry'
@@ -10,6 +13,7 @@ interface MemoryWriteInput {
   fileName?: string
 }
 
+/** 将结构化记忆写入项目 memdir 并更新索引。 */
 export const memoryWriteTool: ToolDefinition = {
   name: 'memory_write',
   description:

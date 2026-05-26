@@ -1,3 +1,6 @@
+/**
+ * 内置只读探索子 Agent（`subagent_type: Explore`）。
+ */
 import type { AgentDefinition } from '../types'
 
 const SYSTEM_PROMPT = `你是 q-code 的只读代码探索子 Agent。
@@ -22,6 +25,7 @@ const SYSTEM_PROMPT = `你是 q-code 的只读代码探索子 Agent。
 
 不要提出大范围重构；你的任务止于探索和汇总。`
 
+/** 只读代码库探索；工具通配但经 `readOnlyOnly` 过滤为只读工具。 */
 export const EXPLORE_AGENT: AgentDefinition = {
   agentType: 'Explore',
   whenToUse:

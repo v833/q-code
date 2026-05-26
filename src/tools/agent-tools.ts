@@ -1,3 +1,6 @@
+/**
+ * Agent 子进程工具：同步/后台子 Agent、Agent Teams 队友校验与 worktree 隔离。
+ */
 import { randomUUID } from 'node:crypto'
 import { failAsyncAgent, registerAsyncAgent } from '../agents/async-agent-store'
 import { findAgent, getAllAgents } from '../agents/registry'
@@ -24,6 +27,7 @@ import type { HookRunner } from '../hooks'
 import type { TeammateIdentity, ToolDefinition, ToolExecutionContext } from './registry'
 import { createMessageSummaryPayload, getAuditLogger } from '../observability/audit'
 
+/** Agent 工具依赖的模型、工具集与会话运行时注入接口。 */
 export interface AgentToolController {
   createModel: (modelName?: string) => any
   getDefaultModelName: () => string
@@ -38,7 +42,9 @@ export interface AgentToolController {
   getHooks?: () => HookRunner | undefined
 }
 
+/** 同步子 Agent 执行函数类型（可注入测试替身）。 */
 export type ChildAgentRunner = (params: RunChildAgentParams) => Promise<AgentRunResult>
+/** 后台 Agent 生命周期函数类型（可注入测试替身）。 */
 export type AsyncAgentLifecycleRunner = (params: RunAsyncAgentLifecycleParams) => Promise<void>
 
 interface AgentInput {
@@ -63,6 +69,9 @@ interface NormalizedAgentInput {
   teamName?: string
 }
 
+/**
+ * 创建 `Agent` 工具：支持 SubAgent、后台运行与 Agent Teams 命名队友。
+ */
 export function createAgentTool(
   controller: AgentToolController,
   runner: ChildAgentRunner = runChildAgent,

@@ -1,9 +1,14 @@
+/**
+ * Skill 列表字符预算：控制 system-reminder 中 Skill 摘要长度。
+ */
 import type { Skill } from './types'
 
+/** 单条 Skill 描述在列表中的最大字符数。 */
 export const MAX_LISTING_DESC_CHARS = 250
 const MIN_DESC_CHARS_PER_SKILL = 20
 const DEFAULT_SKILL_CHAR_BUDGET = 8000
 
+/** 读取 `Q_CODE_SKILL_CHAR_BUDGET` 或返回默认预算。 */
 export function getSkillCharBudget(): number {
   const value = process.env.Q_CODE_SKILL_CHAR_BUDGET?.trim()
   if (!value) return DEFAULT_SKILL_CHAR_BUDGET
@@ -12,6 +17,7 @@ export function getSkillCharBudget(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SKILL_CHAR_BUDGET
 }
 
+/** 在字符预算内格式化 Skill 列表行（多级降级：完整描述 → 均分 → 仅名称）。 */
 export function formatSkillsWithinBudget(
   skills: Skill[],
   budget: number = getSkillCharBudget()
@@ -32,6 +38,7 @@ export function formatSkillsWithinBudget(
   return skills.map((skill) => `- ${skill.name}`).join('\n')
 }
 
+/** 生成注入 system prompt 的 `<system-reminder>` Skill 列表块。 */
 export function formatSkillsSystemReminder(skills: Skill[]): string {
   const listing = formatSkillsWithinBudget(skills)
   if (!listing) return ''

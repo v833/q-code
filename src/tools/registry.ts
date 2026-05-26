@@ -1,3 +1,6 @@
+/**
+ * 内置工具注册表：定义 ToolDefinition、Plan 模式可见性、并发锁，并将执行包装进 Hooks 与审计。
+ */
 import { jsonSchema } from 'ai'
 import { fmtLockAcquire } from '../utils/logger'
 import {
@@ -14,8 +17,10 @@ import {
   safeStringify
 } from '../observability/audit'
 
+/** 工具对上下文的预估成本，用于 JIT 摘要分组。 */
 export type ToolContextCost = 'low' | 'medium' | 'high'
 
+/** 工具返回内容的语义形态，用于 JIT 摘要与截断策略提示。 */
 export type ToolResultShape =
   | 'paths'
   | 'lines'
@@ -29,6 +34,7 @@ export type ToolResultShape =
   | 'agent-report'
   | 'unknown'
 
+/** 内置/自定义/MCP 工具的统一描述与执行入口。 */
 export interface ToolDefinition {
   name: string
   description: string
@@ -46,15 +52,18 @@ export interface ToolDefinition {
   jitHint?: string
 }
 
+/** Agent Teams 队友身份，供 SendMessage 等工具解析发送方。 */
 export interface TeammateIdentity {
-  /** Member `name` (NOT agentId), e.g. "backend". */
+  /** 队友显示名（非 agentId），例如 "backend"。 */
   agentName: string
-  /** Active team's name; matches TeamFile.name. */
+  /** 当前活跃团队名，与 TeamFile.name 一致。 */
   teamName: string
 }
 
+/** 工具 execute 的原始返回值，可为任意值或结构化信封。 */
 export type ToolExecutionOutput = unknown | ToolResultEnvelope
 
+/** 结构化工具结果：ok/content/error 供 registry 统一渲染与截断。 */
 export interface ToolResultEnvelope {
   ok: boolean
   content?: unknown
@@ -63,6 +72,7 @@ export interface ToolResultEnvelope {
   metadata?: Record<string, unknown>
 }
 
+/** 工具执行过程中的进度事件，经 onProgress 上报给 TUI。 */
 export interface ToolProgressEvent {
   type: string
   text?: string
@@ -72,6 +82,7 @@ export interface ToolProgressEvent {
   metadata?: Record<string, unknown>
 }
 
+/** 单次工具调用时的运行时上下文（cwd、会话、Hooks、队友身份等）。 */
 export interface ToolExecutionContext {
   cwd: string
   abortSignal?: AbortSignal
@@ -87,15 +98,18 @@ export interface ToolExecutionContext {
   teammateIdentity?: TeammateIdentity
 }
 
+/** ToolRegistry 构造选项。 */
 export interface ToolRegistryOptions {
   cwd?: string
   quiet?: boolean
 }
 
+/** toAISDKFormat 输出形态选项。 */
 export interface ToolRegistryFormatOptions {
   resultEnvelope?: boolean
 }
 
+/** 工具可见性模式：normal 为常规；plan 仅暴露只读与显式允许的工具。 */
 export type ToolVisibilityMode = 'normal' | 'plan'
 
 // Tool outputs are capped before they enter the model context. The default is
@@ -126,6 +140,9 @@ const RESULT_SHAPE_LABELS: Record<ToolResultShape, string> = {
 
 const COST_SUMMARY_MAX_TOOLS_PER_BUCKET = 10
 
+/**
+ * 集中注册工具、按模式过滤可见性，并将 execute 包装为 AI SDK 格式（含锁、Hooks、审计）。
+ */
 export class ToolRegistry {
   private tools = new Map<string, ToolDefinition>()
   private visibilityMode: ToolVisibilityMode = 'normal'
@@ -533,6 +550,11 @@ function formatToolForJitSummary(tool: ToolDefinition): string {
   return `${tool.name}(${shape}${hint})`
 }
 
+/**
+ * 将过长工具输出截为 head + tail，中间插入省略提示。
+ * @param text - 原始文本
+ * @param maxChars - 最大字符数，默认与 registry 一致
+ */
 export function truncateResult(text: string, maxChars: number = DEFAULT_MAX_RESULT_CHARS): string {
   if (text.length <= maxChars) return text
 
@@ -545,6 +567,7 @@ export function truncateResult(text: string, maxChars: number = DEFAULT_MAX_RESU
   return `${head}\n\n... [省略 ${dropped} 字符] ...\n\n${tail}`
 }
 
+/** 构造成功的结构化工具结果信封。 */
 export function okToolResult(content: unknown, metadata?: Record<string, unknown>): ToolResultEnvelope {
   return {
     ok: true,
@@ -553,6 +576,7 @@ export function okToolResult(content: unknown, metadata?: Record<string, unknown
   }
 }
 
+/** 构造失败的结构化工具结果信封。 */
 export function errorToolResult(
   error: string,
   options: { code?: string; metadata?: Record<string, unknown> } = {}

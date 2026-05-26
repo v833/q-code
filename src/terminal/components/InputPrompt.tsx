@@ -1,3 +1,6 @@
+/**
+ * 多行输入提示符：Ink 渲染文本行，并通过 ANSI 将真实终端光标同步到编辑位置。
+ */
 import React, { useLayoutEffect, useRef } from 'react'
 import { Box, Text, useStdout, type DOMElement } from 'ink'
 import {
@@ -6,6 +9,7 @@ import {
 } from '../input'
 import { animeTheme, formatPromptGlyph } from '../theme/index'
 
+/** 底部输入区；忙碌时隐藏。 */
 export function InputPrompt({
   value,
   cursor,
@@ -118,6 +122,9 @@ function getRootHeight(node: DOMElement): number {
   return current.yogaNode?.getComputedHeight() ?? 0
 }
 
+/**
+ * 计算从 Ink 根节点底部到目标 Y 需上移的行数（ANSI `cursorUp`）。
+ */
 export function getCursorRowsFromFrameEnd(rootHeight: number, targetY: number): number {
   return Math.max(0, rootHeight - targetY)
 }

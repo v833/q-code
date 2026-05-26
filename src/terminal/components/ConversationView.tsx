@@ -1,3 +1,6 @@
+/**
+ * 对话 transcript 列表：按条目类型渲染用户/助手/系统/工具/上下文行。
+ */
 import React from 'react'
 import { Box, Text } from 'ink'
 import type { TranscriptItem } from '../state'
@@ -7,6 +10,9 @@ import { ToolCallItem } from './ToolCallList'
 import { animeTheme, formatPromptGlyph } from '../theme/index'
 import { STARTUP_DUCK_SOURCE } from '../utils/duck'
 
+/**
+ * 渲染一组 {@link TranscriptItem}（Static 区每次一条，动态区可为多条）。
+ */
 export function ConversationView({ items }: { items: TranscriptItem[] }): React.JSX.Element {
   return (
     <Box flexDirection="column">

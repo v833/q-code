@@ -1,9 +1,16 @@
+/**
+ * 外部命令型 Hook 执行器：将事件 JSON 写入 stdin，从 stdout 解析决策 JSON。
+ */
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import type { HookCommandDefinition, HookEvent, HookHandlerResult } from './types'
 
 const DEFAULT_TIMEOUT_MS = 5000
 
+/**
+ * 在事件 cwd 下执行 Hook 命令（Windows 用 pwsh，Unix 用 sh -lc）。
+ * @throws 非零退出码、超时或 stdout 非合法决策 JSON
+ */
 export async function runCommandHook(
   definition: HookCommandDefinition,
   event: HookEvent,

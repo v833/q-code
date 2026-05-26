@@ -1,13 +1,17 @@
+/**
+ * Agent Teams 的 system-reminder 注入：根据功能开关与是否已有活跃团队，
+ * 向 lead 的主 Agent 提示建队、派队友与工作流规则。
+ */
 import { isAgentTeamsEnabled } from '../utils/agent-teams-enabled'
 import { getActiveTeam } from './team-context'
 import { readTeamFile, TEAM_LEAD_NAME, type TeamFile } from './team-helpers'
 
 /**
- * Three-state system-reminder block (mirrors doc §六):
+ * 三态 system-reminder（对齐产品文档 §六）：
  *
- *   1. Feature flag OFF        → empty string
- *   2. Flag ON, no active team → "Agent Teams is enabled. 用 TeamCreate 建团队"
- *   3. Flag ON, team active    → full roster + workflow rules
+ * 1. 功能关闭 → 空字符串
+ * 2. 开启但无活跃团队 → 提示可用 `TeamCreate`
+ * 3. 开启且本进程为 lead → 完整 roster + 工作流说明
  */
 export function formatTeamsSystemReminder(): string {
   if (!isAgentTeamsEnabled()) return ''
@@ -37,6 +41,7 @@ export function formatTeamsSystemReminder(): string {
   return formatActiveTeamReminder(file)
 }
 
+/** 为已建团队生成含成员 roster 与工作流步骤的 reminder 正文。 */
 function formatActiveTeamReminder(file: TeamFile): string {
   const teammates = file.members.filter((m) => m.name !== TEAM_LEAD_NAME)
   const active = teammates.filter((m) => m.isActive)

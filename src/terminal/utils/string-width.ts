@@ -1,3 +1,8 @@
+/**
+ * 终端等宽布局用的字素宽度计算：CJK/emoji 双宽、组合字符与 ANSI 剥离。
+ */
+
+/** 计算字符串在终端中的显示列宽（忽略 ANSI 转义）。 */
 export function stringDisplayWidth(text: string): number {
   let width = 0
   for (const char of splitGraphemes(stripAnsi(text))) {
@@ -6,16 +11,19 @@ export function stringDisplayWidth(text: string): number {
   return width
 }
 
+/** 右侧空格填充至目标显示宽度。 */
 export function padDisplayEnd(text: string, width: number): string {
   const padding = Math.max(0, width - stringDisplayWidth(text))
   return `${text}${' '.repeat(padding)}`
 }
 
+/** 左侧空格填充至目标显示宽度。 */
 export function padDisplayStart(text: string, width: number): string {
   const padding = Math.max(0, width - stringDisplayWidth(text))
   return `${' '.repeat(padding)}${text}`
 }
 
+/** 居中空格填充至目标显示宽度。 */
 export function padDisplayCenter(text: string, width: number): string {
   const padding = Math.max(0, width - stringDisplayWidth(text))
   const left = Math.floor(padding / 2)
@@ -23,6 +31,7 @@ export function padDisplayCenter(text: string, width: number): string {
   return `${' '.repeat(left)}${text}${' '.repeat(right)}`
 }
 
+/** 按显示宽度截断并在末尾加省略号 `…`。 */
 export function clipDisplayWidth(text: string, width: number): string {
   if (stringDisplayWidth(text) <= width) return text
   if (width <= 0) return ''
@@ -43,6 +52,7 @@ function stripAnsi(text: string): string {
   return text.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
 }
 
+/** 按 Unicode 字素簇切分（优先 `Intl.Segmenter`）。 */
 export function splitGraphemes(value: string): string[] {
   if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
     const Segmenter = Intl.Segmenter
@@ -52,6 +62,7 @@ export function splitGraphemes(value: string): string[] {
   return Array.from(value)
 }
 
+/** 单个字素簇的终端显示列宽（含 ZWJ emoji 启发式）。 */
 export function graphemeDisplayWidth(value: string): number {
   if (!value) return 0
   if (value.includes('\u200d')) return 2

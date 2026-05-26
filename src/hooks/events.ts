@@ -1,3 +1,6 @@
+/**
+ * Hook 事件工厂：构造带 session/cwd/agent 时间戳的标准事件对象。
+ */
 import type {
   HookAgentContext,
   HookBaseEvent,
@@ -6,12 +9,14 @@ import type {
   HookPostToolUseEvent
 } from './types'
 
+/** 创建 Hook 事件时的最小上下文。 */
 export interface HookEventFactoryContext {
   sessionId: string
   cwd: string
   agent?: HookAgentContext
 }
 
+/** 生成各事件共享的基础字段（不含 discriminant `event`）。 */
 export function baseHookEvent(context: HookEventFactoryContext): Omit<HookBaseEvent, 'event'> {
   return {
     sessionId: context.sessionId,
@@ -21,6 +26,7 @@ export function baseHookEvent(context: HookEventFactoryContext): Omit<HookBaseEv
   }
 }
 
+/** 根据载荷创建完整 Hook 事件（会话/子 Agent 等）。 */
 export function createHookEvent(
   context: HookEventFactoryContext,
   event: HookEventPayload
@@ -53,6 +59,7 @@ type HookEventPayload =
       }
     }
 
+/** 创建 `pre_tool_use` 事件，供 ToolRegistry 在工具执行前触发。 */
 export function createPreToolUseEvent(
   context: HookEventFactoryContext,
   tool: HookPreToolUseEvent['tool']
@@ -64,6 +71,7 @@ export function createPreToolUseEvent(
   }
 }
 
+/** 创建 `post_tool_use` 事件，供 ToolRegistry 在工具执行后触发。 */
 export function createPostToolUseEvent(
   context: HookEventFactoryContext,
   tool: HookPostToolUseEvent['tool']

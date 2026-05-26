@@ -1,17 +1,26 @@
+/**
+ * 从用户级与项目级目录加载自定义 SubAgent（Markdown + YAML frontmatter）。
+ *
+ * 每个 `.md` 文件需包含 `name`、`description` 字段，正文作为
+ * `getSystemPrompt()` 返回值。
+ */
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { splitFrontmatter } from '../skills/parse-frontmatter'
 import type { AgentDefinition, AgentIsolation, AgentSource } from './types'
 
+/** 解析 `Q_CODE_HOME`，缺省为 `~/.q-code`。 */
 export function getQCodeHome(): string {
   return process.env.Q_CODE_HOME?.trim() || path.join(os.homedir(), '.q-code')
 }
 
+/** 用户级自定义 Agent 目录：`~/.q-code/agents`。 */
 export function getUserAgentsDir(): string {
   return path.join(getQCodeHome(), 'agents')
 }
 
+/** 项目级自定义 Agent 目录：`<cwd>/.q-code/agents`。 */
 export function getProjectAgentsDir(cwd: string): string {
   return path.join(path.resolve(cwd), '.q-code', 'agents')
 }
@@ -21,11 +30,16 @@ interface LoadedFromDir {
   warnings: string[]
 }
 
+/** `loadAllCustomAgents` 的返回值。 */
 export interface LoadAllCustomAgentsResult {
   agents: AgentDefinition[]
   warnings: string[]
 }
 
+/**
+ * 扫描单个目录下所有 `.md` 文件并解析为 `AgentDefinition`。
+ * 目录不存在（ENOENT）时静默返回空列表。
+ */
 async function loadFromOneDir(dir: string, source: AgentSource): Promise<LoadedFromDir> {
   let entries: string[]
   try {
@@ -104,12 +118,17 @@ async function loadFromOneDir(dir: string, source: AgentSource): Promise<LoadedF
   return { agents, warnings }
 }
 
+/** 将 frontmatter 中的 `isolation` 规范为 `none` | `worktree`。 */
 function asIsolation(value: unknown): AgentIsolation | undefined {
   const normalized = asString(value)
   if (normalized === 'none' || normalized === 'worktree') return normalized
   return undefined
 }
 
+/**
+ * 并行加载用户级与项目级 Agent 目录。
+ * 返回顺序为 `[...user, ...project]`；同名类型由 `bootstrapAgents` 中后项覆盖。
+ */
 export async function loadAllCustomAgents(cwd: string): Promise<LoadAllCustomAgentsResult> {
   const [userResult, projectResult] = await Promise.all([
     loadFromOneDir(getUserAgentsDir(), 'user'),
@@ -131,6 +150,7 @@ function asString(value: unknown): string | undefined {
   return undefined
 }
 
+/** 支持 YAML 数组或逗号分隔字符串。 */
 function asStringArray(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value

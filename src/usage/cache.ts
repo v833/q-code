@@ -1,7 +1,11 @@
+/**
+ * Prompt cache 前缀追踪与 `/cache` 状态渲染：检测 system/tools 前缀是否稳定。
+ */
 import { createHash } from 'node:crypto'
 import type { ToolDefinition } from '../tools/registry'
 import type { CacheMode, UsageTotals } from './types'
 
+/** 单次请求前 system prompt 与工具 schema 的前缀指纹。 */
 export interface CachePrefixSnapshot {
   systemHash: string
   toolsHash: string
@@ -9,6 +13,7 @@ export interface CachePrefixSnapshot {
   activeToolSchemaTokens: number
 }
 
+/** 当前与前缀快照及变化统计。 */
 export interface CachePrefixStatus {
   current?: CachePrefixSnapshot
   previous?: CachePrefixSnapshot
@@ -16,12 +21,17 @@ export interface CachePrefixStatus {
   changes: number
 }
 
+/** 跨轮观察 system/tools 前缀变化，用于判断是否适合启用显式 cache hints。 */
 export class CachePrefixTracker {
   private current?: CachePrefixSnapshot
   private previous?: CachePrefixSnapshot
   private changes = 0
   private stable = true
 
+  /**
+   * 记录一次前缀快照；与上次不同时递增 changes 并标记 unstable。
+   * @param snapshot 当前 system/tools 指纹
+   */
   observe(snapshot: CachePrefixSnapshot): CachePrefixStatus {
     const changed = this.current !== undefined && !samePrefix(this.current, snapshot)
     if (changed) {
@@ -33,6 +43,7 @@ export class CachePrefixTracker {
     return this.status()
   }
 
+  /** 返回当前追踪状态（不更新快照）。 */
   status(): CachePrefixStatus {
     return {
       ...(this.current ? { current: this.current } : {}),
@@ -43,12 +54,19 @@ export class CachePrefixTracker {
   }
 }
 
+/**
+ * 解析 slash/CLI 传入的 cache 模式参数。
+ * @returns 合法模式或 undefined
+ */
 export function parseCacheModeArg(value: string): CacheMode | undefined {
   const normalized = value.trim().toLowerCase()
   if (normalized === 'auto' || normalized === 'on' || normalized === 'off') return normalized
   return undefined
 }
 
+/**
+ * 根据 system prompt 与工具列表生成可比较的前缀快照。
+ */
 export function createCachePrefixSnapshot(input: {
   systemPrompt: string
   tools: readonly ToolDefinition[]
@@ -70,6 +88,7 @@ export function createCachePrefixSnapshot(input: {
   }
 }
 
+/** 渲染 Cache Status 多行文本（模式、命中率、前缀稳定性）。 */
 export function renderCacheStatus(params: {
   mode: CacheMode
   totals: UsageTotals

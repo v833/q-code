@@ -1,3 +1,6 @@
+/**
+ * MCP 子系统启动：加载配置、并行连接 server、将工具注册到 ToolRegistry。
+ */
 import { loadMcpConfigs } from './config'
 import {
   clearMcpServerCache,
@@ -23,12 +26,14 @@ import type {
   ScopedMcpServerConfig
 } from './types'
 
+/** `bootstrapMcp` 的汇总结果。 */
 export interface McpBootstrapResult {
   config: McpConfigLoadResult
   connections: McpServerConnection[]
   toolCount: number
 }
 
+/** 启动 MCP：清空旧注册、连接各 server 并将延迟工具写入 registry。 */
 export async function bootstrapMcp(
   cwd: string,
   toolRegistry: ToolRegistry
@@ -63,6 +68,7 @@ export async function bootstrapMcp(
   }
 }
 
+/** 重连单个 MCP server 并刷新其工具定义。 */
 export async function reconnectMcpServer(
   requestedName: string,
   toolRegistry: ToolRegistry
@@ -89,6 +95,7 @@ export async function reconnectMcpServer(
   return result.connection
 }
 
+/** 关闭全部 MCP 连接并清空内存注册表。 */
 export async function closeMcpSubsystem(): Promise<void> {
   await closeAllMcpConnections()
   clearMcpRegistry()
@@ -148,6 +155,7 @@ function seedPendingEntries(servers: Record<string, ScopedMcpServerConfig>): Set
   return skipped
 }
 
+/** 生成 `/mcp` 等命令使用的 MCP 连接状态人类可读摘要。 */
 export function summarizeMcpRegistry(): string {
   const entries = getMcpRegistry()
   if (entries.length === 0) return 'MCP Servers (0 configured)'
@@ -175,6 +183,7 @@ export function summarizeMcpRegistry(): string {
   return lines.join('\n')
 }
 
+/** 描述 MCP 传输类型与 scope（用于状态输出）。 */
 export function describeTransport(config: ScopedMcpServerConfig): string {
   if (config.type === 'http' || config.type === 'sse') {
     return `${config.type} ${config.url} [${config.scope}]`
@@ -182,6 +191,7 @@ export function describeTransport(config: ScopedMcpServerConfig): string {
   return `stdio ${config.command} ${config.args.join(' ')} [${config.scope}]`.trim()
 }
 
+/** 崩溃报告中使用的脱敏传输描述（不含完整 URL/命令细节）。 */
 export function describeTransportForCrashReport(
   config: ScopedMcpServerConfig
 ): Record<string, unknown> {

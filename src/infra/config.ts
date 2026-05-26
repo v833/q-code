@@ -1,3 +1,6 @@
+/**
+ * 企业 AI 基建（Infra）环境变量与客户端标识加载。
+ */
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -6,6 +9,11 @@ import type { InfraConfig, InfraUserInfo } from './types'
 
 const DEFAULT_TIMEOUT_MS = 5000
 
+/**
+ * 从 `process.env` 加载 Infra 运行时配置。
+ *
+ * 缺省不启用；启用后需配合 `Q_CODE_INFRA_BASE_URL` 与 `Q_CODE_INFRA_TOKEN` 使用。
+ */
 export function loadInfraConfig(): InfraConfig {
   const baseUrl = clean(process.env.Q_CODE_INFRA_BASE_URL)
   const token = clean(process.env.Q_CODE_INFRA_TOKEN)
@@ -30,6 +38,11 @@ export function loadInfraConfig(): InfraConfig {
   }
 }
 
+/**
+ * 加载上报给管理端的用户身份信息。
+ *
+ * `id` 可来自 `Q_CODE_INFRA_USER_ID`，否则回退到系统用户名。
+ */
 export function loadInfraUserInfo(): InfraUserInfo {
   return {
     id: clean(process.env.Q_CODE_INFRA_USER_ID) ?? clean(process.env.USERNAME) ?? clean(process.env.USER),
@@ -47,7 +60,7 @@ function getClientId(): string {
     const existing = fs.readFileSync(idFile, 'utf-8').trim()
     if (existing) return existing
   } catch {
-    // generate below
+    // 下方生成新 ID
   }
 
   const generated = randomUUID()
@@ -55,7 +68,7 @@ function getClientId(): string {
     fs.mkdirSync(path.dirname(idFile), { recursive: true })
     fs.writeFileSync(idFile, `${generated}\n`, 'utf-8')
   } catch {
-    // If the id cannot be persisted, the generated value is still stable for this process.
+    // 无法持久化时，本进程内仍使用本次生成的值
   }
   return generated
 }

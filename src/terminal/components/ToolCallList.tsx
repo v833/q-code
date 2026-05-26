@@ -1,8 +1,12 @@
+/**
+ * 单条工具调用 transcript 的紧凑展示（状态、输入预览、结果摘要）。
+ */
 import React from 'react'
 import { Box, Text } from 'ink'
 import type { TranscriptItem } from '../state'
 import { compactToolInputPreview, roleColor } from '../utils/format'
 
+/** 渲染 `kind === 'tool'` 的 transcript 条目。 */
 export function ToolCallItem({ item }: { item: TranscriptItem }): React.JSX.Element {
   const label = item.title ?? 'Tool'
   const color = roleColor(item)

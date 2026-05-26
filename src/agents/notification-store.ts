@@ -1,9 +1,17 @@
+/**
+ * 进程内待投递通知队列：后台 SubAgent 完成后生成的 `<task-notification>`
+ * 块，由主 Agent 循环在下一轮 user 消息前 `drain` 注入。
+ */
+
+/** 队列中的一条待处理通知。 */
 export interface PendingNotification {
   mode: 'task-notification'
+  /** 已格式化的 XML 块正文。 */
   text: string
   enqueuedAt: number
 }
 
+/** `formatTaskNotification` 的结构化输入。 */
 export interface TaskNotificationParts {
   agentId: string
   agentType: string
@@ -21,16 +29,19 @@ export interface TaskNotificationParts {
 
 const queue: PendingNotification[] = []
 
+/** 入队一条任务完成通知（自动打上 `enqueuedAt`）。 */
 export function enqueuePendingNotification(
   notification: Omit<PendingNotification, 'enqueuedAt'>
 ): void {
   queue.push({ ...notification, enqueuedAt: Date.now() })
 }
 
+/** 取出并清空当前队列（FIFO 顺序保持）。 */
 export function drainPendingNotifications(): PendingNotification[] {
   return queue.splice(0, queue.length)
 }
 
+/** 只读查看队列，不移除。 */
 export function peekPendingNotifications(): readonly PendingNotification[] {
   return queue
 }
@@ -39,10 +50,14 @@ export function pendingNotificationCount(): number {
   return queue.length
 }
 
+/** 清空队列（测试用）。 */
 export function clearPendingNotifications(): void {
   queue.length = 0
 }
 
+/**
+ * 将后台任务结果格式化为 lead 可解析的 `<task-notification>` XML 块。
+ */
 export function formatTaskNotification(parts: TaskNotificationParts): string {
   const lines = ['<task-notification>']
   lines.push(`  <task_id>${parts.agentId}</task_id>`)

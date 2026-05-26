@@ -1,3 +1,6 @@
+/**
+ * 加载 AGENT.md / AGENTS.md：从用户 home、cwd 向上链到项目根，合并为 system prompt 片段。
+ */
 import { existsSync } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
@@ -6,17 +9,23 @@ import * as path from 'node:path'
 const AGENT_MD_NAMES = ['AGENT.md', 'AGENTS.md']
 const DEFAULT_HOME_DIR = '.q-code'
 
+/** 单个已加载的 AGENT/AGENTS 文件片段。 */
 export interface AgentMdSection {
   filePath: string
   content: string
 }
 
+/** 加载选项：cwd、home 与项目根边界。 */
 export interface AgentMdLoadOptions {
   cwd?: string
   homeDir?: string
   projectRoot?: string
 }
 
+/**
+ * 按约定路径顺序加载所有存在的 AGENT/AGENTS 文件。
+ * @returns 非空内容的片段列表（过滤缺失文件）
+ */
 export async function loadAgentMdSections(
   options: AgentMdLoadOptions = {}
 ): Promise<AgentMdSection[]> {
@@ -38,6 +47,7 @@ function getDefaultHomeDir(): string {
   return process.env.Q_CODE_HOME?.trim() || path.join(os.homedir(), DEFAULT_HOME_DIR)
 }
 
+/** 加载并格式化为带 `# Source:` 头的连续文本。 */
 export async function loadAgentMdContext(
   options: AgentMdLoadOptions = {}
 ): Promise<string> {
@@ -45,6 +55,7 @@ export async function loadAgentMdContext(
   return formatAgentMdSections(sections)
 }
 
+/** 将多个片段用 `# Source: <path>` 分隔拼接。 */
 export function formatAgentMdSections(sections: readonly AgentMdSection[]): string {
   return sections
     .map((section) => {
@@ -53,6 +64,9 @@ export function formatAgentMdSections(sections: readonly AgentMdSection[]): stri
     .join('\n\n')
 }
 
+/**
+ * 返回待尝试加载的文件路径列表（去重）：home → cwd 向上至 projectRoot。
+ */
 export function getAgentMdFiles(cwd: string, homeDir: string, projectRoot = resolveProjectRoot(cwd)): string[] {
   const files: string[] = []
 

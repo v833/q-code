@@ -1,9 +1,16 @@
+/**
+ * TUI 代码块语法高亮：基于 `cli-highlight`，支持主题、`NO_COLOR`、超大块降级与 diff 着色。
+ */
 import { createRequire } from 'node:module'
 import type { HighlightOptions, Theme } from 'cli-highlight'
 
+/** 高亮主题模式；`auto` 时根据终端环境推断 dark/light。 */
 export type HighlightThemeMode = 'dark' | 'light' | 'auto'
 
+/** 超过此字节数的代码块跳过完整高亮，仅做单色 fallback。 */
 export const MAX_HIGHLIGHT_CODE_BYTES = 16 * 1024
+
+/** 传给 `cli-highlight` 的语言别名白名单。 */
 export const HIGHLIGHT_LANGUAGE_SUBSET: string[] = [
   'ts',
   'tsx',
@@ -137,11 +144,20 @@ const LIGHT_THEME = createTheme({
 
 const DIFF_HEADER_PREFIXES = ['diff --git ', 'index ', '--- ', '+++ ']
 
+/** {@link highlightCode} 的可选主题与无颜色覆盖。 */
 export interface HighlightCodeOptions {
+  /** 显式主题；省略时走 `Q_CODE_THEME` 与 auto 推断。 */
   theme?: HighlightThemeMode
+  /** 为 true 时跳过着色；省略时尊重 `NO_COLOR`。 */
   noColor?: boolean
 }
 
+/**
+ * 为 Markdown 代码块生成 ANSI 着色文本；失败或禁色时返回原文或单色 fallback。
+ *
+ * @param language - 可选语言 hint；空则靠 `languageSubset` 自动检测。
+ * @returns 含 ANSI 转义序列的字符串。
+ */
 export function highlightCode(
   code: string,
   language: string | undefined,
@@ -173,6 +189,7 @@ export function highlightCode(
   }
 }
 
+/** 将 `Q_CODE_THEME` 等原始值规范为 {@link HighlightThemeMode}；无效值默认 `auto`。 */
 export function resolveHighlightThemeMode(rawTheme: string | undefined = process.env.Q_CODE_THEME): HighlightThemeMode {
   const normalized = rawTheme?.trim().toLowerCase()
   if (normalized === 'dark' || normalized === 'light' || normalized === 'auto') {
@@ -181,6 +198,11 @@ export function resolveHighlightThemeMode(rawTheme: string | undefined = process
   return 'auto'
 }
 
+/**
+ * 在 `auto` 模式下推断终端背景倾向的 dark/light 主题。
+ *
+ * 优先读 `COLORFGBG`，其次常见终端 `TERM_PROGRAM` 启发式，默认 `dark`。
+ */
 export function resolveAutoHighlightThemeMode(env = process.env): Exclude<HighlightThemeMode, 'auto'> {
   const colorFgBg = env.COLORFGBG?.trim()
   if (colorFgBg) {
@@ -200,12 +222,14 @@ export function resolveAutoHighlightThemeMode(env = process.env): Exclude<Highli
   return 'dark'
 }
 
+/** 解析最终生效的高亮主题（展开 `auto` 为 dark 或 light）。 */
 export function resolveHighlightTheme(optionsTheme?: HighlightThemeMode): HighlightThemeMode {
   const explicit = optionsTheme ?? resolveHighlightThemeMode()
   if (explicit !== 'auto') return explicit
   return resolveAutoHighlightThemeMode()
 }
 
+/** 是否应禁用 ANSI 着色（`NO_COLOR` 环境变量已设置，含空字符串）。 */
 export function isNoColorEnabled(noColorEnv = process.env.NO_COLOR): boolean {
   return noColorEnv !== undefined && noColorEnv !== null
 }

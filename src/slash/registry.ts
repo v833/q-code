@@ -1,6 +1,10 @@
+/**
+ * 斜杠命令注册表：注册、别名解析、帮助格式化与 dispatch。
+ */
 import { parseSlashCommand } from './parser'
 import type { SlashCommand, SlashCommandInput, SlashCommandSuggestion } from './types'
 
+/** 管理内置与用户斜杠命令的注册与分发。 */
 export class SlashCommandRegistry<Context> {
   private readonly commands = new Map<string, SlashCommand<Context>>()
   private readonly aliases = new Map<string, string>()
@@ -58,6 +62,7 @@ export class SlashCommandRegistry<Context> {
   }
 }
 
+/** 创建并预注册一批斜杠命令的便捷工厂。 */
 export function createSlashCommandRegistry<Context>(
   commands: SlashCommand<Context>[] = []
 ): SlashCommandRegistry<Context> {

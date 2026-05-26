@@ -1,3 +1,7 @@
+/**
+ * Legacy 冒烟脚本：Skills 目录加载、预算、条件激活与斜杠展开。
+ * 由 `pnpm test:skills` 调用。
+ */
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

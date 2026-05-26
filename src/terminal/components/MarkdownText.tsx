@@ -1,3 +1,6 @@
+/**
+ * 将 Markdown 解析为 Ink 块级组件；流式模式下折叠过长内容。
+ */
 import React, { useMemo } from 'react'
 import { Box, Text, useStdout } from 'ink'
 import { parseMarkdown, type MarkdownBlock } from '../markdown'
@@ -8,11 +11,13 @@ import {
   resolveHighlightThemeMode
 } from '../utils/highlight'
 
+/** 超过此长度则跳过 Markdown 解析，直接纯文本渲染。 */
 export const MARKDOWN_PARSE_CHAR_LIMIT = 12000
 const STREAMING_MAX_CHARS = 2600
 const STREAMING_RESERVED_ROWS = 8
 const STREAMING_FALLBACK_ROWS = 16
 
+/** 块级 Markdown 渲染；`streaming` 时启用行/字符折叠预览。 */
 export function MarkdownText({
   text,
   dim = false,
@@ -144,10 +149,12 @@ function MarkdownTable({
   )
 }
 
+/** 是否应对文本执行 {@link parseMarkdown}。 */
 export function shouldParseMarkdownText(text: string, parse = true): boolean {
   return parse && text.length <= MARKDOWN_PARSE_CHAR_LIMIT
 }
 
+/** 流式 assistant 文本的行/字符折叠预览。 */
 export function previewStreamingText(text: string, maxLines: number): string {
   const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
   const charTrimmed =

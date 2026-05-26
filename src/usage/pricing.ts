@@ -1,5 +1,9 @@
+/**
+ * 模型定价表与成本计算：按百万 token 美元单价估算实际/基线/节省成本。
+ */
 import type { ModelPricing, NormalizedUsage, UsageCost } from './types'
 
+/** 内置模型名（小写）到单价的默认价格表。 */
 export const DEFAULT_PRICE_TABLE: Record<string, ModelPricing> = {
   'gpt-5': { input: 5, output: 15, cacheWrite: 5, cacheRead: 1.25 },
   'gpt-5.4': { input: 5, output: 15, cacheWrite: 5, cacheRead: 1.25 },
@@ -11,6 +15,11 @@ export const DEFAULT_PRICE_TABLE: Record<string, ModelPricing> = {
   'mock-model': { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 }
 }
 
+/**
+ * 解析模型对应的定价；先精确匹配，再最长前缀匹配。
+ * @param model 模型名称
+ * @param table 价格表，默认 `DEFAULT_PRICE_TABLE`
+ */
 export function resolveModelPricing(
   model: string,
   table: Record<string, ModelPricing> = DEFAULT_PRICE_TABLE
@@ -26,6 +35,10 @@ export function resolveModelPricing(
   return matched ? { model: matched, pricing: table[matched]! } : undefined
 }
 
+/**
+ * 根据归一化用量与单价计算成本；无定价时返回 undefined。
+ * baseline 假设全部输入按 input 单价计费，saved 为 baseline 与实际之差。
+ */
 export function computeCost(
   usage: NormalizedUsage,
   pricing: ModelPricing | undefined

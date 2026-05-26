@@ -1,3 +1,10 @@
+/**
+ * NDJSON 审计日志：异步队列写入、按日滚动、PII 脱敏与进程退出刷盘。
+ *
+ * 默认目录为 `Q_CODE_HOME/logs`（或 `Q_CODE_AUDIT_DIR`），可通过
+ * `Q_CODE_AUDIT_ENABLED` 等环境变量配置。工具注册表与 Agent 循环通过
+ * `getAuditLogger()` 单例写入 `tool.call` / `tool.result` 等事件。
+ */
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -12,6 +19,7 @@ import { dirname, join, resolve } from "node:path";
 import type { HookAgentContext } from "../hooks";
 import { isFalseEnv } from "../utils/env";
 
+/** 审计事件名称联合类型，覆盖会话、工具、Hook、计划、子 Agent、团队与 MCP 等生命周期。 */
 export type AuditEventName =
   | "session.start"
   | "session.end"
@@ -42,15 +50,23 @@ export type AuditEventName =
   | "audit.dropped"
   | "error";
 
+/** 单次 `emit` 可选的上下文：会话、工作目录与 Agent 身份。 */
 export interface AuditContext {
+  /** 当前会话 ID */
   sessionId?: string;
+  /** 进程工作目录 */
   cwd?: string;
+  /** Hook 侧 Agent 上下文；缺省时记为 `main` */
   agent?: HookAgentContext;
 }
 
+/** 写入 NDJSON 文件的一行审计记录结构。 */
 export interface AuditRecord {
+  /** ISO 8601 时间戳 */
   ts: string;
+  /** 进程内单调递增序号 */
   seq: number;
+  /** 写入进程 PID */
   pid: number;
   sessionId?: string;
   cwd?: string;
@@ -59,15 +75,25 @@ export interface AuditRecord {
   payload: Record<string, unknown>;
 }
 
+/** 审计日志写入器接口：异步队列 + `flush` 刷盘。 */
 export interface AuditLogger {
+  /**
+   * 入队一条审计事件（启用时）；满队列时按策略丢弃非关键事件。
+   *
+   * @param event - 事件名
+   * @param payload - 事件载荷，默认 `{}`
+   * @param ctx - 可选会话/目录/Agent 上下文
+   */
   emit(
     event: AuditEventName,
     payload?: Record<string, unknown>,
     ctx?: AuditContext,
   ): void;
+  /** 等待队列中所有记录落盘 */
   flush(): Promise<void>;
 }
 
+/** `NdjsonAuditLogger` 构造选项，用于测试注入或覆盖配置。 */
 export interface AuditLoggerOptions {
   enabled?: boolean;
   auditDir?: string;
@@ -75,20 +101,31 @@ export interface AuditLoggerOptions {
   maxFileBytes?: number;
   maxQueueSize?: number;
   piiMode?: AuditPiiMode;
+  /** 可注入时钟，便于测试 */
   now?: () => Date;
+  /** 可注入行写入，便于测试 */
   writeLine?: (filePath: string, line: string) => Promise<void>;
+  /** 是否在 `beforeExit`/信号时自动 flush，默认 `true` */
   registerProcessHandlers?: boolean;
+  /** 是否注册 SIGINT/SIGTERM 处理；crash guard 接管时为 `false` */
   registerSignalHandlers?: boolean;
   stderr?: Pick<NodeJS.WriteStream, "write">;
 }
 
+/** PII 模式：`hash` 仅摘要，`full` 保留原文（需显式配置）。 */
 export type AuditPiiMode = "hash" | "full";
 
+/** 从环境变量解析后的审计运行时配置。 */
 export interface AuditConfig {
+  /** 是否写入审计日志 */
   enabled: boolean;
+  /** 审计文件目录（绝对路径） */
   auditDir: string;
+  /** 过期文件保留天数，启动时清理 */
   retentionDays: number;
+  /** 单个 NDJSON 文件大小上限（字节） */
   maxFileBytes: number;
+  /** 内存队列最大条数，溢出时丢弃 */
   maxQueueSize: number;
   piiMode: AuditPiiMode;
 }
@@ -102,6 +139,11 @@ let singleton: AuditLogger | undefined;
 let crashGuardOwnsSignalHandlers = false;
 const auditSignalHandlerDisposers = new Set<() => void>();
 
+/**
+ * 将审计记录异步写入按日滚动的 NDJSON 文件。
+ *
+ * 队列溢出时优先丢弃非关键事件，并可能写入 `audit.dropped` 汇总行。
+ */
 export class NdjsonAuditLogger implements AuditLogger {
   private readonly config: AuditConfig;
   private readonly now: () => Date;
@@ -114,6 +156,9 @@ export class NdjsonAuditLogger implements AuditLogger {
   private lastFileBytes = 0;
   private droppedSinceLastNotice = 0;
 
+  /**
+   * @param options - 覆盖 `getAuditConfig()` 默认值及进程退出钩子行为
+   */
   constructor(options: AuditLoggerOptions = {}) {
     this.config = {
       ...getAuditConfig(),
@@ -277,11 +322,17 @@ export class NdjsonAuditLogger implements AuditLogger {
   }
 }
 
+/** 审计关闭时的空实现，不写入磁盘。 */
 export class NoopAuditLogger implements AuditLogger {
   emit(): void {}
   async flush(): Promise<void> {}
 }
 
+/**
+ * 获取进程级审计日志单例（启用时为 `NdjsonAuditLogger`）。
+ *
+ * @returns 全局 `AuditLogger` 实例
+ */
 export function getAuditLogger(): AuditLogger {
   singleton ??= getAuditConfig().enabled
     ? new NdjsonAuditLogger()
@@ -289,10 +340,20 @@ export function getAuditLogger(): AuditLogger {
   return singleton;
 }
 
+/**
+ * 测试用：替换或清空审计单例。
+ *
+ * @param logger - 注入实例；`undefined` 表示下次 `getAuditLogger` 重新创建
+ */
 export function resetAuditLoggerForTests(logger?: AuditLogger): void {
   singleton = logger;
 }
 
+/**
+ * 声明 crash guard 已注册信号处理，避免审计与 guard 重复监听 SIGINT/SIGTERM。
+ *
+ * @param ownsSignals - `true` 时移除审计已注册的信号监听器
+ */
 export function setCrashGuardOwnsSignalHandlers(ownsSignals: boolean): void {
   crashGuardOwnsSignalHandlers = ownsSignals;
   if (!ownsSignals) return;
@@ -300,6 +361,12 @@ export function setCrashGuardOwnsSignalHandlers(ownsSignals: boolean): void {
   auditSignalHandlerDisposers.clear();
 }
 
+/**
+ * 从环境变量解析审计配置（目录、保留天数、队列与 PII 模式等）。
+ *
+ * @param env - 环境变量对象，默认 `process.env`
+ * @returns 完整 `AuditConfig`
+ */
 export function getAuditConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): AuditConfig {
@@ -326,6 +393,12 @@ export function getAuditConfig(
   };
 }
 
+/**
+ * 构造 `user.prompt` 载荷：始终含字符数与 SHA-256；`full` 模式附加原文。
+ *
+ * @param text - 用户输入文本
+ * @param piiMode - PII 模式，默认来自 `getAuditConfig()`
+ */
 export function createUserPromptPayload(
   text: string,
   piiMode = getAuditConfig().piiMode,
@@ -339,6 +412,11 @@ export function createUserPromptPayload(
   return payload;
 }
 
+/**
+ * 构造 `tool.call` 载荷：工具名、输入摘要/长度，可选 `toolCallId` 与完整 input。
+ *
+ * @param args - 工具名、输入及可选 PII 模式
+ */
 export function createToolCallPayload(args: {
   name: string;
   toolCallId?: string;
@@ -357,6 +435,11 @@ export function createToolCallPayload(args: {
   return payload;
 }
 
+/**
+ * 构造 `tool.result` 载荷：成功标志、输出摘要/长度，可选耗时与完整 output。
+ *
+ * @param args - 工具名、输出、错误码与 PII 相关字段
+ */
 export function createToolResultPayload(args: {
   name: string;
   toolCallId?: string;
@@ -384,6 +467,11 @@ export function createToolResultPayload(args: {
   return payload;
 }
 
+/**
+ * 构造仅含字符数与 SHA-256 的文本摘要载荷（不含原文）。
+ *
+ * @param text - 待摘要文本
+ */
 export function createMessageSummaryPayload(
   text: string,
 ): Record<string, unknown> {
@@ -393,6 +481,12 @@ export function createMessageSummaryPayload(
   };
 }
 
+/**
+ * 构造通用文本载荷：摘要 + 可选在 `full` 模式下附加 `text` 字段。
+ *
+ * @param text - 原始文本
+ * @param piiMode - PII 模式，默认来自配置
+ */
 export function createTextPayload(
   text: string,
   piiMode: AuditPiiMode = getAuditConfig().piiMode,
@@ -402,6 +496,11 @@ export function createTextPayload(
   return payload;
 }
 
+/**
+ * 构造 `hook.decision` 载荷；`reason` / `message` 经 `createTextPayload` 脱敏。
+ *
+ * @param args - Hook 元数据、匹配结果与可选说明文本
+ */
 export function createHookDecisionPayload(args: {
   hookName: string;
   event: string;
@@ -430,6 +529,11 @@ export function createHookDecisionPayload(args: {
   return payload;
 }
 
+/**
+ * 规范化审计上下文：补全默认 Agent，剔除空字段。
+ *
+ * @param ctx - 原始上下文
+ */
 export function auditContext(ctx: AuditContext): AuditContext {
   return {
     ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
@@ -540,6 +644,11 @@ function getPositiveIntEnv(
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
 
+/**
+ * 安全 JSON 序列化：循环引用替换为 `[Circular]`，失败时回退 `String(value)`。
+ *
+ * @param value - 任意可序列化值
+ */
 export function safeStringify(value: unknown): string {
   const seen = new WeakSet<object>();
   try {

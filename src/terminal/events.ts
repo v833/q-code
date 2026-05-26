@@ -1,18 +1,27 @@
+/**
+ * TUI 与 CLI 主循环之间的事件契约：角色/状态类型、 discriminated union 事件，
+ * 以及内存实现的 {@link TerminalEventBus}。
+ */
 import type { TokenUsage } from '../context/token-budget'
 import type { SlashCommandSuggestion } from '../slash'
 import type { CacheMode } from '../usage'
 
+/** transcript 消息角色。 */
 export type TerminalRole = 'assistant' | 'user' | 'system' | 'tool' | 'error'
+/** 状态栏展示的 Agent/工具执行阶段。 */
 export type TerminalStatus = 'idle' | 'thinking' | 'running_tool' | 'compacting' | 'recovering' | 'error'
 
+/** TodoWrite 等进度条目的完成状态。 */
 export type TerminalProgressStatus = 'pending' | 'in_progress' | 'completed'
 
+/** 状态栏中的一条进度项（来自 TodoWrite 或类似来源）。 */
 export interface TerminalProgressItem {
   content: string
   status: TerminalProgressStatus
   activeForm?: string
 }
 
+/** 后台 SubAgent 在状态栏中的摘要行。 */
 export interface TerminalBackgroundAgentItem {
   agentId: string
   agentType: string
@@ -29,12 +38,14 @@ export interface TerminalBackgroundAgentItem {
   error?: string
 }
 
+/** 多数终端事件共用的可选溯源字段。 */
 export interface TerminalBaseEvent {
   source?: string
   agentId?: string
   sessionId?: string
 }
 
+/** CLI → TUI 的全部事件变体；由 {@link terminalReducer} 消费。 */
 export type TerminalEvent =
   | (TerminalBaseEvent & {
       type: 'message'
@@ -126,11 +137,15 @@ export type TerminalEvent =
 
 export type TerminalEventListener = (event: TerminalEvent) => void
 
+/** 终端事件发布/订阅抽象；TUI 与主循环解耦。 */
 export interface TerminalEventBus {
   emit(event: TerminalEvent): void
   subscribe(listener: TerminalEventListener): () => void
 }
 
+/**
+ * 进程内事件总线：保留有限历史，新订阅者会重放历史以便恢复 UI。
+ */
 export class InMemoryTerminalEventBus implements TerminalEventBus {
   private listeners = new Set<TerminalEventListener>()
   private history: TerminalEvent[] = []

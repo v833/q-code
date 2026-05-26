@@ -1,6 +1,14 @@
+/**
+ * Infra 同步状态的人类可读格式化（供 `/infra` 等命令输出）。
+ */
 import { getProjectInfraStatePath, readInfraState } from './state'
 import type { InfraState, InfraSyncResult } from './types'
 
+/**
+ * 读取并格式化当前项目的 Infra 状态摘要。
+ *
+ * @param cwd - 项目工作目录
+ */
 export async function formatInfraStatus(cwd: string): Promise<string> {
   const state = await readInfraState(cwd)
   if (!state) {
@@ -15,10 +23,16 @@ export async function formatInfraStatus(cwd: string): Promise<string> {
   return formatInfraState(state)
 }
 
+/**
+ * 将一次同步结果格式化为多行文本（含 message 与完整 state）。
+ */
 export function formatInfraSyncResult(result: InfraSyncResult): string {
   return [result.message, '', formatInfraState(result.state)].join('\n')
 }
 
+/**
+ * 将 {@link InfraState} 格式化为固定缩进的多行文本。
+ */
 export function formatInfraState(state: InfraState): string {
   const lines = ['AI Infra', '']
   lines.push(`  enabled: ${state.enabled}`)

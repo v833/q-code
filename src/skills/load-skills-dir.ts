@@ -1,85 +1,103 @@
-import * as fs from 'node:fs/promises'
-import * as os from 'node:os'
-import * as path from 'node:path'
+/**
+ * Skill 目录扫描：加载 `~/.q-code/skills` 与 `<cwd>/.q-code/skills` 下的 SKILL.md。
+ */
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {
   extractFallbackDescription,
   normalizeFrontmatter,
-  splitFrontmatter
-} from './parse-frontmatter'
-import type { Skill, SkillSource } from './types'
+  splitFrontmatter,
+} from './parse-frontmatter';
+import type { Skill, SkillSource } from './types';
 
-const SKILL_FILE = 'SKILL.md'
+const SKILL_FILE = 'SKILL.md';
 
+/** 解析 q-code 主目录。 */
 export function getQCodeHome(): string {
-  return process.env.Q_CODE_HOME?.trim() || path.join(os.homedir(), '.q-code')
+  return process.env.Q_CODE_HOME?.trim() || path.join(os.homedir(), '.q-code');
 }
 
 export function getUserAgentsSkillsDir(): string {
-  return path.join(os.homedir(), '.agents', 'skills')
+  return path.join(os.homedir(), '.agents', 'skills');
 }
 
 export function getProjectAgentsSkillsDir(cwd: string): string {
-  return path.join(path.resolve(cwd), '.agents', 'skills')
+  return path.join(path.resolve(cwd), '.agents', 'skills');
 }
 
+/** 用户级 Skill 目录。 */
 export function getUserSkillsDir(): string {
-  return path.join(getQCodeHome(), 'skills')
+  return path.join(getQCodeHome(), 'skills');
 }
 
+/** 项目级 Skill 目录。 */
 export function getProjectSkillsDir(cwd: string): string {
-  return path.join(path.resolve(cwd), '.q-code', 'skills')
+  return path.join(path.resolve(cwd), '.q-code', 'skills');
 }
 
 interface LoadedFromDir {
-  skills: Skill[]
-  warnings: string[]
+  skills: Skill[];
+  warnings: string[];
 }
 
+/** 扫描 Skill 目录后的汇总结果。 */
 export interface LoadAllSkillsResult {
-  skills: Skill[]
-  warnings: string[]
+  skills: Skill[];
+  warnings: string[];
 }
 
-async function loadFromOneDir(dir: string, source: SkillSource): Promise<LoadedFromDir> {
-  let entries: string[]
+async function loadFromOneDir(
+  dir: string,
+  source: SkillSource,
+): Promise<LoadedFromDir> {
+  let entries: string[];
   try {
-    const dirents = await fs.readdir(dir, { withFileTypes: true })
-    entries = dirents.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+    const dirents = await fs.readdir(dir, { withFileTypes: true });
+    entries = dirents
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
   } catch (error) {
-    const err = error as NodeJS.ErrnoException
-    if (err?.code === 'ENOENT') return { skills: [], warnings: [] }
-    return { skills: [], warnings: [`[skills] Failed to read ${dir}: ${formatError(error)}`] }
+    const err = error as NodeJS.ErrnoException;
+    if (err?.code === 'ENOENT') return { skills: [], warnings: [] };
+    return {
+      skills: [],
+      warnings: [`[skills] Failed to read ${dir}: ${formatError(error)}`],
+    };
   }
 
-  const skills: Skill[] = []
-  const warnings: string[] = []
+  const skills: Skill[] = [];
+  const warnings: string[] = [];
 
   for (const dirName of entries) {
-    const skillDir = path.join(dir, dirName)
-    const filePath = path.join(skillDir, SKILL_FILE)
+    const skillDir = path.join(dir, dirName);
+    const filePath = path.join(skillDir, SKILL_FILE);
 
-    let raw: string
+    let raw: string;
     try {
-      raw = await fs.readFile(filePath, 'utf-8')
+      raw = await fs.readFile(filePath, 'utf-8');
     } catch (error) {
-      const err = error as NodeJS.ErrnoException
+      const err = error as NodeJS.ErrnoException;
       if (err?.code !== 'ENOENT') {
-        warnings.push(`[skills] Skipping ${skillDir}: ${formatError(error)}`)
+        warnings.push(`[skills] Skipping ${skillDir}: ${formatError(error)}`);
       }
-      continue
+      continue;
     }
 
-    const split = splitFrontmatter(raw)
+    const split = splitFrontmatter(raw);
     if (split.parseError) {
-      warnings.push(`[skills] Skipping ${dirName}: invalid frontmatter (${split.parseError})`)
-      continue
+      warnings.push(
+        `[skills] Skipping ${dirName}: invalid frontmatter (${split.parseError})`,
+      );
+      continue;
     }
 
-    const frontmatter = normalizeFrontmatter(split.raw, split.body)
-    const realFile = await fs.realpath(filePath).catch(() => filePath)
-    const realDir = await fs.realpath(skillDir).catch(() => skillDir)
-    const name = frontmatter.name ?? dirName
-    const description = frontmatter.description ?? extractFallbackDescription(split.body) ?? name
+    const frontmatter = normalizeFrontmatter(split.raw, split.body);
+    const realFile = await fs.realpath(filePath).catch(() => filePath);
+    const realDir = await fs.realpath(skillDir).catch(() => skillDir);
+    const name = frontmatter.name ?? dirName;
+    const description =
+      frontmatter.description ?? extractFallbackDescription(split.body) ?? name;
 
     skills.push({
       name,
@@ -89,34 +107,39 @@ async function loadFromOneDir(dir: string, source: SkillSource): Promise<LoadedF
       filePath: realFile,
       baseDir: realDir,
       source,
-      frontmatter
-    })
+      frontmatter,
+    });
   }
 
-  return { skills, warnings }
+  return { skills, warnings };
 }
 
+/** 加载用户与项目 Skill；同名时项目覆盖用户，并去重 realpath。 */
 export async function loadAllSkills(cwd: string): Promise<LoadAllSkillsResult> {
-  const [userQCodeResult, userAgentsResult, projectQCodeResult, projectAgentsResult] =
-    await Promise.all([
-      loadFromOneDir(getUserSkillsDir(), 'user'),
-      loadFromOneDir(getUserAgentsSkillsDir(), 'user'),
-      loadFromOneDir(getProjectSkillsDir(cwd), 'project'),
-      loadFromOneDir(getProjectAgentsSkillsDir(cwd), 'project')
-    ])
+  const [
+    userQCodeResult,
+    userAgentsResult,
+    projectQCodeResult,
+    projectAgentsResult,
+  ] = await Promise.all([
+    loadFromOneDir(getUserSkillsDir(), 'user'),
+    loadFromOneDir(getUserAgentsSkillsDir(), 'user'),
+    loadFromOneDir(getProjectSkillsDir(cwd), 'project'),
+    loadFromOneDir(getProjectAgentsSkillsDir(cwd), 'project'),
+  ]);
 
-  const seenRealPaths = new Set<string>()
-  const byName = new Map<string, Skill>()
+  const seenRealPaths = new Set<string>();
+  const byName = new Map<string, Skill>();
 
   for (const skill of [
     ...userQCodeResult.skills,
     ...userAgentsResult.skills,
     ...projectQCodeResult.skills,
-    ...projectAgentsResult.skills
+    ...projectAgentsResult.skills,
   ]) {
-    if (seenRealPaths.has(skill.filePath)) continue
-    seenRealPaths.add(skill.filePath)
-    byName.set(skill.name, skill)
+    if (seenRealPaths.has(skill.filePath)) continue;
+    seenRealPaths.add(skill.filePath);
+    byName.set(skill.name, skill);
   }
 
   return {
@@ -125,11 +148,11 @@ export async function loadAllSkills(cwd: string): Promise<LoadAllSkillsResult> {
       ...userQCodeResult.warnings,
       ...userAgentsResult.warnings,
       ...projectQCodeResult.warnings,
-      ...projectAgentsResult.warnings
-    ]
-  }
+      ...projectAgentsResult.warnings,
+    ],
+  };
 }
 
 function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return error instanceof Error ? error.message : String(error);
 }

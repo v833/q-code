@@ -1,3 +1,9 @@
+/**
+ * CLI / 经典 readline 模式的终端彩色与格式化输出。
+ *
+ * 在 TTY 下使用 ANSI 转义着色；非 TTY（管道、CI）自动降级为纯文本。
+ * Ink TUI 路径通常不依赖本模块。
+ */
 const isColorSupported = process.stdout.isTTY
 
 /** 用 ANSI 转义序列包裹文本，非 TTY 环境自动跳过着色 */
@@ -5,6 +11,7 @@ function wrap(code: number) {
   return (text: string) => (isColorSupported ? `\x1b[${code}m${text}\x1b[0m` : text)
 }
 
+/** ANSI 颜色与样式快捷函数集合（bold、dim、red 等） */
 export const c = {
   bold: wrap(1),
   dim: wrap(2),

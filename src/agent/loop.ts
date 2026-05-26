@@ -1,3 +1,10 @@
+/**
+ * Agent 主循环：基于 Vercel AI SDK `streamText` 的多步推理与工具执行。
+ *
+ * 每步包含可选 preflight、流式消费（文本/工具调用/结果）、循环检测、
+ * 步骤级重试、token 预算与 `stopAfterToolNames` 早停。工具经 `ToolRegistry`
+ * 包装审计与 Hooks；步骤事件写入 NDJSON 审计（`agent.step.start` / `end`）。
+ */
 import { streamText, type LanguageModelUsage, type ModelMessage } from 'ai'
 import { detect, recordCall, recordResult, resetHistory } from './loop-detection'
 import { isRetryable, calculateDelay, sleep } from './retry'
@@ -37,20 +44,28 @@ const DEFAULT_TOKEN_BUDGET = 256000
 const DEFAULT_MAX_OUTPUT_TOKENS = 8000
 const DEFAULT_ESCALATED_MAX_OUTPUT_TOKENS = 64000
 const DEFAULT_TOOL_STEP_IDLE_TIMEOUT_MS = Number(process.env.TOOL_STEP_IDLE_TIMEOUT_MS?.trim() || 5000)
+/** 工具步全部返回后、提供商未再发 `finish` 时，空闲超时 race 的哨兵值。 */
 const STREAM_IDLE = Symbol('stream-idle')
 
+/** `agentLoop` 结束时的完整消息列表与本轮新增片段。 */
 export interface AgentLoopResult {
+  /** 累积后的全部消息（含传入的初始消息） */
   messages: ModelMessage[]
+  /** 本轮循环新追加的消息 */
   newMessages: ModelMessage[]
+  /** 最后一步的 usage 锚点，供上下文占用估算 */
   usageAnchor?: UsageAnchor
 }
 
+/** `preflight` 钩子可返回的扩展结果（可提前停止本步或整轮）。 */
 export interface AgentLoopPreflightResult {
   messages: ModelMessage[]
   usageAnchor?: UsageAnchor
+  /** 若设置，本步结束后退出 Agent Loop */
   stopReason?: string
 }
 
+/** 工具生命周期事件（TUI / 会话持久化用）。 */
 export interface AgentToolEvent {
   phase: 'start' | 'done'
   name: string
@@ -60,6 +75,7 @@ export interface AgentToolEvent {
   isError?: boolean
 }
 
+/** 工具完成后的结构化结果（含原始 output）。 */
 export interface AgentToolResultEvent {
   name: string
   toolCallId?: string
@@ -69,6 +85,7 @@ export interface AgentToolResultEvent {
   isError?: boolean
 }
 
+/** 工具执行过程中的进度事件（如 Shell 流式输出）。 */
 export interface AgentToolProgressEvent {
   type: string
   name: string
@@ -78,12 +95,15 @@ export interface AgentToolProgressEvent {
   metadata?: Record<string, unknown>
 }
 
+/** 单步模型用量（含因输出截断重试而被丢弃的步）。 */
 export interface AgentStepUsage {
   model: string
   usage: NormalizedUsage
+  /** 为 true 表示该步用量来自「length 截断后重试」前的失败尝试 */
   discarded: boolean
 }
 
+/** `agentLoop` 的可选配置与回调。 */
 export interface AgentLoopOptions {
   tokenBudget?: number
   maxOutputTokens?: number
@@ -111,11 +131,7 @@ export interface AgentLoopOptions {
   agent?: HookAgentContext
   quiet?: boolean
   toolStepIdleTimeoutMs?: number
-  /**
-   * Set when the loop is running inside a named teammate (Agent Teams).
-   * Forwarded to every tool execution so SendMessage can resolve the
-   * sender's identity.
-   */
+  /** Agent Teams 队友身份；转发给工具执行以便 SendMessage 解析发送方 */
   teammateIdentity?: TeammateIdentity
 }
 
@@ -138,6 +154,16 @@ type ToolResultOutput =
   | { type: 'json'; value: unknown }
   | { type: 'error-text'; value: string }
 
+/**
+ * 运行多步 Agent 循环直至无工具调用、触发停止条件或达到 `maxSteps`。
+ *
+ * @param model - AI SDK 语言模型实例
+ * @param registry - 工具注册表（含审计/Hooks 包装）
+ * @param messages - 初始对话消息
+ * @param system - 系统提示词
+ * @param options - 预算、回调、preflight、中止信号等
+ * @returns 更新后的消息与 usage 锚点
+ */
 export async function agentLoop(
   model: any,
   registry: ToolRegistry,
@@ -270,6 +296,7 @@ export async function agentLoop(
             shouldCloseToolStep(outstandingToolCallIds, hasToolCall),
             toolStepIdleTimeoutMs
           )
+          // 工具已全部返回但流未结束：主动 abort，避免无限等待 finish 事件
           if (next === STREAM_IDLE) {
             stepAbortController.abort(new Error('tool step completed without provider finish'))
             await stream.return?.().catch(() => undefined)

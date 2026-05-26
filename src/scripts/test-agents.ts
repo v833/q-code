@@ -1,3 +1,7 @@
+/**
+ * Legacy 冒烟脚本：同步子 Agent 注册、运行与工具白名单。
+ * 由 `pnpm test:agents` 调用。
+ */
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

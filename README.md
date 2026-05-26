@@ -530,7 +530,7 @@ q-code 默认启用崩溃保护。遇到未捕获异常、未处理 Promise reje
 - 输出超过 `maxBufferBytes`（默认 4MB）不会杀进程，会把完整输出写入 `<Q_CODE_HOME>/shell-spills/<jobId>.log`，工具结果返回 head/tail 摘要和文件路径。
 - 执行过程中 stdout/stderr 会以节流进度写入 TUI 的 JIT 状态；`--classic` 下会直接打印进度行。
 - `cwd` 默认只能位于当前工作目录内；确需跳出时设置 `Q_CODE_SHELL_ALLOW_ABS_CWD=true`。
-- 交互提示（如 `password:`、`(y/n)`、`Enter ...`）会在短暂宽限后终止并返回 `interactive_not_supported`；`rm -rf /`、fork bomb、`mkfs`、危险 `dd` 会直接拦截。
+- 交互提示（如 `password:`、`(y/n)`、`Enter ...`）会在短暂宽限后终止并返回 `interactive_not_supported`；针对根目录的 `rm -rf /`（含 `-fr`、拆分 `-r`/`-f`、`--recursive`/`--force` 长选项、`sudo rm -rf /` 等常见写法）、fork bomb、`mkfs`、危险 `dd` 会直接拦截。
 
 后台模式使用 `f({ command, background: true })`，立即返回 `jobId`、`pid`、`outputFile` 和 `startedAt`。后续可用：
 
@@ -1281,6 +1281,12 @@ pnpm run test:skills   # Skills 渐进式披露
 pnpm run test:mcp      # MCP smoke test
 pnpm exec tsc --noEmit # TypeScript 类型检查
 ```
+
+### 源码文档约定
+
+- `src/` 下生产模块在文件头提供**模块级中文说明**；对外导出函数、类、接口、类型与常量配有 **JSDoc**（行为、边界、副作用以当前实现为准）。
+- 复杂非显然逻辑辅以少量行内注释（说明「为何」而非复述代码）；TUI 组件仅文档化导出符号与关键 props。
+- 目录职责与协作约定见仓库根目录 `AGENTS.md`；API 细节以源码 JSDoc 为准，README 不重复维护完整符号表。
 
 ## License
 

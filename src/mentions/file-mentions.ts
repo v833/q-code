@@ -1,3 +1,6 @@
+/**
+ * `@file` 文件引用：路径索引、fuzzy 补全、行/范围/正则选择器解析，以及安全读取与上下文注入。
+ */
 import { spawn } from 'node:child_process'
 import {
   closeSync,
@@ -14,8 +17,11 @@ import { StringDecoder } from 'node:string_decoder'
 import { isInsideDirectory } from '../tools/path-policy'
 import { isTrueEnv } from '../utils/env'
 
+/** 文件索引最多收录的相对路径数量。 */
 export const FILE_MENTION_MAX_INDEX_FILES = 20_000
+/** 单个 `@file` 附件的最大字节数。 */
 export const FILE_MENTION_SINGLE_FILE_MAX_BYTES = 50 * 1024
+/** 一轮用户消息中所有 `@file` 附件的合计字节上限。 */
 export const FILE_MENTION_TOTAL_MAX_BYTES = 200 * 1024
 
 const DEFAULT_SUGGESTION_LIMIT = 8
@@ -34,39 +40,54 @@ const FALLBACK_SKIP_DIRS = new Set([
   '.sessions'
 ])
 
+/** 文件索引的构建来源。 */
 export type FileMentionIndexSource = 'git' | 'walk' | 'empty'
 
+/** `@file` 补全用的 cwd 内相对路径索引。 */
 export interface FileMentionIndex {
   cwd: string
+  /** 已排序的相对路径列表（可能因 {@link FILE_MENTION_MAX_INDEX_FILES} 被裁剪）。 */
   files: string[]
+  /** 索引构建时见到的文件总数（含被裁剪部分）。 */
   totalFiles: number
+  /** 是否因上限未收录全部文件。 */
   truncated: boolean
   source: FileMentionIndexSource
+  /** 索引构建失败时的说明。 */
   error?: string
 }
 
+/** fuzzy 搜索单条候选及其得分。 */
 export interface FileMentionSuggestion {
   path: string
   score: number
 }
 
+/** 输入框光标处正在编辑的 `@file` token 区间。 */
 export interface FileMentionAtCursor {
+  /** token 在输入串中的字素簇起点（含 `@`）。 */
   start: number
+  /** token 在输入串中的字素簇终点（不含）。 */
   end: number
+  /** 含 `@` 的完整 token 文本。 */
   token: string
+  /** 用于 fuzzy 匹配的路径查询（已剥除行/范围/正则后缀）。 */
   query: string
 }
 
+/** 路径后的可选内容选择器（`:line`、`:start-end`、`: #regex`）。 */
 export type FileMentionSelector =
   | { type: 'line'; line: number }
   | { type: 'range'; startLine: number; endLine: number }
   | { type: 'regex'; pattern: string }
 
+/** 解析后的 `@file` 目标路径与可选选择器。 */
 export interface ParsedFileMentionTarget {
   path: string
   selector?: FileMentionSelector
 }
 
+/** 单个 `@file` token 的读取与注入结果。 */
 export interface FileMentionResult {
   raw: string
   path: string
@@ -81,6 +102,7 @@ export interface FileMentionResult {
   content?: string
 }
 
+/** {@link expandFileMentions} 的完整输出：改写后的 prompt 与各 mention 明细。 */
 export interface FileMentionExpansion {
   prompt: string
   results: FileMentionResult[]
@@ -90,13 +112,20 @@ export interface FileMentionExpansion {
   totalBytes: number
 }
 
+/** {@link expandFileMentions} 的路径策略与字节预算。 */
 export interface ExpandFileMentionsOptions {
   cwd: string
+  /** 是否允许绝对路径；默认读 `Q_CODE_MENTION_ALLOW_ABS`。 */
   allowAbsolute?: boolean
   singleFileMaxBytes?: number
   totalMaxBytes?: number
 }
 
+/**
+ * 为 `cwd` 构建 `@file` 补全索引：优先 `git ls-files`，否则目录遍历。
+ *
+ * @param maxFiles - 最多收录路径数，默认 {@link FILE_MENTION_MAX_INDEX_FILES}。
+ */
 export async function createFileMentionIndex(
   cwd: string,
   maxFiles = FILE_MENTION_MAX_INDEX_FILES
@@ -107,6 +136,7 @@ export async function createFileMentionIndex(
   return walkFileIndex(root, maxFiles)
 }
 
+/** 返回空索引（TUI 在索引尚未就绪时使用）。 */
 export function createEmptyFileMentionIndex(cwd: string): FileMentionIndex {
   return {
     cwd: resolve(cwd),
@@ -117,6 +147,11 @@ export function createEmptyFileMentionIndex(cwd: string): FileMentionIndex {
   }
 }
 
+/**
+ * 对索引做子序列 fuzzy 匹配并按得分降序返回候选。
+ *
+ * @param limit - 最多返回条数，默认 8。
+ */
 export function searchFileMentionIndex(
   index: FileMentionIndex,
   query: string,
@@ -134,6 +169,11 @@ export function searchFileMentionIndex(
   return scored.slice(0, limit)
 }
 
+/**
+ * 计算 query 与 candidatePath 的 fuzzy 得分；无法匹配时返回 `null`。
+ *
+ * 空 query 时按路径长度给予基础分，便于列出常用文件。
+ */
 export function scoreFileMentionCandidate(query: string, candidatePath: string): number | null {
   const candidate = normalizeQuery(candidatePath)
   if (!query) {
@@ -162,6 +202,7 @@ export function scoreFileMentionCandidate(query: string, candidatePath: string):
   return score
 }
 
+/** 从光标左侧回溯，定位正在编辑的 `@file` token（支持引号路径）。 */
 export function findFileMentionAtCursor(value: string, cursor: number): FileMentionAtCursor | null {
   const chars = splitTextUnits(value)
   const safeCursor = Math.max(0, Math.min(chars.length, cursor))
@@ -202,6 +243,11 @@ export function findFileMentionAtCursor(value: string, cursor: number): FileMent
   return null
 }
 
+/**
+ * 解析 `@file` 目标字符串中的路径与 `:line` / `:start-end` / `:#regex` 选择器。
+ *
+ * `:#` 后缀优先于单个 `:`，避免与 Windows 盘符冲突。
+ */
 export function parseFileMentionTarget(rawTarget: string): ParsedFileMentionTarget {
   const target = rawTarget.trim()
   const regexIndex = target.lastIndexOf(':#')
@@ -238,6 +284,7 @@ export function parseFileMentionTarget(rawTarget: string): ParsedFileMentionTarg
   return { path: target }
 }
 
+/** 从整段用户输入中提取所有 `@file` token 的原始目标字符串（去重保序）。 */
 export function extractFileMentionTokens(input: string): string[] {
   const tokens: string[] = []
   const chars = splitTextUnits(input)
@@ -264,6 +311,11 @@ export function extractFileMentionTokens(input: string): string[] {
   return tokens
 }
 
+/**
+ * 展开输入中的 `@file` token：读取文件、校验 cwd/ symlink、应用字节预算并改写 prompt。
+ *
+ * 被 blocked/missing 的 mention 保留警告；超出 {@link FILE_MENTION_TOTAL_MAX_BYTES} 的条目标记为 `dropped`。
+ */
 export function expandFileMentions(
   input: string,
   options: ExpandFileMentionsOptions
@@ -327,6 +379,7 @@ export function expandFileMentions(
   }
 }
 
+/** 构造写入 `user.mention` 审计事件的摘要 payload。 */
 export function createUserMentionPayload(expansion: FileMentionExpansion): Record<string, unknown> {
   return {
     count: expansion.results.length,
@@ -345,6 +398,7 @@ export function createUserMentionPayload(expansion: FileMentionExpansion): Recor
   }
 }
 
+/** 索引被裁剪时返回 TUI 提示文案；未裁剪时返回 `undefined`。 */
 export function fileMentionIndexNotice(index: FileMentionIndex): string | undefined {
   if (!index.truncated) return undefined
   return `@file 候选已裁剪到 ${FILE_MENTION_MAX_INDEX_FILES} 个文件，继续输入可缩小范围`
@@ -639,6 +693,7 @@ function stripSelectorFromQuery(query: string): string {
   return parseFileMentionTarget(query).path
 }
 
+/** 将路径格式化为可插入输入框的 `@file` token（含空格时加引号）。 */
 export function formatFileMentionTarget(path: string): string {
   return /\s/.test(path) ? `@"${path.replace(/"/g, '\\"')}"` : `@${path}`
 }

@@ -1,12 +1,17 @@
+/**
+ * 斜杠命令补全列表：按 category 分组并高亮当前选中项。
+ */
 import React from 'react'
 import { Box, Text } from 'ink'
 import type { SlashCommandSuggestion } from '../../slash'
 import { animeTheme } from '../theme/index'
 
+/** 带选中态的斜杠建议项（由 {@link TerminalApp} 注入 `isSelected`）。 */
 export interface RenderedCommandSuggestion extends SlashCommandSuggestion {
   isSelected?: boolean
 }
 
+/** 无建议时返回 `null`。 */
 export function CommandSuggestions({
   suggestions,
   notice

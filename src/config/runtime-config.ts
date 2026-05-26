@@ -1,3 +1,10 @@
+/**
+ * 运行时配置加载：`.env`、用户/项目 `config.toml` 合并到 `process.env`。
+ *
+ * 优先级：已存在的进程环境变量不被覆盖；同文件内后写覆盖先写。
+ * 加载顺序：项目 `.env` → 用户 toml（含 `[env].file`）→ 项目 toml。
+ * TOML 键经 `ROOT_ALIASES` / `SECTION_ALIASES` 映射为标准 `ENV_NAME`。
+ */
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -113,12 +120,19 @@ interface ParsedTomlConfig {
   entries: Record<string, Record<string, string | number | boolean>>
 }
 
+/** `applyRuntimeConfig` 实际读取的配置文件路径。 */
 export interface RuntimeConfigPaths {
   envPath: string
   userConfigPath: string
   projectConfigPath: string
 }
 
+/**
+ * 解析默认配置路径（不读取文件）。
+ *
+ * 用户配置：`$Q_CODE_HOME/config.toml` 或 `~/.q-code/config.toml`；
+ * 项目配置：`<cwd>/.q-code/config.toml`。
+ */
 export function getRuntimeConfigPaths(cwd: string = process.cwd()): RuntimeConfigPaths {
   const qCodeHome = process.env.Q_CODE_HOME?.trim()
     ? resolve(process.env.Q_CODE_HOME)
@@ -130,6 +144,14 @@ export function getRuntimeConfigPaths(cwd: string = process.cwd()): RuntimeConfi
   }
 }
 
+/**
+ * 加载并合并配置到 `process.env`，再应用 OpenAI/Summary 缺省值。
+ *
+ * 仅当某环境变量当前为空/仅空白时才写入，不覆盖 shell 或 CI 已导出的值。
+ *
+ * @param cwd - 项目工作目录，用于定位 `.env` 与项目 toml
+ * @returns 本次使用的三个配置文件路径
+ */
 export function applyRuntimeConfig(cwd: string = process.cwd()): RuntimeConfigPaths {
   const paths = getRuntimeConfigPaths(cwd)
   const values = new Map<string, string>()
@@ -146,6 +168,7 @@ export function applyRuntimeConfig(cwd: string = process.cwd()): RuntimeConfigPa
     mergeValues(values, extractTomlEnvValues(projectConfig))
   }
 
+  // 已存在于 process.env 的键保持最高优先级（便于 CI/一次性 export 覆盖 toml）
   for (const [name, value] of values) {
     if (!hasEnvValue(name)) process.env[name] = value
   }

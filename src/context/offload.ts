@@ -1,23 +1,31 @@
+/**
+ * 超大工具结果卸载到磁盘：替换为带预览的标记文本，并可选注入卸载索引 manifest。
+ */
 import type { ModelMessage } from 'ai'
 import { createHash } from 'node:crypto'
 import { mkdir, open, rename, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getProjectStorageInfo } from './project-paths'
 
+/** 单条工具结果已卸载时的正文前缀。 */
 export const OFFLOAD_MARKER = '[tool result offloaded]'
+/** 多条卸载条目的索引 manifest 前缀。 */
 export const OFFLOAD_INDEX_MARKER = '[context offload index]'
 
 const DEFAULT_MIN_OFFLOAD_CHARS = 12_000
 const PREVIEW_HEAD_CHARS = 600
 const PREVIEW_TAIL_CHARS = 400
 
+/** 卸载运行配置。 */
 export interface ContextOffloadOptions {
   cwd: string
   sessionId: string
+  /** 超过该字符数的工具输出才卸载，默认 12000 */
   minChars?: number
   storageDir?: string
 }
 
+/** 一条已卸载工具结果的磁盘元数据。 */
 export interface ContextOffloadEntry {
   filePath: string
   originalChars: number
@@ -25,6 +33,7 @@ export interface ContextOffloadEntry {
   toolCallId?: string
 }
 
+/** 卸载批处理结果。 */
 export interface ContextOffloadResult {
   messages: ModelMessage[]
   offloaded: number
@@ -51,6 +60,9 @@ interface ToolResultMeta {
   source: string
 }
 
+/**
+ * 扫描 tool 消息中的 tool-result，将超大输出原子写入 `<projectDir>/offloads/<session>/`。
+ */
 export async function offloadLargeToolResults(
   messages: ModelMessage[],
   options: ContextOffloadOptions
@@ -83,6 +95,7 @@ export async function offloadLargeToolResults(
   }
 }
 
+/** 判断字符串是否为卸载标记正文（含 original_chars、file、restore 行）。 */
 export function isOffloadMarkerText(text: string): boolean {
   return (
     text.startsWith(`${OFFLOAD_MARKER}\n`) &&
@@ -92,6 +105,7 @@ export function isOffloadMarkerText(text: string): boolean {
   )
 }
 
+/** 根据卸载条目生成索引 manifest 文本。 */
 export function buildOffloadManifest(entries: ContextOffloadEntry[]): string {
   const lines = [
     OFFLOAD_INDEX_MARKER,
@@ -110,6 +124,9 @@ export function buildOffloadManifest(entries: ContextOffloadEntry[]): string {
   return lines.join('\n')
 }
 
+/**
+ * 将 manifest 作为 user 消息注入：优先插在压缩摘要之后，否则插在末尾 user 之前或追加。
+ */
 export function injectOffloadManifest(
   messages: ModelMessage[],
   entries: ContextOffloadEntry[]

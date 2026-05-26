@@ -1,3 +1,7 @@
+/**
+ * Legacy 冒烟脚本：后台 SubAgent 生命周期、JSONL 输出与进程清理。
+ * 由 `pnpm test:agents` 链式调用。
+ */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

@@ -1,3 +1,7 @@
+/**
+ * Legacy 冒烟脚本：Agent Teams 建队、队友邮箱、SendMessage 与 worktree 协作。
+ * 由 `pnpm test:teams` 调用。
+ */
 import { execFileSync } from 'node:child_process'
 import {
   existsSync,

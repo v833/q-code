@@ -1,3 +1,7 @@
+/**
+ * 子 Agent 的 git worktree 隔离：在 `<gitRoot>/.q-code/worktrees/<slug>` 下
+ * 创建独立分支与工作目录，并在任务结束且工作区干净时自动拆除。
+ */
 import { execFile } from 'node:child_process'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
@@ -6,9 +10,11 @@ import { promisify } from 'node:util'
 const execFileAsync = promisify(execFile)
 const WORKTREES_SUBDIR = path.join('.q-code', 'worktrees')
 
+/** `createAgentWorktree` 成功后返回的 worktree 元数据。 */
 export interface WorktreeInfo {
   worktreePath: string
   worktreeBranch: string
+  /** 创建时 HEAD 的 commit，用于判断是否有新提交。 */
   headCommit: string
   gitRoot: string
 }
@@ -19,6 +25,10 @@ interface ExecResult {
   stderr: string
 }
 
+/**
+ * 自 `cwd` 向上查找包含 `.git` 的目录（最多 64 层）。
+ * 非 git 仓库内返回 null。
+ */
 export async function findGitRoot(cwd: string): Promise<string | null> {
   let current = path.resolve(cwd)
 
@@ -36,6 +46,10 @@ export async function findGitRoot(cwd: string): Promise<string | null> {
   return null
 }
 
+/**
+ * 在仓库根下创建 Agent 专用 worktree 与分支（`worktree-<slug>`）。
+ * 基于当前 HEAD，不拉取远程。
+ */
 export async function createAgentWorktree(slug: string, cwd: string): Promise<WorktreeInfo> {
   const gitRoot = await findGitRoot(cwd)
   if (!gitRoot) {
@@ -64,6 +78,10 @@ export async function createAgentWorktree(slug: string, cwd: string): Promise<Wo
   }
 }
 
+/**
+ * 判断 worktree 相对创建时是否有未提交改动或新 commit。
+ * 无法读取状态时保守返回 true（视为 dirty）。
+ */
 export async function hasWorktreeChanges(
   worktreePath: string,
   headCommit: string
@@ -78,6 +96,10 @@ export async function hasWorktreeChanges(
   return Number.isFinite(count) && count > 0
 }
 
+/**
+ * 强制移除 worktree 并删除本地分支（`git branch -D`）。
+ * 任一步失败时返回 `{ ok: false, error }`。
+ */
 export async function removeAgentWorktree(
   info: Pick<WorktreeInfo, 'worktreePath' | 'worktreeBranch' | 'gitRoot'>
 ): Promise<{ ok: boolean; error?: string }> {
@@ -97,6 +119,10 @@ export async function removeAgentWorktree(
   return { ok: true }
 }
 
+/**
+ * 任务结束后：若 worktree 无改动则拆除并返回空对象；
+ * 若仍 dirty 则保留路径供 lead 手动处理。
+ */
 export async function cleanupWorktreeIfClean(
   info: WorktreeInfo | undefined
 ): Promise<{ worktreePath?: string; worktreeBranch?: string }> {
@@ -120,14 +146,17 @@ export async function cleanupWorktreeIfClean(
   return {}
 }
 
+/** 生成分支名：`worktree-<flattened-slug>`。 */
 export function worktreeBranchName(slug: string): string {
   return `worktree-${flattenSlug(slug)}`
 }
 
+/** 生成 worktree 目录绝对路径。 */
 export function worktreePathFor(gitRoot: string, slug: string): string {
   return path.join(gitRoot, WORKTREES_SUBDIR, flattenSlug(slug))
 }
 
+/** 包装 `git` 子进程；非零退出码不抛错，由调用方检查 `code`。 */
 async function git(args: string[], cwd: string): Promise<ExecResult> {
   try {
     const { stdout, stderr } = await execFileAsync('git', args, {
@@ -150,6 +179,7 @@ async function git(args: string[], cwd: string): Promise<ExecResult> {
   }
 }
 
+/** 将 slug 中非安全字符替换为 `+`，用于路径与分支名。 */
 function flattenSlug(slug: string): string {
   return slug.replace(/[^A-Za-z0-9._-]/g, '+')
 }

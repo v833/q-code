@@ -1,3 +1,6 @@
+/**
+ * Shell 工具（`f`）与后台 job 管理：超时、输出 spill、危险命令 lint、cwd 策略。
+ */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import {
   appendFileSync,
@@ -26,6 +29,7 @@ const INTERACTIVE_GRACE_MS = 5000
 const DEFAULT_TAIL_MAX_BYTES = 64 * 1024
 const SHELL_COMPLETED_JOB_RETENTION = 100
 
+/** 按平台解析出的 shell 启动参数（bash -lc 或 pwsh -Command）。 */
 export interface ShellInvocation {
   command: string
   args: string[]
@@ -63,6 +67,7 @@ interface ShellJob {
   outputFd?: number
 }
 
+/** `lintShellCommand` 的静态检查结果。 */
 export interface ShellCommandLintResult {
   blocked: boolean
   code?: 'dangerous_command'
@@ -73,6 +78,7 @@ export interface ShellCommandLintResult {
 const shellJobs = new Map<string, ShellJob>()
 let shellProcessCleanupRegistered = false
 
+/** 主 shell 执行工具（名称 `f`），支持前台/后台与 spill。 */
 export const bashTool: ToolDefinition = {
   name: 'f',
   description:
@@ -114,6 +120,7 @@ export const bashTool: ToolDefinition = {
   }
 }
 
+/** 查询后台 shell job 状态（`f_status`）。 */
 export const shellStatusTool: ToolDefinition = {
   name: 'f_status',
   description: '查询 f 后台 shell job 状态',
@@ -136,6 +143,7 @@ export const shellStatusTool: ToolDefinition = {
   }
 }
 
+/** 读取后台 job 输出尾部（`f_tail`）。 */
 export const shellTailTool: ToolDefinition = {
   name: 'f_tail',
   description: '读取 f 后台 shell job 输出，支持 fromOffset/maxBytes 增量读取',
@@ -161,6 +169,7 @@ export const shellTailTool: ToolDefinition = {
   }
 }
 
+/** 终止后台 shell job（`f_kill`）。 */
 export const shellKillTool: ToolDefinition = {
   name: 'f_kill',
   description: '终止 f 后台 shell job',
@@ -192,6 +201,7 @@ export const shellKillTool: ToolDefinition = {
   }
 }
 
+/** 列出当前会话的后台 shell job（`f_list`）。 */
 export const shellListTool: ToolDefinition = {
   name: 'f_list',
   description: '列出当前进程内 f 后台 shell jobs',
@@ -540,10 +550,48 @@ function validateShellCwd(cwd: string) {
   }
 }
 
+/**
+ * 检测命令中是否包含针对根目录的 `rm -rf /`（及 `-fr`、拆分 `-r`/`-f`、长选项等常见写法）。
+ * 使用词边界 `\brm`，以便拦截 `sudo rm -rf /` 等前缀形式。
+ */
+function isRmRecursiveForceRoot(command: string): boolean {
+  const normalized = command.toLowerCase().replace(/\s+/g, ' ').trim()
+  const match = normalized.match(/\brm\s+(.+)$/)
+  if (!match) return false
+
+  let recursive = false
+  let force = false
+  const paths: string[] = []
+
+  for (const token of match[1].split(' ').filter(Boolean)) {
+    if (token.startsWith('--')) {
+      const longFlag = token.slice(2)
+      if (longFlag === 'recursive' || longFlag === 'r') recursive = true
+      if (longFlag === 'force' || longFlag === 'f') force = true
+      continue
+    }
+    if (token.startsWith('-')) {
+      for (const flag of token.slice(1)) {
+        if (flag === 'r') recursive = true
+        if (flag === 'f') force = true
+      }
+      continue
+    }
+    paths.push(token)
+  }
+
+  if (!recursive || !force) return false
+  return paths.some((target) => target === '/' || target === '/*')
+}
+
+/**
+ * 对 shell 命令做静态 lint：拦截危险命令（如根目录 `rm -rf /`、fork bomb、mkfs、危险 dd），
+ * 并对 curl/wget 管道到 sh/bash 给出警告。
+ */
 export function lintShellCommand(command: string): ShellCommandLintResult {
   const normalized = command.toLowerCase().replace(/\s+/g, ' ').trim()
   const warnings: string[] = []
-  if (/\brm\s+-[^\n]*r[^\n]*f[^\n]*\s+\/(?:\s|$)/.test(normalized)) {
+  if (isRmRecursiveForceRoot(command)) {
     return { blocked: true, code: 'dangerous_command', message: '危险命令已拦截: rm -rf /', warnings }
   }
   if (normalized.includes(':(){') || normalized.includes(':() {')) {
@@ -564,6 +612,7 @@ export function lintShellCommand(command: string): ShellCommandLintResult {
   return { blocked: false, warnings }
 }
 
+/** 按平台返回 shell 子进程的 command/args（供 `f` 与自定义工具复用）。 */
 export function getShellInvocation(
   command: string,
   platform: NodeJS.Platform = process.platform
@@ -595,6 +644,7 @@ export function getShellInvocation(
   }
 }
 
+/** Windows 下 taskkill 参数：结束进程树。 */
 export function getWindowsProcessTreeKillArgs(pid: number): string[] {
   return ['/F', '/T', '/PID', String(pid)]
 }

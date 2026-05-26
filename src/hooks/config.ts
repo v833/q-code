@@ -1,3 +1,6 @@
+/**
+ * Hook 配置加载：从用户/项目 `settings.json` 解析 command 型 Hook 定义。
+ */
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
@@ -18,6 +21,7 @@ interface RawSettings {
   hooks?: unknown
 }
 
+/** `loadHookConfigs` 的返回结构。 */
 export interface HookConfigLoadResult {
   hooks: HookDefinition[]
   errors: string[]
@@ -25,6 +29,7 @@ export interface HookConfigLoadResult {
   projectSettingsPath: string
 }
 
+/** 返回用户级与项目级 Hook 配置文件路径。 */
 export function getHookSettingsPaths(cwd: string = process.cwd()): {
   userSettingsPath: string
   projectSettingsPath: string
@@ -38,6 +43,7 @@ export function getHookSettingsPaths(cwd: string = process.cwd()): {
   }
 }
 
+/** 加载并合并用户与项目 Hook 配置；解析错误写入 errors 数组。 */
 export async function loadHookConfigs(cwd: string = process.cwd()): Promise<HookConfigLoadResult> {
   const { userSettingsPath, projectSettingsPath } = getHookSettingsPaths(cwd)
   const errors: string[] = []

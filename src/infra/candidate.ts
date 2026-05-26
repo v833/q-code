@@ -1,15 +1,24 @@
+/**
+ * 通过 MCP 向企业知识库提交候选知识（`/infra candidate`）。
+ *
+ * 解析斜杠命令参数、查找 `submit_knowledge_candidate` 工具并组装 payload。
+ */
 import { collectRepoInfo } from './git-info'
 import type { InfraRepoInfo } from './types'
 import type { ToolDefinition, ToolRegistry } from '../tools/registry'
 
+/** 候选知识类型，与管理端枚举一致。 */
 export type KnowledgeCandidateType = 'pitfall' | 'decision' | 'faq' | 'requirement_case' | 'convention'
 
+/** {@link submitInfraKnowledgeCandidate} 的输入。 */
 export interface SubmitKnowledgeCandidateOptions {
   cwd: string
   registry: ToolRegistry
+  /** 斜杠命令去掉子命令后的参数字符串 */
   args: string
 }
 
+/** 候选知识提交结果。 */
 export interface SubmitKnowledgeCandidateResult {
   ok: boolean
   message: string
@@ -38,6 +47,11 @@ const CANDIDATE_TYPES = new Set<KnowledgeCandidateType>([
 const SUBMIT_TOOL_SUFFIX = '__submit_knowledge_candidate'
 const PREFERRED_SUBMIT_TOOL = `mcp__enterprise_kb${SUBMIT_TOOL_SUFFIX}`
 
+/**
+ * 解析参数并调用 MCP 工具提交候选知识。
+ *
+ * @param options - 工作目录、工具注册表与原始参数字符串
+ */
 export async function submitInfraKnowledgeCandidate(
   options: SubmitKnowledgeCandidateOptions
 ): Promise<SubmitKnowledgeCandidateResult> {
@@ -92,6 +106,13 @@ export async function submitInfraKnowledgeCandidate(
   }
 }
 
+/**
+ * 解析 `/infra candidate` 参数字符串。
+ *
+ * 支持引号、`\` 转义及 `--type` / `--title` / `--repo` / `--domain` 选项。
+ *
+ * @returns 解析成功时的结构化参数；否则 `null`
+ */
 export function parseKnowledgeCandidateArgs(input: string): ParsedCandidateArgs | null {
   const tokens = tokenizeArgs(input)
   if (tokens.length === 0) return null
@@ -212,7 +233,7 @@ function parseToolJson(output: unknown): Record<string, string | undefined> {
       const parsed = JSON.parse(candidate)
       if (isRecord(parsed)) return parsed as Record<string, string | undefined>
     } catch {
-      /* try next candidate */
+      /* 尝试下一个 JSON 片段 */
     }
   }
   return {}
@@ -267,6 +288,7 @@ function summarizeTitle(content: string): string {
   return normalized.length <= 48 ? normalized : `${normalized.slice(0, 48)}...`
 }
 
+/** 从混合文本中提取顶层 `{...}` JSON 对象字符串（用于解析 MCP 工具输出）。 */
 function extractJsonObjects(text: string): string[] {
   const results: string[] = []
   let depth = 0

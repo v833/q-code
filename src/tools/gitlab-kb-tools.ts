@@ -1,3 +1,6 @@
+/**
+ * GitLab Wiki 知识库工具：搜索、读取与发布页面。
+ */
 import {
   formatGitLabKbPage,
   formatGitLabKbPages,
@@ -24,6 +27,7 @@ interface PublishInput {
   slug?: string
 }
 
+/** 创建 gitlab_kb_search/read/publish 工具数组（未配置时 isEnabled 为 false）。 */
 export function createGitLabKbTools(): ToolDefinition[] {
   return [createGitLabKbSearchTool(), createGitLabKbReadTool(), createGitLabKbPublishTool()]
 }

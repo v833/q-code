@@ -1,5 +1,9 @@
+/**
+ * 延迟工具展开：tool_search 按名称返回完整 schema。
+ */
 import type { ToolDefinition, ToolRegistry } from './registry'
 
+/** 创建绑定指定 registry 的 `tool_search` 工具。 */
 export function createToolSearchTool(registry: ToolRegistry): ToolDefinition {
   return {
     name: 'tool_search',

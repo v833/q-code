@@ -1,15 +1,23 @@
+/**
+ * `q-code update` 子命令：通过全局 `npm install -g @q-code-cli/q-code@latest` 升级 CLI。
+ *
+ * 在进入主交互循环前由早期 CLI 路由调用；支持 `--dry-run` 与可注入 runner（测试用）。
+ */
 import { spawn } from 'node:child_process'
 
 const PACKAGE_NAME = '@q-code-cli/q-code'
 const UPDATE_ARGS = ['install', '-g', `${PACKAGE_NAME}@latest`] as const
 
+/** `UpdateRunner` 执行 npm 子进程后的结果。 */
 export interface UpdateRunResult {
   exitCode: number
   error?: unknown
 }
 
+/** 可替换的更新命令执行器（单元测试注入 mock）。 */
 export type UpdateRunner = (command: string, args: readonly string[]) => Promise<UpdateRunResult>
 
+/** `runCliUpdate` 的输入选项。 */
 export interface RunCliUpdateOptions {
   currentVersion: string
   argv: string[]
@@ -19,6 +27,11 @@ export interface RunCliUpdateOptions {
   stderr?: (text: string) => void
 }
 
+/**
+ * 解析当前平台的 npm 全局安装命令（Windows 使用 `npm.cmd`）。
+ *
+ * @param platform - 默认 `process.platform`
+ */
 export function getUpdateCommand(platform: NodeJS.Platform = process.platform): {
   command: string
   args: readonly string[]
@@ -31,6 +44,12 @@ export function getUpdateCommand(platform: NodeJS.Platform = process.platform): 
   }
 }
 
+/**
+ * 执行或模拟 CLI 自更新；向 stdout/stderr 输出进度与错误提示。
+ *
+ * @param options - 当前版本、argv（含 `--dry-run`）、可选 runner
+ * @returns 进程退出码（未知参数为 2）
+ */
 export async function runCliUpdate(options: RunCliUpdateOptions): Promise<number> {
   const stdout = options.stdout ?? console.log
   const stderr = options.stderr ?? console.error

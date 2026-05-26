@@ -1,3 +1,7 @@
+/**
+ * 后台 SubAgent / 队友的完整生命周期：JSONL 输出、内存状态表更新、
+ * worktree 清理、`<task-notification>` 入队，以及队友 `isActive` 收尾。
+ */
 import {
   completeAsyncAgent,
   failAsyncAgent,
@@ -16,6 +20,7 @@ import type { TeammateIdentity, ToolDefinition } from '../tools/registry'
 import type { HookRunner } from '../hooks'
 import { getAuditLogger } from '../observability/audit'
 
+/** `runAsyncAgentLifecycle` 的输入（由 `Agent` 工具在后台分支构造）。 */
 export interface RunAsyncAgentLifecycleParams {
   entry: AsyncAgentEntry
   agentDefinition: AgentDefinition
@@ -31,14 +36,16 @@ export interface RunAsyncAgentLifecycleParams {
   hooks?: HookRunner
   worktreeInfo?: WorktreeInfo
   /**
-   * Present when this async run is a named teammate in an Agent Teams
-   * session. Forwarded to runChildAgent and used in a `finally` block
-   * to flip the teammate's `isActive` flag to false no matter how the
-   * run terminates (completed / failed / killed).
+   * 若存在，表示本次后台运行为 Agent Teams 命名队友。
+   * 会转发给 `runChildAgent`；`finally` 中无论成功/失败/被杀都会将 `isActive` 置 false。
    */
   teammateIdentity?: TeammateIdentity
 }
 
+/**
+ * 在后台执行子 Agent 循环并同步更新 `async-agent-store`、任务输出文件与通知队列。
+ * 本函数不向外抛错：错误路径会写入 failed/killed 状态并 enqueue 通知。
+ */
 export async function runAsyncAgentLifecycle(params: RunAsyncAgentLifecycleParams): Promise<void> {
   const startTime = Date.now()
   const { entry } = params
@@ -275,11 +282,8 @@ export async function runAsyncAgentLifecycle(params: RunAsyncAgentLifecycleParam
       })
     })
   } finally {
-    // Always flip the team member's isActive flag — completed, failed,
-    // or killed. TeamDelete blocks until every teammate is inactive,
-    // and the lead's system-prompt roster shows [active]/[idle] based
-    // on this same flag. Skipping it on any failure path would leave
-    // a permanently-active ghost teammate stuck on the lead's roster.
+    // 无论 completed / failed / killed，都必须把队友 isActive 翻回 false。
+    // TeamDelete 会等待全部队友 inactive；遗漏会导致 lead roster 上永久 [active] 幽灵队友。
     if (params.teammateIdentity) {
       try {
         await setMemberActive(
@@ -288,7 +292,7 @@ export async function runAsyncAgentLifecycle(params: RunAsyncAgentLifecycleParam
           false
         )
       } catch {
-        // Bookkeeping only; never propagate.
+        // 簿记类操作，不向调用方传播。
       }
     }
   }

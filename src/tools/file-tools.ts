@@ -1,3 +1,6 @@
+/**
+ * 文件读写工具：read_file、write_file、list_directory、edit_file（受 path-policy 约束）。
+ */
 import {
   closeSync,
   createReadStream,
@@ -29,6 +32,7 @@ interface ReadFileInput {
   showLineNumbers?: boolean
 }
 
+/** 按行范围读取文本文件。 */
 export const readFileTool: ToolDefinition = {
   name: 'read_file',
   description:
@@ -340,6 +344,7 @@ function formatBytes(bytes: number): string {
   return `${(kb / 1024).toFixed(1)} MB`
 }
 
+/** 写入或覆盖文本文件。 */
 export const writeFileTool: ToolDefinition = {
   name: 'write_file',
   description: '写入内容到指定文件',
@@ -367,6 +372,7 @@ export const writeFileTool: ToolDefinition = {
   }
 }
 
+/** 列出目录内容。 */
 export const listDirectoryTool: ToolDefinition = {
   name: 'list_directory',
   description: '列出指定目录下的文件和子目录',
@@ -398,6 +404,7 @@ export const listDirectoryTool: ToolDefinition = {
   }
 }
 
+/** 对文件做基于搜索替换的编辑。 */
 export const editFileTool: ToolDefinition = {
   name: 'edit_file',
   description:

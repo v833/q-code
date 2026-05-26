@@ -1,3 +1,8 @@
+/**
+ * System prompt 管道：通过可注册的 pipe 函数按序拼接各上下文片段。
+ */
+
+/** 单次 `PromptBuilder.build` 的输入上下文。 */
 export interface PromptContext {
   toolCount: number
   deferredToolSummary: string
@@ -19,14 +24,21 @@ export interface PromptContext {
 
 type PipeFn = (ctx: PromptContext) => string | null
 
+/** 按注册顺序执行 pipe，将非 null 结果以双换行拼接为 system prompt。 */
 export class PromptBuilder {
   private pipes: Array<{ name: string; fn: PipeFn }> = []
 
+  /**
+   * 注册一个命名 pipe。
+   * @param name 调试输出用名称
+   * @param fn 返回 null 表示跳过该段
+   */
   pipe(name: string, fn: PipeFn): this {
     this.pipes.push({ name, fn })
     return this
   }
 
+  /** 执行全部 pipe 并拼接为最终 system prompt 字符串。 */
   build(ctx: PromptContext): string {
     const sections: string[] = []
 
@@ -40,6 +52,7 @@ export class PromptBuilder {
     return sections.join('\n\n')
   }
 
+  /** 打印每个 pipe 的 ON/OFF 与字符数，便于调试 prompt 组成。 */
   debug(ctx: PromptContext, log: (text: string) => void = console.log): void {
     log('\n=== Prompt Pipe Debug ===')
     for (const { name, fn } of this.pipes) {
@@ -51,8 +64,7 @@ export class PromptBuilder {
   }
 }
 
-// ── 预定义的 Pipe ────────────────────────────────
-
+/** 核心行为准则 pipe。 */
 export function coreRules(): PipeFn {
   return () => `你是 q-code，一个有工具调用能力的 AI 助手。
 你的行为准则：
@@ -62,6 +74,7 @@ export function coreRules(): PipeFn {
 - 回答要简洁直接`
 }
 
+/** 工具使用与 JIT 上下文纪律 pipe；无工具时返回 null。 */
 export function toolGuide(): PipeFn {
   return (ctx) => {
     if (ctx.toolCount === 0) return null
@@ -80,6 +93,7 @@ export function toolGuide(): PipeFn {
   }
 }
 
+/** 延迟加载工具与 tool_search 提示 pipe。 */
 export function deferredTools(): PipeFn {
   return (ctx) => {
     if (!ctx.deferredToolSummary) return null
@@ -87,6 +101,7 @@ export function deferredTools(): PipeFn {
   }
 }
 
+/** 注入 Skills 上下文 pipe。 */
 export function skillsContext(): PipeFn {
   return (ctx) => {
     if (!ctx.skillsContext) return null
@@ -94,6 +109,7 @@ export function skillsContext(): PipeFn {
   }
 }
 
+/** 注入 SubAgent 说明 pipe。 */
 export function agentsContext(): PipeFn {
   return (ctx) => {
     if (!ctx.agentsContext) return null
@@ -101,6 +117,7 @@ export function agentsContext(): PipeFn {
   }
 }
 
+/** 注入 Agent Teams 说明 pipe。 */
 export function teamsContext(): PipeFn {
   return (ctx) => {
     if (!ctx.teamsContext) return null
@@ -108,6 +125,7 @@ export function teamsContext(): PipeFn {
   }
 }
 
+/** Todo 模式下的 todo_write 使用指引 pipe。 */
 export function todoGuide(): PipeFn {
   return (ctx) => {
     if (ctx.taskMode !== 'todo') return null
@@ -119,6 +137,7 @@ export function todoGuide(): PipeFn {
   }
 }
 
+/** 注入当前会话 Todo 列表 pipe。 */
 export function todoContext(): PipeFn {
   return (ctx) => {
     if (ctx.taskMode !== 'todo') return null
@@ -127,6 +146,7 @@ export function todoContext(): PipeFn {
   }
 }
 
+/** Task 模式下的 task_* 工具使用指引 pipe。 */
 export function taskGuide(): PipeFn {
   return (ctx) => {
     if (ctx.taskMode !== 'task') return null
@@ -139,6 +159,7 @@ export function taskGuide(): PipeFn {
   }
 }
 
+/** 注入当前持久化任务图 pipe。 */
 export function taskContext(): PipeFn {
   return (ctx) => {
     if (ctx.taskMode !== 'task') return null
@@ -147,6 +168,7 @@ export function taskContext(): PipeFn {
   }
 }
 
+/** Plan Mode 运行模式说明 pipe。 */
 export function modeContext(): PipeFn {
   return (ctx) => {
     if (ctx.agentMode !== 'plan') return null
@@ -160,6 +182,7 @@ export function modeContext(): PipeFn {
   }
 }
 
+/** 注入运行环境（cwd/OS/Git）pipe。 */
 export function runtimeEnvironment(): PipeFn {
   return (ctx) => {
     if (!ctx.runtimeContext) return null
@@ -167,6 +190,7 @@ export function runtimeEnvironment(): PipeFn {
   }
 }
 
+/** 注入 AGENT.md / AGENTS.md 项目指令 pipe。 */
 export function agentMdInstructions(): PipeFn {
   return (ctx) => {
     if (!ctx.agentMdContext) return null
@@ -178,6 +202,7 @@ export function agentMdInstructions(): PipeFn {
   }
 }
 
+/** 注入项目记忆 system 上下文 pipe。 */
 export function projectMemory(): PipeFn {
   return (ctx) => {
     if (!ctx.memoryContext) return null
@@ -185,6 +210,7 @@ export function projectMemory(): PipeFn {
   }
 }
 
+/** 注入会话 ID 与历史消息数 pipe。 */
 export function sessionContext(): PipeFn {
   return (ctx) => {
     if (ctx.sessionMessageCount === 0) return null

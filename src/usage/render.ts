@@ -1,5 +1,9 @@
+/**
+ * Usage 汇总的人类可读渲染（`/usage` 等场景）。
+ */
 import type { UsageTotals } from './types'
 
+/** 将 `UsageTotals` 格式化为多行 Usage Summary 文本。 */
 export function renderUsageSummary(totals: UsageTotals): string {
   const lines = ['Usage Summary', '', `已记录 ${totals.steps} 个模型步骤`, '']
   lines.push(`Cache hit ${renderBar(totals.cacheHitRate, 18)} ${formatPercent(totals.cacheHitRate)}`)
@@ -29,6 +33,7 @@ export function renderUsageSummary(totals: UsageTotals): string {
   return lines.join('\n')
 }
 
+/** 无用量记录时的占位文案。 */
 export function renderNoUsage(): string {
   return ['Usage Summary', '', '当前会话还没有可统计的模型用量。'].join('\n')
 }

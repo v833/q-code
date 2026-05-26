@@ -1,5 +1,9 @@
+/**
+ * 基于 `marked` 的轻量 Markdown 解析：产出 TUI 可渲染的块结构（非完整 HTML）。
+ */
 import { Lexer, lexer, type Token, type Tokens } from 'marked'
 
+/** TUI 支持的 Markdown 块联合类型。 */
 export type MarkdownBlock =
   | { type: 'heading'; depth: number; text: string }
   | { type: 'paragraph'; text: string }
@@ -15,14 +19,20 @@ export type MarkdownBlock =
   | { type: 'code'; language?: string; code: string }
   | { type: 'rule' }
 
+/** GFM 表格列对齐方式。 */
 export type TableAlignment = 'left' | 'center' | 'right'
 
+/** 单表最大渲染行数，超出部分记入 `omittedRows`。 */
 export const MAX_MARKDOWN_TABLE_ROWS = 300
 
+/**
+ * 将 Markdown 字符串解析为 {@link MarkdownBlock} 列表（启用 GFM）。
+ */
 export function parseMarkdown(markdown: string): MarkdownBlock[] {
   return tokensToBlocks(lexer(markdown, { gfm: true, breaks: false }))
 }
 
+/** 剥除行内 Markdown 标记，保留纯文本。 */
 export function stripInlineMarkdown(text: string): string {
   return renderInlineTokens(Lexer.lexInline(text, { gfm: true, breaks: false }))
 }

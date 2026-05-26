@@ -1,3 +1,6 @@
+/**
+ * Agent Teams 工具：TeamCreate、TeamDelete、SendMessage。
+ */
 import {
   cleanupTeamDirectory,
   formatAgentId,
@@ -33,6 +36,7 @@ interface TeamCreateInput {
   description?: unknown
 }
 
+/** 创建 `TeamCreate` 工具。 */
 export function createTeamCreateTool(): ToolDefinition {
   return {
     name: 'TeamCreate',
@@ -149,6 +153,7 @@ export function createTeamCreateTool(): ToolDefinition {
 
 // ─── TeamDelete ─────────────────────────────────────────────────────
 
+/** 创建 `TeamDelete` 工具。 */
 export function createTeamDeleteTool(): ToolDefinition {
   return {
     name: 'TeamDelete',
@@ -243,6 +248,7 @@ interface SendMessageInput {
   summary?: unknown
 }
 
+/** 创建 `SendMessage` 工具。 */
 export function createSendMessageTool(): ToolDefinition {
   return {
     name: 'SendMessage',

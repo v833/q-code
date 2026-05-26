@@ -1,7 +1,11 @@
+/**
+ * 解析 GitLab KB 目标项目：显式 ID、URL 路径或当前 Git origin 推断。
+ */
 import { collectRepoInfo } from '../infra/git-info'
 import type { InfraRepoInfo } from '../infra/types'
 import { loadGitLabKbConfig, type GitLabKbConfig } from './config'
 
+/** 已解析的 GitLab 项目上下文（含编码后的 API project id）。 */
 export interface GitLabKbTarget {
   config: GitLabKbConfig
   projectId: string
@@ -9,6 +13,15 @@ export interface GitLabKbTarget {
   repo?: InfraRepoInfo
 }
 
+/**
+ * 根据配置与当前工作区确定 Wiki API 使用的 project id。
+ *
+ * 优先级：`Q_CODE_GITLAB_PROJECT_ID` → URL 中的 project 路径 → git remote 推断。
+ *
+ * @param cwd - 项目工作目录
+ * @param config - 可选，默认 `loadGitLabKbConfig()`
+ * @throws 未启用、缺少凭证或无法推断 project 时
+ */
 export async function resolveGitLabKbTarget(
   cwd: string,
   config: GitLabKbConfig = loadGitLabKbConfig()
@@ -52,10 +65,16 @@ export async function resolveGitLabKbTarget(
   }
 }
 
+/**
+ * 将 project id 或 `group/project` 路径编码为 GitLab API 路径段。
+ */
 export function encodeProjectId(projectIdOrPath: string): string {
   return encodeURIComponent(projectIdOrPath.trim().replace(/\.git$/, '').replace(/^\/+|\/+$/g, ''))
 }
 
+/**
+ * 当 git remote 主机与 `baseUrl` 一致时，从 group/name 推断 `group/project`。
+ */
 export function inferProjectPathFromRepo(
   config: GitLabKbConfig,
   repo: Pick<InfraRepoInfo, 'remoteHost' | 'group' | 'name'>

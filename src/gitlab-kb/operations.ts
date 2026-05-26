@@ -1,7 +1,13 @@
+/**
+ * GitLab Wiki 知识库高层操作与 CLI 格式化。
+ *
+ * 封装搜索、读取、发布、状态查询及 `/gitlab-kb` 参数解析。
+ */
 import { GitLabWikiClient, slugFromTitle, type GitLabWikiPage } from './client'
 import { loadGitLabKbConfig, type GitLabKbConfig } from './config'
 import { resolveGitLabKbTarget, type GitLabKbTarget } from './project'
 
+/** {@link searchGitLabKb} 的选项。 */
 export interface GitLabKbSearchOptions {
   cwd: string
   query?: string
@@ -9,12 +15,14 @@ export interface GitLabKbSearchOptions {
   signal?: AbortSignal
 }
 
+/** {@link readGitLabKbPage} 的选项。 */
 export interface GitLabKbReadOptions {
   cwd: string
   slug: string
   signal?: AbortSignal
 }
 
+/** {@link publishGitLabKbPage} 的选项。 */
 export interface GitLabKbPublishOptions {
   cwd: string
   title: string
@@ -23,6 +31,7 @@ export interface GitLabKbPublishOptions {
   signal?: AbortSignal
 }
 
+/** `parseGitLabKbPublishArgs` 的成功解析结果。 */
 export interface ParsedGitLabKbPublishArgs {
   title: string
   content: string
@@ -31,6 +40,11 @@ export interface ParsedGitLabKbPublishArgs {
 
 const DEFAULT_SEARCH_LIMIT = 10
 
+/**
+ * 返回 GitLab KB 配置与连通性摘要（供 `/gitlab-kb` status）。
+ *
+ * @param cwd - 项目工作目录
+ */
 export async function getGitLabKbStatus(cwd: string): Promise<string> {
   const config = loadGitLabKbConfig()
   const lines = ['GitLab Wiki KB', '']
@@ -64,6 +78,11 @@ export async function getGitLabKbStatus(cwd: string): Promise<string> {
   return lines.join('\n')
 }
 
+/**
+ * 按可选关键词搜索 Wiki 知识页（受 `pagePrefix` 过滤）。
+ *
+ * @returns 匹配页列表，最多 `limit` 条（默认 10，上限 30）
+ */
 export async function searchGitLabKb(options: GitLabKbSearchOptions): Promise<GitLabWikiPage[]> {
   const target = await resolveGitLabKbTarget(options.cwd)
   const client = createClient(target)
@@ -81,6 +100,9 @@ export async function searchGitLabKb(options: GitLabKbSearchOptions): Promise<Gi
   return matched.slice(0, limit)
 }
 
+/**
+ * 按 slug 读取单页 Wiki 正文（自动补全 `pagePrefix`）。
+ */
 export async function readGitLabKbPage(options: GitLabKbReadOptions): Promise<GitLabWikiPage> {
   const target = await resolveGitLabKbTarget(options.cwd)
   const client = createClient(target)
@@ -89,6 +111,9 @@ export async function readGitLabKbPage(options: GitLabKbReadOptions): Promise<Gi
   })
 }
 
+/**
+ * 创建或更新 Wiki 知识页，并在正文末尾附加 q-code 标记注释。
+ */
 export async function publishGitLabKbPage(
   options: GitLabKbPublishOptions
 ): Promise<{ page: GitLabWikiPage; created: boolean }> {
@@ -106,6 +131,9 @@ export async function publishGitLabKbPage(
   )
 }
 
+/**
+ * 将 Wiki 页列表格式化为缩进列表（含可选 preview）。
+ */
 export function formatGitLabKbPages(pages: readonly GitLabWikiPage[], heading = 'GitLab Wiki KB'): string {
   const lines = [heading, '']
   if (pages.length === 0) {
@@ -124,6 +152,7 @@ export function formatGitLabKbPages(pages: readonly GitLabWikiPage[], heading = 
   return lines.join('\n')
 }
 
+/** 将单页 Wiki 格式化为 Markdown 风格全文。 */
 export function formatGitLabKbPage(page: GitLabWikiPage): string {
   return [
     `# ${page.title}`,
@@ -137,6 +166,7 @@ export function formatGitLabKbPage(page: GitLabWikiPage): string {
     .join('\n')
 }
 
+/** 格式化发布/更新结果摘要。 */
 export function formatGitLabKbPublishResult(result: {
   page: GitLabWikiPage
   created: boolean
@@ -149,6 +179,11 @@ export function formatGitLabKbPublishResult(result: {
   ].join('\n')
 }
 
+/**
+ * 解析 `/gitlab-kb publish` 参数字符串（`--title`、`--slug` 与正文）。
+ *
+ * @returns 解析成功时的结构化参数；否则 `null`
+ */
 export function parseGitLabKbPublishArgs(input: string): ParsedGitLabKbPublishArgs | null {
   const tokens = tokenizeArgs(input)
   if (tokens.length === 0) return null

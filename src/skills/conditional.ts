@@ -1,7 +1,11 @@
+/**
+ * 条件 Skill 激活：根据工具触及的文件路径匹配 frontmatter.paths。
+ */
 import * as path from 'node:path'
 import ignore from 'ignore'
 import { activateConditionalSkill, listConditionalSkills } from './registry'
 
+/** 对给定仓库相对路径尝试激活匹配的条件 Skill，返回已激活名称列表。 */
 export function activateConditionalSkillsForPaths(filePaths: string[], cwd: string): string[] {
   if (filePaths.length === 0) return []
 
@@ -28,6 +32,7 @@ export function activateConditionalSkillsForPaths(filePaths: string[], cwd: stri
   return activated
 }
 
+/** 从文件类工具 input 中提取可能触发条件 Skill 的路径字段。 */
 export function extractToolFilePaths(toolName: string, input: unknown): string[] {
   if (!input || typeof input !== 'object') return []
   const record = input as Record<string, unknown>

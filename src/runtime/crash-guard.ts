@@ -1,3 +1,10 @@
+/**
+ * 进程级崩溃保护：未捕获异常、未处理 Promise 拒绝与 SIGINT/SIGTERM/SIGHUP。
+ *
+ * 在退出前尽力：写入 mid-stream 标记、卸载 Ink、运行 cleanup、刷审计、
+ * 写 JSON 崩溃报告到 `<Q_CODE_HOME>/crashes`。默认注册除非 `Q_CODE_CRASH_GUARD=false`。
+ * 用户提示仅走裸 `stderr.write`，不依赖 TUI。
+ */
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -7,6 +14,7 @@ import type { TerminalRuntime } from '../terminal/runtime'
 import { getAuditLogger, setCrashGuardOwnsSignalHandlers } from '../observability/audit'
 import { isFalseEnv } from '../utils/env'
 
+/** `installCrashGuard` 的配置与可测试注入点。 */
 export interface CrashGuardOptions {
   sessionStore?: SessionStore
   terminal?: TerminalRuntime
@@ -24,6 +32,7 @@ export interface CrashGuardOptions {
   terminalRestoreTimeoutMs?: number
 }
 
+/** 已注册的处理句柄；`dispose` 卸载 process 监听器。 */
 export interface CrashGuardHandle {
   handleUncaughtException: (error: unknown) => void
   handleUnhandledRejection: (reason: unknown) => void
@@ -31,8 +40,10 @@ export interface CrashGuardHandle {
   dispose: () => void
 }
 
+/** 可优雅关闭的 POSIX 信号（Windows 不注册 SIGHUP）。 */
 export type CrashSignal = 'SIGINT' | 'SIGTERM' | 'SIGHUP'
 
+/** 写入磁盘的崩溃报告 JSON 结构。 */
 export interface CrashReport {
   version: string
   platform: NodeJS.Platform
@@ -57,6 +68,7 @@ export interface CrashReport {
   memorySnapshot: NodeJS.MemoryUsage
 }
 
+/** 可 JSON 序列化的错误摘要。 */
 export interface SerializedError {
   name: string
   message: string
@@ -75,6 +87,12 @@ const DEFAULT_TERMINAL_RESTORE_TIMEOUT_MS = 1000
 
 let installed: CrashGuardHandle | undefined
 
+/**
+ * 安装全局崩溃/信号处理器（单例：新安装会先 dispose 旧句柄）。
+ *
+ * @param options.register - 为 false 时仅返回句柄，不挂到 process（测试用）
+ * @returns 可手动调用或 `dispose` 的句柄
+ */
 export function installCrashGuard(options: CrashGuardOptions): CrashGuardHandle {
   const shouldRegister =
     options.register !== false && !isFalseEnv(process.env.Q_CODE_CRASH_GUARD)
@@ -111,6 +129,7 @@ export function installCrashGuard(options: CrashGuardOptions): CrashGuardHandle 
       lastSignal = signal
       signalCount = 1
     }
+    // 第二次相同信号：跳过清理，按 shell 惯例立即硬退出
     if (handling || signalCount >= 2) {
       exit(FORCE_EXIT_CODES[signal])
       return
@@ -383,6 +402,11 @@ function safeStringify(value: unknown): string {
   }
 }
 
+/**
+ * 对用户提示等敏感字段做 SHA-256 摘要（写入报告时脱敏用）。
+ *
+ * @param text - 原始文本
+ */
 export function sha256ForCrashGuard(text: string): string {
   return createHash('sha256').update(text).digest('hex')
 }

@@ -1,3 +1,6 @@
+/**
+ * MCP 配置加载：合并用户/项目 `settings.json` 中的 mcpServers，并处理 legacy 回退。
+ */
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
@@ -19,6 +22,7 @@ interface JsonReadResult<T> {
   parseError?: string
 }
 
+/** 返回用户级与项目级 MCP 配置文件路径。 */
 export function getMcpSettingsPaths(cwd: string = process.cwd()): {
   userSettingsPath: string
   projectSettingsPath: string
@@ -32,6 +36,7 @@ export function getMcpSettingsPaths(cwd: string = process.cwd()): {
   }
 }
 
+/** 加载并合并 MCP 服务端配置；项目级覆盖用户级同名 server。 */
 export async function loadMcpConfigs(cwd: string = process.cwd()): Promise<McpConfigLoadResult> {
   const { userSettingsPath, projectSettingsPath } = getMcpSettingsPaths(cwd)
   const errors: string[] = []

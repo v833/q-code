@@ -1,3 +1,6 @@
+/**
+ * MCP 客户端连接：stdio/http/sse 传输、连接缓存与进程退出清理。
+ */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -25,6 +28,7 @@ const connectionCache = new Map<string, Promise<McpServerConnection>>()
 const activeConnections = new Map<string, ConnectedMcpServer>()
 let cleanupRegistered = false
 
+/** 连接 MCP 服务端（带缓存）；失败时返回 FailedMcpServer 形态。 */
 export function connectToMcpServer(
   name: string,
   config: ScopedMcpServerConfig
@@ -43,6 +47,7 @@ export function connectToMcpServer(
   return promise
 }
 
+/** 清除指定 server 的连接缓存并执行 cleanup。 */
 export async function clearMcpServerCache(name: string, config: ScopedMcpServerConfig): Promise<void> {
   connectionCache.delete(getCacheKey(name, config))
   const existing = activeConnections.get(name)
@@ -52,6 +57,7 @@ export async function clearMcpServerCache(name: string, config: ScopedMcpServerC
   await existing.cleanup()
 }
 
+/** 关闭所有活跃 MCP 连接并清空缓存。 */
 export async function closeAllMcpConnections(): Promise<void> {
   const connections = Array.from(activeConnections.values())
   activeConnections.clear()
@@ -59,6 +65,7 @@ export async function closeAllMcpConnections(): Promise<void> {
   await Promise.allSettled(connections.map((connection) => connection.cleanup()))
 }
 
+/** 注册 SIGINT/SIGTERM/beforeExit 时自动关闭 MCP 连接（幂等）。 */
 export function registerMcpProcessCleanup(): void {
   if (cleanupRegistered) return
   cleanupRegistered = true

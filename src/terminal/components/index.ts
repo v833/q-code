@@ -1,3 +1,4 @@
+/** TUI React 组件 barrel 导出。 */
 export { ConversationView } from './ConversationView'
 export { CommandSuggestions } from './CommandSuggestions'
 export { Header } from './Header'

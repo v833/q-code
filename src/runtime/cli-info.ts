@@ -1,11 +1,23 @@
+/**
+ * 早期 CLI 子命令路由与版本/帮助文案（不启动 MCP 与会话）。
+ *
+ * `getEarlyCliCommand` 在 `index.ts` 进入主循环前 short-circuit：
+ * help、version、update、audit。
+ */
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+/** 在进入主交互循环前即可处理的子命令。 */
 export type EarlyCliCommand = 'help' | 'version' | 'update' | 'audit'
 
 let cachedPackageVersion: string | undefined
 
+/**
+ * 解析 `@q-code-cli/q-code` 的 package.json 版本（向上遍历至多 6 层目录）。
+ *
+ * 找不到时回退 `npm_package_version` 或 `0.0.0`；结果进程内缓存。
+ */
 export function getPackageVersion(): string {
   if (cachedPackageVersion) return cachedPackageVersion
 
@@ -29,6 +41,11 @@ export function getPackageVersion(): string {
   return cachedPackageVersion
 }
 
+/**
+ * 根据 argv（不含 node/q-code 可执行路径）判断早期子命令。
+ *
+ * `--help` / `-h` 与 `help` 均映射为 `help`；`--version` / `-v` 同理。
+ */
 export function getEarlyCliCommand(argv: string[]): EarlyCliCommand | undefined {
   const first = argv[0]
   if (first === 'help' || argv.includes('--help') || argv.includes('-h')) return 'help'
@@ -38,10 +55,12 @@ export function getEarlyCliCommand(argv: string[]): EarlyCliCommand | undefined 
   return undefined
 }
 
+/** 格式化单行版本输出，如 `q-code 1.2.3`。 */
 export function formatCliVersion(version: string): string {
   return `q-code ${version}`
 }
 
+/** 生成 `q-code help` 的完整多行帮助文本。 */
 export function formatCliHelp(version: string): string {
   return [
     formatCliVersion(version),
@@ -83,6 +102,9 @@ export function formatCliHelp(version: string): string {
   ].join('\n')
 }
 
+/**
+ * 是否启用启动诊断（`--debug` 或 `Q_CODE_DEBUG` 为真值字符串）。
+ */
 export function isDebugMode(
   argv: string[],
   env: { Q_CODE_DEBUG?: string | undefined } = process.env

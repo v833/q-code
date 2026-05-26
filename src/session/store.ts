@@ -1,3 +1,9 @@
+/**
+ * 会话持久化：按项目目录下的 JSONL append-only 转录（transcript）。
+ *
+ * 支持 `--continue`（latest 指针）、旧版 `default.jsonl` 迁移、压缩快照、
+ * usage/cache/tool 事件与恢复时跳过已持久化消息前缀。
+ */
 import { randomUUID } from 'node:crypto'
 import {
   appendFileSync,
@@ -17,23 +23,32 @@ import type { CacheMode, NormalizedUsage, UsageCost, UsageRecord, UsageTotals } 
 const LATEST_FILE = 'latest'
 const LEGACY_DEFAULT_SESSION_ID = 'default'
 
+/** 上下文压缩写入 transcript 时的触发来源。 */
 export type CompactionTrigger = 'startup' | 'preflight' | 'post-turn' | 'manual'
 
+/** `SessionStore` 构造选项。 */
 export interface SessionStoreOptions {
+  /** 项目工作目录，默认 `process.cwd()` */
   cwd?: string
+  /** 显式会话 ID；缺省时由 continue/latest/新建 UUID 决定 */
   sessionId?: string
+  /** 为 true 时读取 `latest` 指针续接最近会话 */
   continueLatest?: boolean
+  /** 覆盖默认 `.sessions` 根目录（`Q_CODE_SESSION_DIR` 同级语义） */
   sessionDir?: string
 }
 
+/** 当前会话在磁盘上的路径集合。 */
 export interface SessionPaths {
   rootDir: string
   projectDir: string
   latestPath: string
   transcriptPath: string
+  /** 旧版根目录下的 `default.jsonl` */
   legacyTranscriptPath: string
 }
 
+/** 列表/摘要视图中的会话元信息。 */
 export interface SessionSummary {
   sessionId: string
   cwd: string
@@ -46,6 +61,7 @@ export interface SessionSummary {
   usageTotals?: UsageTotals
 }
 
+/** JSONL 单行事件：元数据、消息、用量、压缩、工具事件等。 */
 export type TranscriptEntry =
   | {
       type: 'session_meta'
@@ -95,6 +111,9 @@ export type TranscriptEntry =
       messageCount: number
     }
 
+/**
+ * 单会话 JSONL 存储：追加写入、按最后一次 compaction 恢复活跃消息。
+ */
 export class SessionStore {
   readonly sessionId: string
   readonly cwd: string
@@ -102,6 +121,11 @@ export class SessionStore {
   readonly paths: SessionPaths
   private readonly existedBeforeInit: boolean
 
+  /**
+   * 打开或创建会话；新会话写入 `session_meta` 行并更新 `latest`。
+   *
+   * @param options - 配置对象，或仅传 `sessionId` 字符串
+   */
   constructor(options: SessionStoreOptions | string = {}) {
     const normalizedOptions = normalizeOptions(options)
     const storage = getProjectStorageInfo(normalizedOptions.cwd ?? process.cwd(), normalizedOptions.sessionDir)
@@ -138,6 +162,7 @@ export class SessionStore {
     }
   }
 
+  /** 追加一条对话消息。 */
   append(message: ModelMessage): void {
     this.appendEntry({
       type: 'message',
@@ -146,18 +171,23 @@ export class SessionStore {
     })
   }
 
+  /** 顺序追加多条消息。 */
   appendAll(messages: ModelMessage[]): void {
     for (const message of messages) this.append(message)
   }
 
+  /**
+   * 仅追加尚未出现在 transcript 活跃视图中的消息后缀。
+   *
+   * 压缩快照可能已整段写入；agent loop 续写时避免重复持久化相同前缀。
+   */
   appendUnpersisted(messages: ModelMessage[]): void {
-    // 压缩快照会把当前活跃上下文整段写入 transcript。随后 agent loop
-    // 只应补写本轮真正新增的后缀，避免同一条消息在恢复视图里出现两次。
     const persisted = this.load()
     const alreadyStored = countPersistedPrefix(persisted, messages)
     for (const message of messages.slice(alreadyStored)) this.append(message)
   }
 
+  /** 追加 v1 用量行（turn + 累计 total）。 */
   appendUsage(turn: TokenUsage, total: TokenUsage): void {
     this.appendEntry({
       type: 'usage',
@@ -167,6 +197,7 @@ export class SessionStore {
     })
   }
 
+  /** 追加 v2 用量行（含归一化 usage 与可选 totals）。 */
   appendUsageV2(record: UsageRecord, totals: UsageTotals): void {
     this.appendEntry({
       type: 'usage_v2',
@@ -176,6 +207,7 @@ export class SessionStore {
     })
   }
 
+  /** 记录 prompt cache 模式切换。 */
   appendCacheMode(mode: CacheMode): void {
     this.appendEntry({
       type: 'cache_mode',
@@ -184,6 +216,7 @@ export class SessionStore {
     })
   }
 
+  /** 记录工具 start/done 事件（TUI 回放用）。 */
   appendToolEvent(event: Omit<Extract<TranscriptEntry, { type: 'tool_event' }>, 'timestamp'>): void {
     this.appendEntry({
       ...event,
@@ -191,6 +224,11 @@ export class SessionStore {
     })
   }
 
+  /**
+   * 写入压缩元数据并批量追加压缩后的消息快照。
+   *
+   * `load()` 仅返回最后一次 compaction 之后的 `message` 行。
+   */
   appendCompactionSnapshot(params: {
     trigger: CompactionTrigger
     beforeTokens: number
@@ -217,6 +255,7 @@ export class SessionStore {
     this.appendEntries(entries)
   }
 
+  /** 读取当前活跃上下文中的消息（忽略 compaction 之前的历史）。 */
   load(): ModelMessage[] {
     const entries = this.readEntries()
     const lastCompactionIndex = findLastCompactionIndex(entries)
@@ -230,10 +269,12 @@ export class SessionStore {
       .map((entry) => entry.message)
   }
 
+  /** 构造时 transcript 文件是否已存在（区分新建 vs 续接）。 */
   exists(): boolean {
     return this.existedBeforeInit
   }
 
+  /** 从 transcript 聚合会话摘要。 */
   getSummary(): SessionSummary {
     const entries = this.readEntries()
     return summarizeTranscript({
@@ -245,6 +286,7 @@ export class SessionStore {
     })
   }
 
+  /** 返回全部 `usage_v2` 记录（按文件顺序）。 */
   getUsageRecords(): UsageRecord[] {
     return this.readEntries()
       .filter((entry): entry is Extract<TranscriptEntry, { type: 'usage_v2' }> => {
@@ -253,6 +295,7 @@ export class SessionStore {
       .map((entry) => entry.record)
   }
 
+  /** 返回 transcript 中最后一次 `cache_mode`（若无则 undefined）。 */
   getLatestCacheMode(): CacheMode | undefined {
     return [...this.readEntries()]
       .reverse()
@@ -280,10 +323,16 @@ export class SessionStore {
   }
 }
 
+/** 生成新的 UUID 会话 ID。 */
 export function createSessionId(): string {
   return randomUUID()
 }
 
+/**
+ * 列出当前项目目录下所有 `.jsonl` 会话文件摘要，按 `updatedAt` 降序。
+ *
+ * @param options - `cwd` / `sessionDir` 与 `SessionStore` 一致
+ */
 export function listProjectSessions(options: Pick<SessionStoreOptions, 'cwd' | 'sessionDir'> = {}): SessionSummary[] {
   const storage = getProjectStorageInfo(options.cwd ?? process.cwd(), options.sessionDir)
   const cwd = storage.cwd

@@ -1,3 +1,9 @@
+/**
+ * Agent Teams 的磁盘持久化：`~/.q-code/teams/<team>/team.json` 与成员 roster。
+ *
+ * 提供团队目录路径、名称规范化、成员增删改、`isActive` 簿记，以及
+ * 进程重启后对陈旧 active 标记的 reconcile。
+ */
 import { mkdirSync, readFileSync } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
@@ -61,6 +67,7 @@ export interface TeamFile {
 /** 每个团队中约定的 lead 名称。 */
 export const TEAM_LEAD_NAME = 'team-lead'
 
+/** 所有团队状态文件的根目录：`~/.q-code/teams`。 */
 export function getTeamsRoot(): string {
   return path.join(getQCodeHome(), 'teams')
 }
@@ -80,10 +87,12 @@ export function sanitizeName(name: string): string {
     .toLowerCase()
 }
 
+/** 生成确定性成员 id：`<sanitized-name>@<sanitized-team>`。 */
 export function formatAgentId(name: string, teamName: string): string {
   return `${sanitizeName(name)}@${sanitizeName(teamName)}`
 }
 
+/** 单个团队在磁盘上的目录（已 sanitize）。 */
 export function getTeamDir(teamName: string): string {
   return path.join(getTeamsRoot(), sanitizeName(teamName))
 }
@@ -94,6 +103,7 @@ export function getTeamFilePath(teamName: string): string {
 
 // ─── 读写（同步 + 异步） ────────────────────────────────────
 
+/** 同步读取 `team.json`；不存在或解析失败返回 null。 */
 export function readTeamFile(teamName: string): TeamFile | null {
   try {
     const content = readFileSync(getTeamFilePath(teamName), 'utf-8')
@@ -103,6 +113,7 @@ export function readTeamFile(teamName: string): TeamFile | null {
   }
 }
 
+/** 异步读取 `team.json`；不存在或解析失败返回 null。 */
 export async function readTeamFileAsync(teamName: string): Promise<TeamFile | null> {
   try {
     const content = await fs.readFile(getTeamFilePath(teamName), 'utf-8')
@@ -112,12 +123,14 @@ export async function readTeamFileAsync(teamName: string): Promise<TeamFile | nu
   }
 }
 
+/** 同步原子写入 `team.json`（自动打上 `schemaVersion`）。 */
 export function writeTeamFile(teamName: string, file: TeamFile): void {
   mkdirSync(getTeamDir(teamName), { recursive: true })
   const stamped: TeamFile = { schemaVersion: TEAM_FILE_SCHEMA_VERSION, ...file }
   writeJsonAtomicSync(getTeamFilePath(teamName), stamped)
 }
 
+/** 异步原子写入 `team.json`。 */
 export async function writeTeamFileAsync(teamName: string, file: TeamFile): Promise<void> {
   await fs.mkdir(getTeamDir(teamName), { recursive: true })
   const stamped: TeamFile = { schemaVersion: TEAM_FILE_SCHEMA_VERSION, ...file }
@@ -134,6 +147,7 @@ export async function writeTeamFileAsync(teamName: string, file: TeamFile): Prom
 // 丢失时会抛出 `TeamFileMissingError`。以前静默返回 null 会掩盖
 // “队友已启动但从未出现在 lead roster 中”的 bug。
 
+/** `team.json` 在磁盘上缺失时由 `addTeamMember` 等抛出。 */
 export class TeamFileMissingError extends Error {
   constructor(teamName: string) {
     super(`team.json for "${teamName}" is missing on disk`)
@@ -158,6 +172,10 @@ export async function addTeamMember(teamName: string, member: TeamMember): Promi
   return next
 }
 
+/**
+ * 更新指定成员的 `isActive` 标志。
+ * 团队文件不存在时返回 null（与 `addTeamMember` 的硬失败不同）。
+ */
 export async function setMemberActive(
   teamName: string,
   memberName: string,
@@ -181,6 +199,7 @@ export async function setMemberActive(
   return next
 }
 
+/** 从 roster 移除成员；不存在则无操作并返回当前文件。 */
 export async function removeTeamMember(
   teamName: string,
   memberName: string
@@ -235,10 +254,11 @@ export async function cleanupTeamDirectory(teamName: string): Promise<void> {
   try {
     await fs.rm(getTeamDir(teamName), { recursive: true, force: true })
   } catch {
-    // Best-effort.
+    // 尽力清理，失败不抛出。
   }
 }
 
+/** 列出 `teams` 根目录下所有团队目录名（已 sanitize 的文件夹名）。 */
 export async function listTeamNames(): Promise<string[]> {
   try {
     const entries = await fs.readdir(getTeamsRoot(), { withFileTypes: true })

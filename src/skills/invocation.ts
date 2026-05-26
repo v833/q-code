@@ -1,9 +1,14 @@
+/**
+ * Skill 调用：斜杠展开、prompt 正文构建与名称校验。
+ */
 import type { ModelMessage } from 'ai'
 import { findSkill } from './registry'
 import type { Skill } from './types'
 
+/** Skill 名称允许的字符集正则。 */
 export const SKILL_NAME_RE = /^[a-zA-Z0-9_-]+$/
 
+/** 斜杠调用 Skill 后注入会话的消息载荷。 */
 export interface SkillInvocation {
   skill: Skill
   markerContent: string
@@ -11,6 +16,7 @@ export interface SkillInvocation {
   messages: ModelMessage[]
 }
 
+/** 将 `/skill-name [args]` 展开为 marker + body 两条 user 消息；未命中返回 null。 */
 export function expandSkillSlashCommand(input: string, sessionId: string): SkillInvocation | null {
   const match = input.match(/^\/([a-zA-Z0-9_-]+)(?:\s+([\s\S]*))?$/)
   if (!match) return null
@@ -34,6 +40,7 @@ export function expandSkillSlashCommand(input: string, sessionId: string): Skill
   }
 }
 
+/** 构建注入模型的 Skill 工作流正文（含 $ARGUMENTS 替换）。 */
 export function buildSkillPromptText(
   skill: Skill,
   args: string,

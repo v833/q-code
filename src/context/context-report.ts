@@ -1,3 +1,6 @@
+/**
+ * 上下文用量报告：token 分解、阈值状态与 16×16 ASCII 矩阵可视化。
+ */
 import type { ModelMessage } from 'ai'
 import {
   buildTokenBudgetSnapshot,
@@ -10,6 +13,7 @@ import {
 const MATRIX_SIZE = 16
 const MATRIX_CELLS = MATRIX_SIZE * MATRIX_SIZE
 
+/** 构建上下文报告所需的配置（与 token 预算一致）。 */
 export interface ContextReportOptions {
   modelName: string
   systemPrompt: string
@@ -22,6 +26,7 @@ export interface ContextReportOptions {
   usageAnchor?: UsageAnchor
 }
 
+/** System/Tools/Messages/Free/Buffer/Reserved 分项 token 估算。 */
 export interface ContextBreakdown {
   systemTokens: number
   toolTokens: number
@@ -32,6 +37,7 @@ export interface ContextBreakdown {
   overLimitTokens: number
 }
 
+/** 完整上下文报告：快照、分解与矩阵字符串。 */
 export interface ContextReport {
   modelName: string
   snapshot: TokenBudgetSnapshot
@@ -39,6 +45,9 @@ export interface ContextReport {
   matrix: string
 }
 
+/**
+ * 根据消息与配置生成上下文报告。
+ */
 export function buildContextReport(
   messages: readonly ModelMessage[],
   options: ContextReportOptions
@@ -75,6 +84,7 @@ export function buildContextReport(
   }
 }
 
+/** 将 `ContextReport` 格式化为面向终端的多行文本。 */
 export function renderContextReport(report: ContextReport): string {
   const usedPercent = formatPercent(report.snapshot.ratio)
   return [
@@ -103,6 +113,9 @@ export function renderContextReport(report: ContextReport): string {
   ].join('\n')
 }
 
+/**
+ * 将 token 分解映射为 16×16 字符矩阵（S/T/M/F/B/R/.）。
+ */
 export function renderContextMatrix(limit: number, breakdown: ContextBreakdown): string {
   const allocations = allocateMatrixCells(limit, [
     { label: 'S', tokens: breakdown.systemTokens },
@@ -136,6 +149,7 @@ interface MatrixAllocation {
   remainder: number
 }
 
+/** 按 token 比例分配 256 格，余数用最大小数部分优先补齐。 */
 function allocateMatrixCells(limit: number, categories: MatrixCategory[]): MatrixAllocation[] {
   const positive = categories.filter((category) => category.tokens > 0)
   if (positive.length === 0 || limit <= 0) return []

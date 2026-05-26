@@ -1,7 +1,15 @@
+/**
+ * 向主 Agent system prompt 注入 SubAgent 目录说明（`<system-reminder>` 块）。
+ *
+ * 列出当前已注册的 `AgentDefinition`，并附带自定义 Agent 的 Markdown 模板。
+ */
 import type { AgentDefinition } from './types'
 
 const MAX_DESC_CHARS = 220
 
+/**
+ * 生成 SubAgent 能力说明的 system-reminder 文本；无可用 Agent 时返回空字符串。
+ */
 export function formatAgentsSystemReminder(agents: AgentDefinition[]): string {
   if (agents.length === 0) return ''
 

@@ -1,3 +1,7 @@
+/**
+ * Ink 运行时封装：创建 {@link InMemoryTerminalEventBus}、挂载 {@link TerminalApp}，
+ * 并向 CLI 主循环暴露 `print` / `emit` / `waitUntilExit`。
+ */
 import React from 'react'
 import { render, type Instance } from 'ink'
 import { InMemoryTerminalEventBus, type TerminalEvent, type TerminalEventBus } from './events'
@@ -5,10 +9,12 @@ import { TerminalApp } from './App'
 import type { SlashCommandSuggestion } from '../slash'
 import type { FileMentionIndex } from '../mentions'
 
+/** {@link startTerminalRuntime} 的启动选项。 */
 export interface TerminalRuntimeOptions {
   title?: string
   sessionId?: string
   cwd?: string
+  /** 渲染前预灌入的事件（如启动横幅）。 */
   initialEvents?: TerminalEvent[]
   slashCommands?: SlashCommandSuggestion[]
   fileMentionIndex?: FileMentionIndex
@@ -17,14 +23,20 @@ export interface TerminalRuntimeOptions {
   onExit: () => Promise<void> | void
 }
 
+/** 已启动的 Ink 终端运行时句柄。 */
 export interface TerminalRuntime {
   bus: TerminalEventBus
   instance: Instance
+  /** 以 system 消息写入 transcript。 */
   print(text: string): void
   emit(event: TerminalEvent): void
+  /** 等待用户退出 TUI（Ink `waitUntilExit`）。 */
   waitUntilExit(): Promise<void>
 }
 
+/**
+ * 启动 Ink TUI 并返回可与 `index.ts` 主循环对接的运行时句柄。
+ */
 export function startTerminalRuntime(options: TerminalRuntimeOptions): TerminalRuntime {
   const bus = new InMemoryTerminalEventBus()
   for (const event of options.initialEvents ?? []) bus.emit(event)

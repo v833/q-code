@@ -1,11 +1,17 @@
+/**
+ * Task V2 持久化任务图：每任务独立 JSON 文件、依赖关系与 high-watermark id 分配。
+ */
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getProjectStorageInfo } from './project-paths'
 
+/** 任务状态枚举值。 */
 export const TASK_STATUSES = ['pending', 'in_progress', 'completed'] as const
 export type TaskStatus = (typeof TASK_STATUSES)[number]
+/** 任务清单模式：持久化任务图或会话 Todo。 */
 export type TaskMode = 'task' | 'todo'
 
+/** 单条持久化任务。 */
 export interface Task {
   id: string
   subject: string
@@ -17,11 +23,13 @@ export interface Task {
   metadata?: Record<string, unknown>
 }
 
+/** 任务图存储路径选项。 */
 export interface TaskGraphOptions {
   cwd?: string
   sessionId: string
 }
 
+/** `createTask` 输入字段。 */
 export interface TaskCreateInput {
   subject: string
   description: string
@@ -29,6 +37,7 @@ export interface TaskCreateInput {
   metadata?: Record<string, unknown>
 }
 
+/** `blockTask` 结果：是否成功及是否实际修改了依赖边。 */
 export interface BlockTaskResult {
   ok: boolean
   changed: boolean
@@ -39,11 +48,13 @@ const HIGH_WATER_MARK_FILE = '.highwatermark'
 
 // Task V2 是文件级持久化图：每个任务独立 JSON，便于人工检查和局部修复。
 // q-code 目前是单 CLI loop，写工具由 ToolRegistry 独占执行，因此这里不引入跨进程锁。
+/** 返回当前会话任务图目录 `<projectDir>/tasks/<sessionId>/`。 */
 export function getTaskGraphDir(options: TaskGraphOptions): string {
   const storage = getProjectStorageInfo(options.cwd ?? process.cwd())
   return join(storage.projectDir, TASKS_DIR, sanitizePathSegment(options.sessionId || 'default'))
 }
 
+/** 创建新任务（自增数字 id）并写入 JSON 文件。 */
 export async function createTask(options: TaskGraphOptions, input: TaskCreateInput): Promise<Task> {
   await ensureTaskGraphDir(options)
   const id = String((await findHighestTaskId(options)) + 1)
@@ -63,6 +74,7 @@ export async function createTask(options: TaskGraphOptions, input: TaskCreateInp
   return cloneTask(task)
 }
 
+/** 按 id 读取任务；文件不存在或解析失败返回 null。 */
 export async function getTask(options: TaskGraphOptions, taskId: string): Promise<Task | null> {
   try {
     const raw = await readFile(getTaskPath(options, taskId), 'utf-8')
@@ -72,6 +84,7 @@ export async function getTask(options: TaskGraphOptions, taskId: string): Promis
   }
 }
 
+/** 列出会话内全部任务，按 id 排序。 */
 export async function listTasks(options: TaskGraphOptions): Promise<Task[]> {
   let files: string[]
   try {
@@ -89,6 +102,7 @@ export async function listTasks(options: TaskGraphOptions): Promise<Task[]> {
   return tasks.filter((task): task is Task => task !== null).sort(compareTaskId)
 }
 
+/** 部分更新任务字段；任务不存在返回 null。 */
 export async function updateTask(
   options: TaskGraphOptions,
   taskId: string,
@@ -108,6 +122,9 @@ export async function updateTask(
   return cloneTask(updated)
 }
 
+/**
+ * 删除任务并清理其他任务上的 blocks/blockedBy 引用；不存在返回 false。
+ */
 export async function deleteTask(options: TaskGraphOptions, taskId: string): Promise<boolean> {
   const numericId = Number(taskId)
   if (Number.isInteger(numericId) && numericId > 0) {
@@ -133,6 +150,7 @@ export async function deleteTask(options: TaskGraphOptions, taskId: string): Pro
   return true
 }
 
+/** 建立 from → to 的阻塞关系（双向维护 blocks/blockedBy）。 */
 export async function blockTask(
   options: TaskGraphOptions,
   fromTaskId: string,
@@ -158,6 +176,10 @@ export async function blockTask(
   return { ok: true, changed }
 }
 
+/**
+ * 清空当前图内所有任务 JSON，但保留 high-watermark 以避免 id 复用。
+ * @returns 删除的文件数
+ */
 export async function resetTaskGraph(options: TaskGraphOptions): Promise<number> {
   await ensureTaskGraphDir(options)
   const highest = await findHighestTaskId(options)
@@ -175,6 +197,7 @@ export async function resetTaskGraph(options: TaskGraphOptions): Promise<number>
   return deleted
 }
 
+/** pending 且所有 blocker 已完成（缺失 blocker 视为已解除）时返回 true。 */
 export function isReady(task: Task, tasks: readonly Task[]): boolean {
   if (task.status !== 'pending') return false
   const byId = new Map(tasks.map((candidate) => [candidate.id, candidate]))
@@ -182,6 +205,7 @@ export function isReady(task: Task, tasks: readonly Task[]): boolean {
   return task.blockedBy.every((id) => byId.get(id)?.status === 'completed' || !byId.has(id))
 }
 
+/** 将任务列表格式化为 Markdown 概要。 */
 export function formatTaskList(tasks: readonly Task[]): string {
   if (tasks.length === 0) return '## Tasks\n\n当前没有任务。'
 
@@ -197,6 +221,7 @@ export function formatTaskList(tasks: readonly Task[]): string {
   return lines.join('\n')
 }
 
+/** 将单条任务格式化为 Markdown 详情块。 */
 export function formatTaskDetail(task: Task, allTasks: readonly Task[] = []): string {
   const lines = [
     `## Task ${formatTaskRef(task.id)}: ${formatMarkdownInline(task.subject)}`,
@@ -333,6 +358,7 @@ function formatTaskRef(id: string): string {
   return `#${id}`
 }
 
+/** 转义 Markdown 行内控制字符并折叠空白。 */
 export function formatMarkdownInline(value: string): string {
   return escapeMarkdownControlChars(value.replace(/\s+/g, ' ').trim())
 }

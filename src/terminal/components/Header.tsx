@@ -1,8 +1,12 @@
+/**
+ * TUI 顶栏：标题、会话 ID、压缩后的 cwd 与快捷键说明。
+ */
 import React from 'react'
 import { Box, Text } from 'ink'
 import { compactPath } from '../utils/format'
 import { animeTheme } from '../theme/index'
 
+/** 顶栏展示组件。 */
 export function Header({
   title,
   sessionId,

@@ -1,14 +1,23 @@
+/**
+ * GitLab Wiki 知识库环境变量解析与 URL 规范化。
+ */
+
+/** 从环境变量加载的 GitLab KB 运行时配置。 */
 export interface GitLabKbConfig {
   enabled: boolean
   baseUrl?: string
   token?: string
   projectId?: string
+  /** 从 `Q_CODE_GITLAB_URL` 路径段解析出的 `group/project` */
   projectPathFromUrl?: string
+  /** Wiki 页 slug 前缀，用于过滤与发布命名空间 */
   pagePrefix: string
   timeoutMs: number
+  /** 未启用时的可读原因（供 status 输出） */
   disabledReason?: string
 }
 
+/** `parseGitLabUrl` 的解析结果。 */
 export interface ParsedGitLabUrl {
   baseUrl: string
   projectPath?: string
@@ -17,6 +26,13 @@ export interface ParsedGitLabUrl {
 const DEFAULT_PAGE_PREFIX = 'q-code-kb'
 const DEFAULT_TIMEOUT_MS = 10000
 
+/**
+ * 从环境变量加载 GitLab KB 配置。
+ *
+ * 显式 `Q_CODE_GITLAB_KB_ENABLED=false` 时强制禁用；否则在 URL 与 token 齐备时默认启用。
+ *
+ * @param env - 环境变量对象，默认 `process.env`（便于测试注入）
+ */
 export function loadGitLabKbConfig(
   env: Pick<NodeJS.ProcessEnv, string> = process.env
 ): GitLabKbConfig {
@@ -60,6 +76,13 @@ export function loadGitLabKbConfig(
   }
 }
 
+/**
+ * 将用户配置的 GitLab URL 规范为 API 所需的 `baseUrl` 与可选 `projectPath`。
+ *
+ * 支持项目页 URL、裸 API 根（含 `/api/v4` 时截断）及 `.git` 后缀。
+ *
+ * @param raw - 原始 URL 字符串
+ */
 export function parseGitLabUrl(raw: string): ParsedGitLabUrl | undefined {
   const trimmed = raw.trim().replace(/\.git$/, '')
   if (!trimmed) return undefined

@@ -1,8 +1,14 @@
+/**
+ * 面向 Agent 的安全 HTTP 抓取：校验公网 URL、跟随有限次重定向并拒绝私网地址。
+ */
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 
 const MAX_REDIRECTS = 5
 
+/**
+ * 在每次重定向前重新校验目标 URL，使用 manual redirect 防止 SSRF 跳转绕过。
+ */
 export async function safeFetchUrl(
   rawUrl: string,
   init: RequestInit = {},
@@ -30,6 +36,10 @@ export async function safeFetchUrl(
   throw new Error(`重定向次数超过上限 ${maxRedirects}`)
 }
 
+/**
+ * 解析并校验 URL 为 http(s) 且 hostname 解析结果均为公网地址。
+ * @returns 规范化后的 URL 字符串
+ */
 export async function validatePublicHttpUrl(rawUrl: string): Promise<string> {
   let url: URL
   try {

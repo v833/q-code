@@ -1,3 +1,6 @@
+/**
+ * 上下文压缩：microcompact 清理旧工具结果、LLM 摘要压缩长对话，并保留 tool-call 配对安全边界。
+ */
 import { generateText, type ModelMessage } from 'ai'
 import { isOffloadMarkerText } from './offload'
 import { estimateMessagesTokens } from './token-budget'
@@ -17,11 +20,13 @@ const CLEARABLE_TOOLS = new Set([
 const KEEP_RECENT_TOOL_RESULTS = 3
 const KEEP_RECENT_MESSAGES = 8
 
+/** `microcompact` 的返回：可能替换后的消息列表与清理的工具结果 part 数。 */
 export interface MicrocompactResult {
   messages: ModelMessage[]
   cleared: number
 }
 
+/** `summarize` 的返回：压缩后的消息、摘要正文与被压缩的消息条数。 */
 export interface CompactionResult {
   messages: ModelMessage[]
   summary: string
@@ -54,10 +59,14 @@ const COMPRESS_PROMPT = `你是一个对话压缩系统。你的任务是把 Age
 - 不要调用工具，只输出摘要正文
 - 总长度控制在 1200 字以内`
 
+/** 估算消息列表 token（委托 `estimateMessagesTokens`）。 */
 export function estimateTokens(messages: ModelMessage[]): number {
   return estimateMessagesTokens(messages)
 }
 
+/**
+ * 将较早的可清理工具消息内容替换为占位符，保留最近若干条完整结果。
+ */
 export function microcompact(messages: ModelMessage[]): MicrocompactResult {
   const clearableIndices = collectClearableToolMessageIndices(messages)
   const toClear = new Set(
@@ -82,6 +91,11 @@ export function microcompact(messages: ModelMessage[]): MicrocompactResult {
   return { messages: cleared > 0 ? compacted : messages, cleared }
 }
 
+/**
+ * 用 LLM 将较早对话压缩为结构化摘要 user 消息，保留尾部 verbatim 消息。
+ * @param model AI SDK 语言模型实例
+ * @param existingSummary 已有摘要时与新对话一并送入压缩
+ */
 export async function summarize(
   model: any,
   messages: ModelMessage[],

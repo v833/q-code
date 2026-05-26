@@ -1,3 +1,9 @@
+/**
+ * 子 Agent / 队友的单次 Agent 循环执行器。
+ *
+ * 负责工具集解析、子 Agent system prompt 组装、邮箱未读消息注入、
+ * Hooks/审计事件，以及通过 `onProgress` 向上层（含后台 JSONL）转发进度。
+ */
 import type { ModelMessage } from 'ai'
 import { agentLoop } from '../agent/loop'
 import {
@@ -22,10 +28,13 @@ import { resolveAgentTools } from './resolve-agent-tools'
 import { drainUnreadMessages, formatMailboxAttachment } from './teammate-mailbox'
 import type { AgentDefinition, AgentRunResult } from './types'
 
+/** 未在定义中指定 `maxTurns` 时的默认最大步数。 */
 export const DEFAULT_AGENT_MAX_TURNS = 30
 
+/** `runChildAgent` 的输入参数。 */
 export interface RunChildAgentParams {
   agentDefinition: AgentDefinition
+  /** 委托给子 Agent 的任务说明（须自包含，子 Agent 看不到主对话）。 */
   prompt: string
   availableTools: ToolDefinition[]
   model: any
@@ -34,20 +43,22 @@ export interface RunChildAgentParams {
   tokenBudget?: number
   maxOutputTokens?: number
   escalatedMaxOutputTokens?: number
+  /** 覆盖进程 cwd（worktree 隔离时使用）。 */
   cwdOverride?: string
   abortSignal?: AbortSignal
   sessionId?: string
   hooks?: HookRunner
+  /** 为 true 时不向 TUI 打印子 Agent 流式输出。 */
   quiet?: boolean
   onProgress?: (event: ChildAgentProgressEvent) => void
   /**
-   * When set, this run is a named teammate inside an Agent Teams session.
-   * The identity is forwarded to every tool call and is used at startup
-   * to drain the teammate's mailbox into the opening user message.
+   * 若设置，表示本次运行为 Agent Teams 中的命名队友。
+   * 身份会转发到每次工具调用；启动时会排空该队友邮箱并 prepend 到首轮 user 消息。
    */
   teammateIdentity?: TeammateIdentity
 }
 
+/** 子 Agent 运行过程中的进度事件（供后台任务 JSONL 等消费）。 */
 export type ChildAgentProgressEvent =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; toolName: string; toolCallId?: string }
@@ -61,6 +72,10 @@ export type ChildAgentProgressEvent =
     }
   | { type: 'turn_usage'; turnUsage: TokenUsage; cumulativeUsage: TokenUsage; turnCount: number }
 
+/**
+ * 在独立上下文中运行一次子 Agent（或队友）循环。
+ * 返回最终摘要文本、完整消息历史及用量统计。
+ */
 export async function runChildAgent(params: RunChildAgentParams): Promise<AgentRunResult> {
   const startTime = Date.now()
   const resolved = resolveAgentTools(params.agentDefinition, params.availableTools)
@@ -69,10 +84,8 @@ export async function runChildAgent(params: RunChildAgentParams): Promise<AgentR
     quiet: params.quiet
   })
 
-  // Teammates may have unread inbox messages waiting from the team lead
-  // or other teammates. Drain them once at startup and prepend them to
-  // the opening user prompt so the loop sees them as authoritative
-  // coordination input on its very first turn.
+  // 队友可能在空闲期间收到 lead/其他队友的 SendMessage；启动时一次性排空并
+  // 拼到 opening user 消息前，使第一轮循环即可看到权威协作输入。
   const openingPrompt = await buildOpeningPrompt(params.prompt, params.teammateIdentity)
   const messages: ModelMessage[] = [{ role: 'user', content: openingPrompt }]
   const sessionId = params.sessionId ?? `sub-agent:${params.agentDefinition.agentType}`
@@ -238,6 +251,10 @@ export async function runChildAgent(params: RunChildAgentParams): Promise<AgentR
   }
 }
 
+/**
+ * 队友启动时合并邮箱未读；非队友或排空失败时原样返回 `prompt`。
+ * 邮箱属于可观测性能力，失败不应阻塞队友启动。
+ */
 async function buildOpeningPrompt(
   prompt: string,
   identity: TeammateIdentity | undefined
@@ -248,11 +265,14 @@ async function buildOpeningPrompt(
     if (unread.length === 0) return prompt
     return `${formatMailboxAttachment(unread)}\n\n${prompt}`
   } catch {
-    // Inbox is observability-grade; do not block the teammate from starting.
     return prompt
   }
 }
 
+/**
+ * 为子 Agent 构建独立 `ToolRegistry`：注册解析后的工具，按需挂载 `tool_search`，
+ * 非通配模式下将 `shouldDefer` 工具标记为延迟加载。
+ */
 function buildChildRegistry(
   tools: ToolDefinition[],
   hasWildcard: boolean,
@@ -273,6 +293,7 @@ function buildChildRegistry(
   return registry
 }
 
+/** 组装子 Agent / 队友的 system prompt（含角色块与共享 prompt 管道）。 */
 function buildChildSystemPrompt(params: {
   definition: AgentDefinition
   registry: ToolRegistry
@@ -322,6 +343,7 @@ function buildChildSystemPrompt(params: {
   return builder.build(ctx)
 }
 
+/** 从后往前取第一条含非空文本的 assistant 消息作为 `finalText`。 */
 function extractFinalAssistantText(messages: ModelMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index]
@@ -332,6 +354,7 @@ function extractFinalAssistantText(messages: ModelMessage[]): string {
   return '(Sub-agent completed but produced no text output.)'
 }
 
+/** 从 string 或 content part 数组中提取纯文本。 */
 function extractText(content: unknown): string {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''

@@ -1,9 +1,19 @@
+/**
+ * 采集当前 Git 仓库信息，并解析 `remote.origin.url` 为 host/group/name。
+ */
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { InfraRepoInfo } from './types'
 
 const execFileAsync = promisify(execFile)
 
+/**
+ * 并行执行若干 `git` 子命令，组装 {@link InfraRepoInfo}。
+ *
+ * 非 Git 仓库或命令失败时，对应字段为 `undefined`（不抛错）。
+ *
+ * @param cwd - 项目工作目录
+ */
 export async function collectRepoInfo(cwd: string): Promise<InfraRepoInfo> {
   const [remoteUrl, branch, commit, status] = await Promise.all([
     git(cwd, ['config', '--get', 'remote.origin.url']),
@@ -25,6 +35,13 @@ export async function collectRepoInfo(cwd: string): Promise<InfraRepoInfo> {
   }
 }
 
+/**
+ * 将 Git remote URL 解析为 `remoteHost`、`group`、`name`。
+ *
+ * 支持 HTTPS、SSH（`git@host:group/repo`）及松散 `host:path` 形式。
+ *
+ * @param remoteUrl - `git remote` 输出的 URL 字符串
+ */
 export function parseGitRemote(remoteUrl: string): Pick<InfraRepoInfo, 'remoteHost' | 'group' | 'name'> {
   const normalized = remoteUrl.trim().replace(/\.git$/, '')
   const https = parseAsUrl(normalized)

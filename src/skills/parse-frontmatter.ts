@@ -1,6 +1,10 @@
+/**
+ * SKILL.md frontmatter 解析：YAML 分割、字段规范化与描述回退。
+ */
 import { parse as parseYaml } from 'yaml'
 import type { SkillFrontmatter } from './types'
 
+/** `splitFrontmatter` 的解析结果。 */
 export interface FrontmatterSplit {
   raw: Record<string, unknown>
   body: string
@@ -9,6 +13,7 @@ export interface FrontmatterSplit {
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
 
+/** 从 SKILL.md 全文分离 YAML frontmatter 与正文。 */
 export function splitFrontmatter(content: string): FrontmatterSplit {
   const match = content.match(FRONTMATTER_RE)
   if (!match) return { raw: {}, body: content }
@@ -33,6 +38,7 @@ export function splitFrontmatter(content: string): FrontmatterSplit {
   }
 }
 
+/** 将原始 YAML 映射为 {@link SkillFrontmatter}（含 kebab-case 别名）。 */
 export function normalizeFrontmatter(
   raw: Record<string, unknown>,
   body: string
@@ -53,6 +59,7 @@ export function normalizeFrontmatter(
   }
 }
 
+/** 当 frontmatter 无 description 时，从正文首段提取简短描述。 */
 export function extractFallbackDescription(body: string): string | undefined {
   const lines = body.split(/\r?\n/)
   const buffer: string[] = []

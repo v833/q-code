@@ -1,3 +1,6 @@
+/**
+ * 会话 Todo 工具：todo_write 全量替换当前会话任务清单。
+ */
 import {
   formatTodoList,
   getTodoStatusWarning,
@@ -6,11 +9,13 @@ import {
 } from '../context/todos'
 import type { ToolDefinition } from './registry'
 
+/** 注入 todo_write 所需的会话上下文。 */
 export interface TodoToolController {
   getSessionId: () => string
   isEnabled?: () => boolean
 }
 
+/** 创建 `todo_write` 工具定义。 */
 export function createTodoWriteTool(controller: TodoToolController): ToolDefinition {
   return {
     name: 'todo_write',

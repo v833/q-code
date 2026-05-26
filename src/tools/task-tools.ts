@@ -1,3 +1,6 @@
+/**
+ * 任务图工具：TaskCreate/Update/Get/List，对接 context/tasks 持久化。
+ */
 import {
   blockTask,
   createTask,
@@ -17,6 +20,7 @@ import {
 } from '../context/tasks'
 import type { ToolDefinition } from './registry'
 
+/** Task 工具所需的会话与 cwd 上下文。 */
 export interface TaskToolController {
   getSessionId: () => string
   getCwd: () => string
@@ -27,6 +31,7 @@ type UpdateStatus = TaskStatus | 'deleted'
 
 const UPDATE_STATUSES = new Set<string>([...TASK_STATUSES, 'deleted'])
 
+/** 创建任务图 CRUD 工具集合。 */
 export function createTaskTools(controller: TaskToolController): ToolDefinition[] {
   return [
     createTaskCreateTool(controller),

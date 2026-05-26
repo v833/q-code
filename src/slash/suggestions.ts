@@ -1,5 +1,9 @@
+/**
+ * 斜杠命令自动补全过滤：按输入前缀匹配并去重。
+ */
 import type { SlashCommandSuggestion } from './types'
 
+/** 返回以 `input` 为前缀的命令建议，最多 limit 条。 */
 export function filterSlashCommandSuggestions(
   input: string,
   commands: SlashCommandSuggestion[],

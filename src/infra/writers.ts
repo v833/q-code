@@ -1,3 +1,8 @@
+/**
+ * 将 Infra 配置包落地到项目工作区。
+ *
+ * 合并 MCP 设置、在 AGENTS.md 中替换托管规则区块、写入 Skills 文件树。
+ */
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { writeJsonAtomic } from '../utils/atomic-write'
@@ -7,6 +12,14 @@ import { getProjectInfraDir, getProjectInfraStatePath } from './state'
 const MANAGED_START = '<!-- q-code-infra:start'
 const MANAGED_END = '<!-- q-code-infra:end -->'
 
+/**
+ * 应用完整配置包：MCP 合并、AGENTS.md 托管区块、Skills 目录。
+ *
+ * @param params.cwd - 项目工作目录
+ * @param params.configPackage - 管理端下发的配置包
+ * @param params.skills - 已下载的 Skill 包列表
+ * @returns 各落地路径与写入项摘要
+ */
 export async function applyInfraConfigPackage(params: {
   cwd: string
   configPackage: InfraConfigPackage
@@ -30,6 +43,11 @@ export async function applyInfraConfigPackage(params: {
   }
 }
 
+/**
+ * 将配置包中的 `mcpServers` 与现有 `.q-code/settings.json` 浅合并。
+ *
+ * @returns 本次写入的 MCP server 名称列表
+ */
 export async function mergeMcpSettings(
   cwd: string,
   mcpServers: Record<string, unknown> | undefined
@@ -51,6 +69,11 @@ export async function mergeMcpSettings(
   return Object.keys(incomingServers)
 }
 
+/**
+ * 在 `AGENTS.md` 中插入或替换 `q-code-infra` 托管 HTML 注释区块。
+ *
+ * @returns 规则文件路径；无 `agentRules` 时返回 `undefined`
+ */
 export async function writeAgentRules(
   cwd: string,
   configPackage: InfraConfigPackage
@@ -67,6 +90,11 @@ export async function writeAgentRules(
   return target
 }
 
+/**
+ * 将 Skill 包文件写入 `.q-code/skills/<name>/`，跳过路径穿越条目。
+ *
+ * @returns 成功写入的 Skill 名称列表
+ */
 export async function writeSkills(cwd: string, skills: InfraSkillPackage[]): Promise<string[]> {
   const written: string[] = []
   for (const skill of skills) {
@@ -83,6 +111,11 @@ export async function writeSkills(cwd: string, skills: InfraSkillPackage[]): Pro
   return written
 }
 
+/**
+ * 在现有 Markdown 中替换托管区块，或追加到文末。
+ *
+ * 通过 `MANAGED_START` / `MANAGED_END` 标记定位，避免重复插入多段规则。
+ */
 export function replaceManagedBlock(existing: string, block: string): string {
   const normalized = existing.replace(/\s+$/g, '')
   const start = normalized.indexOf(MANAGED_START)

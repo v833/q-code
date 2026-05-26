@@ -1,3 +1,6 @@
+/**
+ * 项目记忆目录读写：`MEMORY.md` 索引、主题 Markdown 文件与 system prompt 记忆指引组装。
+ */
 import { createHash } from 'node:crypto'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
@@ -14,21 +17,27 @@ import {
   type MemoryType
 } from './memory-types'
 
+/** 记忆索引文件名。 */
 export const MEMORY_ENTRYPOINT = 'MEMORY.md'
+/** 索引文件最大行数。 */
 export const MAX_ENTRYPOINT_LINES = 200
+/** 索引文件最大字节数。 */
 export const MAX_ENTRYPOINT_BYTES = 25000
 
+/** 含 frontmatter 与正文的完整记忆文档。 */
 export interface MemoryDocument extends MemoryEntry {
   frontmatter: MemoryFrontmatter
   body: string
   relativePath: string
 }
 
+/** 仅含 frontmatter 与路径的记忆元数据（不含正文）。 */
 export interface MemoryHeader extends MemoryEntry {
   frontmatter: MemoryFrontmatter
   relativePath: string
 }
 
+/** 记忆目录解析选项。 */
 export interface MemoryOptions {
   cwd?: string
   storageDir?: string
@@ -48,11 +57,13 @@ function sanitizeSlug(input: string): string {
   )
 }
 
+/** 返回 `<projectDir>/memory` 绝对路径。 */
 export function getProjectMemoryDir(options: MemoryOptions = {}): string {
   const storage = getProjectStorageInfo(options.cwd ?? process.cwd(), options.storageDir)
   return path.join(storage.projectDir, 'memory')
 }
 
+/** 创建记忆目录并在缺失时初始化空 `MEMORY.md`。 */
 export async function ensureMemoryDirExists(options: MemoryOptions = {}): Promise<string> {
   const memoryDir = getProjectMemoryDir(options)
   await fs.mkdir(memoryDir, { recursive: true })
@@ -65,6 +76,7 @@ export async function ensureMemoryDirExists(options: MemoryOptions = {}): Promis
   return memoryDir
 }
 
+/** 生成记忆目录与索引路径说明段落。 */
 export function formatMemorySystemLocation(memoryDir: string): string[] {
   const entrypointPath = path.join(memoryDir, MEMORY_ENTRYPOINT)
   return [
@@ -74,6 +86,7 @@ export function formatMemorySystemLocation(memoryDir: string): string[] {
   ]
 }
 
+/** 生成写入/更新记忆的操作指引段落。 */
 export function buildMemoryPromptInstructions(): string[] {
   return [
     '只把未来对话仍然有用、且不能从当前仓库可靠推导的信息写入项目记忆。',
@@ -84,6 +97,10 @@ export function buildMemoryPromptInstructions(): string[] {
   ]
 }
 
+/**
+ * 组装注入 system prompt 的完整项目记忆说明（含索引内容与各类指引）。
+ * 用户查询含「忽略记忆」短语时不注入索引正文。
+ */
 export async function buildMemorySystemContext(params: {
   cwd?: string
   storageDir?: string
@@ -107,6 +124,7 @@ export async function buildMemorySystemContext(params: {
   return sections.join('\n\n')
 }
 
+/** 读取并截断后的 `MEMORY.md` 索引文本；空文件返回 null。 */
 export async function readMemoryEntrypoint(options: MemoryOptions = {}): Promise<string | null> {
   const memoryDir = await ensureMemoryDirExists(options)
   const raw = await fs.readFile(path.join(memoryDir, MEMORY_ENTRYPOINT), 'utf-8')
@@ -114,6 +132,7 @@ export async function readMemoryEntrypoint(options: MemoryOptions = {}): Promise
   return [truncated.content, truncated.warning].filter(Boolean).join('\n\n') || null
 }
 
+/** 列出所有有效主题记忆文件（含正文）。 */
 export async function listMemoryFiles(options: MemoryOptions = {}): Promise<MemoryDocument[]> {
   const headers = await loadMemoryHeaders(options)
   return loadMemoryDocumentBodies(
@@ -122,6 +141,7 @@ export async function listMemoryFiles(options: MemoryOptions = {}): Promise<Memo
   )
 }
 
+/** 加载所有主题记忆的 frontmatter 元数据（不读正文）。 */
 export async function loadMemoryHeaders(options: MemoryOptions = {}): Promise<MemoryHeader[]> {
   const memoryDir = await ensureMemoryDirExists(options)
   const relativePaths = await collectMemoryMarkdownFiles(memoryDir)
@@ -147,6 +167,9 @@ export async function loadMemoryHeaders(options: MemoryOptions = {}): Promise<Me
     .sort((a, b) => a.relativePath.localeCompare(b.relativePath))
 }
 
+/**
+ * 按相对路径批量加载记忆正文；路径越界或 frontmatter 无效时跳过。
+ */
 export async function loadMemoryDocumentBodies(
   options: MemoryOptions,
   relativePaths: readonly string[]
@@ -175,6 +198,10 @@ export async function loadMemoryDocumentBodies(
   return docs.filter((doc): doc is MemoryDocument => doc !== null)
 }
 
+/**
+ * 写入或更新主题记忆文件，并重建 `MEMORY.md` 索引。
+ * @returns 文件路径、文件名及是否为更新已有文件
+ */
 export async function writeProjectMemory(input: {
   cwd?: string
   storageDir?: string
@@ -217,6 +244,7 @@ export async function writeProjectMemory(input: {
   return { filePath, fileName, updatedExisting: Boolean(existingFileName) }
 }
 
+/** 检测用户查询是否要求本轮忽略已保存记忆。 */
 export function shouldIgnoreMemory(query: string): boolean {
   const normalized = query.toLowerCase()
   return ['ignore memory', "don't use memory", 'do not use memory', '忽略记忆', '不要用记忆', '别用记忆'].some((term) =>

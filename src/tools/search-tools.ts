@@ -1,9 +1,13 @@
+/**
+ * 联网搜索与网页抓取工具（Tavily/Serper 自动选择 + web_fetch）。
+ */
 import type { ToolDefinition } from './registry'
 import TurndownService from 'turndown'
 import { safeFetchUrl } from './safe-fetch'
 
 // ── Tavily（自动挡）──────────────────────────────
 
+/** Tavily 实现的 web_search 工具。 */
 export const tavilySearchTool: ToolDefinition = {
   name: 'web_search',
   description: '搜索互联网获取最新信息。返回相关网页的标题、链接和内容摘要',
@@ -58,6 +62,7 @@ export const tavilySearchTool: ToolDefinition = {
 
 // ── Serper（手动挡）──────────────────────────────
 
+/** Serper 实现的 web_search 工具（与 Tavily 二选一）。 */
 export const serperSearchTool: ToolDefinition = {
   name: 'web_search',
   description: '搜索互联网获取最新信息。返回 Google 搜索结果的标题、链接和摘要',
@@ -115,6 +120,7 @@ export const serperSearchTool: ToolDefinition = {
 
 // ── Web Fetch（手动挡配套）──────────────────────────────
 
+/** 抓取 URL 并转为 Markdown（经 safe-fetch 校验）。 */
 export const webFetchTool: ToolDefinition = {
   name: 'web_fetch',
   description:
@@ -164,6 +170,7 @@ function htmlToMarkdown(html: string): string {
 
 // ── 根据环境变量选择搜索后端 ──────────────────────────────
 
+/** 按环境变量选择可用的 web_search 实现。 */
 export function pickSearchTool(): ToolDefinition {
   if (process.env.TAVILY_API_KEY) return tavilySearchTool
   if (process.env.SERPER_API_KEY) return serperSearchTool

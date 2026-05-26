@@ -1,3 +1,7 @@
+/**
+ * 自定义工具目录加载：扫描 `~/.q-code/tools` 与 `<cwd>/.q-code/tools`，
+ * 解析 schema.json 并以子进程执行 execute 命令。
+ */
 import { spawn } from 'node:child_process'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
@@ -9,10 +13,10 @@ const TOOL_SCHEMA_FILE = 'schema.json'
 const CUSTOM_TOOL_TIMEOUT_MS = 10_000
 const CUSTOM_TOOL_MAX_BUFFER = 1024 * 1024
 
-/** stdin JSON envelope version sent to custom tool `execute` commands. */
+/** 写入自定义工具 execute 子进程 stdin 的协议版本号。 */
 export const CUSTOM_TOOL_STDIN_VERSION = 1
 
-/** Result of scanning user/project custom tool directories. */
+/** 扫描用户/项目自定义工具目录后的汇总结果。 */
 export interface LoadedCustomToolsResult {
   tools: ToolDefinition[]
   warnings: string[]
@@ -32,24 +36,23 @@ interface CustomToolInputEnvelope {
   }
 }
 
-/** Resolves q-code home (`Q_CODE_HOME` or `~/.q-code`). */
+/** 解析 q-code 主目录（`Q_CODE_HOME` 或 `~/.q-code`）。 */
 export function getQCodeHome(): string {
   return process.env.Q_CODE_HOME?.trim() || path.join(os.homedir(), '.q-code')
 }
 
-/** Directory for user-level custom tools (`<Q_CODE_HOME>/tools`). */
+/** 用户级自定义工具目录（`<Q_CODE_HOME>/tools`）。 */
 export function getUserToolsDir(): string {
   return path.join(getQCodeHome(), 'tools')
 }
 
-/** Directory for project-level custom tools (`<cwd>/.q-code/tools`). */
+/** 项目级自定义工具目录（`<cwd>/.q-code/tools`）。 */
 export function getProjectToolsDir(cwd: string): string {
   return path.join(path.resolve(cwd), '.q-code', 'tools')
 }
 
 /**
- * Loads custom tools from user and project directories.
- * Project tools override user tools on name collision.
+ * 从用户与项目目录加载自定义工具；同名时项目覆盖用户。
  */
 export async function loadAllCustomTools(cwd: string): Promise<LoadedCustomToolsResult> {
   const [userResult, projectResult] = await Promise.all([
@@ -177,8 +180,8 @@ function normalizeCustomToolSchema(
 }
 
 /**
- * Runs a custom tool `execute` command in `toolDir`, passing a versioned JSON envelope on stdin.
- * Parses JSON stdout as structured output when possible; otherwise returns plain text or error envelopes.
+ * 在 `toolDir` 下执行自定义工具的 execute 命令，向 stdin 写入版本化 JSON 信封。
+ * 优先解析 stdout 为 JSON 结构化输出；否则返回纯文本或错误信封。
  */
 export async function executeCustomToolCommand(
   command: string,

@@ -1,3 +1,7 @@
+/**
+ * Legacy 冒烟脚本：企业 Infra 知识候选上报（需配置 base URL / token）。
+ * 由 `pnpm test:infra-candidate` 调用。
+ */
 import { bootstrapMcp, closeMcpSubsystem } from '../mcp/bootstrap'
 import { submitInfraKnowledgeCandidate } from '../infra/candidate'
 import { ToolRegistry } from '../tools/registry'

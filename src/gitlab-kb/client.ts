@@ -1,5 +1,11 @@
+/**
+ * GitLab Wiki REST API 客户端。
+ *
+ * 使用 `PRIVATE-TOKEN` 认证，支持列表/读取/创建/更新及 upsert。
+ */
 import type { GitLabKbConfig } from './config'
 
+/** GitLab Wiki 页面元数据与正文。 */
 export interface GitLabWikiPage {
   title: string
   slug: string
@@ -8,6 +14,7 @@ export interface GitLabWikiPage {
   encoding?: string
 }
 
+/** 创建或更新 Wiki 页时的请求体字段。 */
 export interface GitLabWikiWriteInput {
   title: string
   content: string
@@ -15,6 +22,7 @@ export interface GitLabWikiWriteInput {
   format?: 'markdown' | 'rdoc' | 'asciidoc' | 'org'
 }
 
+/** GitLab API 非 2xx 响应时抛出的错误，附带 HTTP 状态与原始响应体。 */
 export class GitLabKbHttpError extends Error {
   constructor(
     message: string,
@@ -26,12 +34,19 @@ export class GitLabKbHttpError extends Error {
   }
 }
 
+/** 针对单个 GitLab 项目的 Wiki API 封装。 */
 export class GitLabWikiClient {
   constructor(
     private readonly config: GitLabKbConfig,
+    /** 已 URL 编码的 project id 或 `group%2Fproject` 路径 */
     private readonly projectId: string
   ) {}
 
+  /**
+   * 列出项目下全部 Wiki 页。
+   *
+   * @param options.withContent - 为 true 时请求体包含正文（搜索场景使用）
+   */
   async listPages(options: { withContent?: boolean; signal?: AbortSignal } = {}): Promise<GitLabWikiPage[]> {
     return this.request<GitLabWikiPage[]>('/wikis', {
       method: 'GET',
@@ -40,6 +55,7 @@ export class GitLabWikiClient {
     })
   }
 
+  /** 按 slug 获取单页 Wiki。 */
   async getPage(slug: string, options: { signal?: AbortSignal } = {}): Promise<GitLabWikiPage> {
     return this.request<GitLabWikiPage>(`/wikis/${encodeURIComponent(slug)}`, {
       method: 'GET',
@@ -47,6 +63,7 @@ export class GitLabWikiClient {
     })
   }
 
+  /** 创建新 Wiki 页。 */
   async createPage(
     input: GitLabWikiWriteInput,
     options: { signal?: AbortSignal } = {}
@@ -62,6 +79,7 @@ export class GitLabWikiClient {
     })
   }
 
+  /** 按 slug 更新已有 Wiki 页。 */
   async updatePage(
     slug: string,
     input: GitLabWikiWriteInput,
@@ -78,6 +96,11 @@ export class GitLabWikiClient {
     })
   }
 
+  /**
+   * 存在则更新、404 则创建。
+   *
+   * @returns 最终页面与是否为新创建
+   */
   async upsertPage(
     input: GitLabWikiWriteInput,
     options: { signal?: AbortSignal } = {}
@@ -160,11 +183,14 @@ function formatGitLabError(status: number, text: string): string {
     if (typeof message === 'string') return `${fallback}: ${message}`
     if (message && typeof message === 'object') return `${fallback}: ${JSON.stringify(message)}`
   } catch {
-    // keep fallback below
+    // 使用下方 fallback
   }
   return `${fallback}: ${text.slice(0, 500)}`
 }
 
+/**
+ * 由标题生成 Wiki slug（空白转连字符、去掉 `.md` 与首尾斜杠）。
+ */
 export function slugFromTitle(title: string): string {
   return title
     .trim()

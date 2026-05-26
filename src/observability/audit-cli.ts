@@ -1,18 +1,37 @@
+/**
+ * `q-code audit` 子命令实现：校验本地 NDJSON 审计日志、按条件 tail 与 follow。
+ *
+ * 由 `src/runtime/cli-info.ts` 在进入主循环前 short-circuit 调用
+ * `runAuditCli`，不初始化会话或 MCP。
+ */
 import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs'
 import { open } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import { getAuditConfig, type AuditRecord } from './audit'
 
+/** `q-code audit verify` 的校验汇总结果。 */
 export interface AuditVerifyResult {
+  /** 无错误时为 `true` */
   ok: boolean
+  /** 扫描的 NDJSON 文件数 */
   files: number
+  /** 解析成功的事件总行数 */
   totalEvents: number
+  /** 人类可读错误列表（含文件路径与行号） */
   errors: string[]
+  /** 按事件名计数 */
   byEvent: Record<string, number>
+  /** 按 sessionId 计数 */
   bySessionId: Record<string, number>
 }
 
+/**
+ * 执行 `q-code audit` 子命令路由。
+ *
+ * @param argv - `audit` 之后的参数（如 `verify`、`tail` 及选项）
+ * @returns 进程退出码：`0` 成功，`1` 校验失败或未知子命令
+ */
 export async function runAuditCli(argv: string[]): Promise<number> {
   const [subcommand = 'verify'] = argv
   if (subcommand === 'verify') {
@@ -28,6 +47,11 @@ export async function runAuditCli(argv: string[]): Promise<number> {
   return subcommand === 'help' || subcommand === '--help' || subcommand === '-h' ? 0 : 1
 }
 
+/**
+ * 扫描审计目录中的 NDJSON 文件，校验 JSON 与必要字段、按 pid 检查 seq 单调性。
+ *
+ * @param options - 目录、日期范围等过滤条件
+ */
 export async function verifyAuditLogs(options: AuditCliOptions = {}): Promise<AuditVerifyResult> {
   const files = listAuditFiles(options)
   const result: AuditVerifyResult = {
@@ -76,6 +100,11 @@ export async function verifyAuditLogs(options: AuditCliOptions = {}): Promise<Au
   return result
 }
 
+/**
+ * 按 session/event 过滤输出审计行；`follow` 时轮询新追加内容。
+ *
+ * @param options - 过滤、`follow` 与自定义 `stdout` 回调
+ */
 export async function tailAuditLogs(options: AuditCliOptions = {}): Promise<void> {
   const files = listAuditFiles(options)
   for (const filePath of files) {
@@ -106,15 +135,25 @@ export async function tailAuditLogs(options: AuditCliOptions = {}): Promise<void
   }
 }
 
+/** `verify` / `tail` 共用的 CLI 与测试选项。 */
 export interface AuditCliOptions {
+  /** 审计目录，默认 `getAuditConfig().auditDir` */
   auditDir?: string
+  /** 起始日期 `YYYY-MM-DD`（文件名中的日期） */
   from?: string
+  /** 结束日期 `YYYY-MM-DD` */
   to?: string
+  /** 仅输出匹配会话 ID 的记录 */
   sessionId?: string
+  /** 仅输出匹配事件名的记录 */
   event?: string
+  /** 输出已有内容后继续 follow 新行 */
   follow?: boolean
+  /** follow 轮询间隔（毫秒），默认 1000 */
   followIntervalMs?: number
+  /** 用于中断 follow 的 AbortSignal */
   signal?: AbortSignal
+  /** 自定义行输出（测试用），默认 `console.log` */
   stdout?: (line: string) => void
 }
 

@@ -1,3 +1,6 @@
+/**
+ * 通用工具：fetch_url、glob、grep、本地预览服务器等。
+ */
 import { createReadStream, readFileSync, statSync, existsSync } from 'node:fs'
 import { lstat, open, readdir } from 'node:fs/promises'
 import { extname, join, relative, resolve } from 'node:path'
@@ -27,6 +30,7 @@ export const SEARCH_IGNORE_DIRS = [
   'vendor'
 ] as const
 
+/** 与 {@link SEARCH_IGNORE_DIRS} 对应的 fast-glob 忽略模式。 */
 export const SEARCH_IGNORE_GLOBS = SEARCH_IGNORE_DIRS.map((dir) => `${dir}/**`)
 
 const GREP_DEFAULT_TIMEOUT_MS = 8000
@@ -67,6 +71,7 @@ const GREP_BINARY_EXTENSIONS = new Set([
   '.zip'
 ])
 
+/** 安全抓取单个 URL 的原始内容。 */
 export const fetchUrlTool: ToolDefinition = {
   name: 'fetch_url',
   description: '抓取指定 URL 的网页内容并转换为纯文本（自动剥离 HTML 标签）',
@@ -106,6 +111,7 @@ export const fetchUrlTool: ToolDefinition = {
   }
 }
 
+/** 按 glob 模式查找文件路径。 */
 export const globTool: ToolDefinition = {
   name: 'glob',
   description:
@@ -146,6 +152,7 @@ export const globTool: ToolDefinition = {
   }
 }
 
+/** 在仓库内按正则搜索文件内容。 */
 export const grepTool: ToolDefinition = {
   name: 'grep',
   description: '在文件中搜索匹配指定模式的内容。返回匹配的行号和内容',
@@ -423,6 +430,7 @@ const MIME: Record<string, string> = {
   // ...
 }
 
+/** 启动本地 HTTP 预览静态文件。 */
 export const startPreviewTool: ToolDefinition = {
   name: 'start_preview',
   description: '启动 app/ 目录的预览服务器。生成应用文件后必须立即调用此工具',
@@ -478,6 +486,7 @@ export const startPreviewTool: ToolDefinition = {
   }
 }
 
+/** 将预览 URL 解析为 root 下的绝对文件路径。 */
 export function resolvePreviewFilePath(root: string, rawUrl: string | undefined): string | null {
   const rawPath = rawUrl?.split('?')[0] || '/'
   let decodedPath: string

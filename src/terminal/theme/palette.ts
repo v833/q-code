@@ -1,3 +1,8 @@
+/**
+ * TUI 动漫风格调色板：Ink 组件使用的十六进制颜色名。
+ */
+
+/** 全局主题色表。 */
 export const animeTheme = {
   duck: '#ffd86b',
   duckShadow: '#f6a84f',
@@ -11,4 +16,5 @@ export const animeTheme = {
   danger: '#ff6b8f'
 } as const
 
+/** {@link animeTheme} 的键名联合类型。 */
 export type AnimeThemeColor = keyof typeof animeTheme

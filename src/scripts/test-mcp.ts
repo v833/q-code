@@ -1,3 +1,7 @@
+/**
+ * Legacy 冒烟脚本：在临时目录启动内联 MCP server，验证 bootstrap、工具注册与重连。
+ * 由 `pnpm test:mcp` 调用，非生产运行时路径。
+ */
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

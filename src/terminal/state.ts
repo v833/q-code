@@ -1,3 +1,6 @@
+/**
+ * TUI 可渲染状态：`TerminalState`、transcript 条目类型，以及将 {@link TerminalEvent} 归约为状态的 reducer。
+ */
 import type {
   TerminalBackgroundAgentItem,
   TerminalEvent,
@@ -8,8 +11,10 @@ import type {
 import type { SlashCommandSuggestion } from '../slash'
 import type { CacheMode } from '../usage'
 
+/** transcript 中单条记录的类别。 */
 export type TranscriptItemKind = 'message' | 'tool' | 'usage' | 'context'
 
+/** 对话区一条可渲染记录（消息、工具调用、用量或上下文事件）。 */
 export interface TranscriptItem {
   id: string
   kind: TranscriptItemKind
@@ -23,6 +28,7 @@ export interface TranscriptItem {
   meta?: TranscriptItemMeta
 }
 
+/** 工具类 transcript 条目的附加元数据（预览、恢复提示等）。 */
 export interface TranscriptItemMeta {
   toolName?: string
   resultLength?: number
@@ -33,18 +39,21 @@ export interface TranscriptItemMeta {
   offloadFiles?: string[]
 }
 
+/** 上下文 token 占用快照，供状态栏 ContextMeter 使用。 */
 export interface TerminalContextUsage {
   used: number
   limit: number
   state?: string
 }
 
+/** 累计 token 用量摘要。 */
 export interface TerminalUsage {
   totalTokens: number
   inputTokens: number
   outputTokens: number
 }
 
+/** 顶栏/状态栏展示的会话与模式信息。 */
 export interface TerminalSessionInfo {
   sessionId: string
   cwd?: string
@@ -54,6 +63,7 @@ export interface TerminalSessionInfo {
   cacheMode: CacheMode
 }
 
+/** TUI 全局 UI 状态，由 {@link terminalReducer} 根据事件更新。 */
 export interface TerminalState {
   transcript: TranscriptItem[]
   status: TerminalStatus
@@ -74,6 +84,7 @@ export interface TerminalState {
 const MAX_TRANSCRIPT_ITEMS = 400
 const NOISY_SUCCESS_TOOL_RESULTS = new Set(['read_file', 'grep'])
 
+/** 创建空的 {@link TerminalState}（Ready、空 transcript）。 */
 export function createInitialTerminalState(): TerminalState {
   return {
     transcript: [],
@@ -89,6 +100,10 @@ export function createInitialTerminalState(): TerminalState {
   }
 }
 
+/**
+ * 将 {@link TerminalEvent} 应用到 {@link TerminalState}：维护流式 assistant、
+ * 工具调用配对、上下文/用量条与 transcript 上限。
+ */
 export function terminalReducer(state: TerminalState, event: TerminalEvent): TerminalState {
   switch (event.type) {
     case 'message': {

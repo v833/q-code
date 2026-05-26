@@ -1,3 +1,8 @@
+/**
+ * 企业 AI 基建管理端 HTTP 客户端。
+ *
+ * 封装配置解析与 Skill 包下载，统一 Bearer 认证、超时与错误响应解析。
+ */
 import type {
   InfraConfig,
   InfraResolveConfigRequest,
@@ -15,13 +20,22 @@ interface ApiResponse<T> {
   }
 }
 
+/** 调用 Infra 管理端 REST API 的客户端。 */
 export class InfraApiClient {
   constructor(private readonly config: InfraConfig) {}
 
+  /**
+   * 根据客户端、用户与仓库上下文解析应下发的配置包。
+   */
   async resolveConfig(request: InfraResolveConfigRequest): Promise<InfraResolveConfigResponse> {
     return this.post<InfraResolveConfigResponse>('/api/v1/client/config:resolve', request)
   }
 
+  /**
+   * 按相对或绝对 URL 下载 Skill 包 JSON。
+   *
+   * @param downloadUrl - 管理端返回的下载地址
+   */
   async downloadSkill(downloadUrl: string): Promise<InfraSkillPackage> {
     const url = new URL(downloadUrl, this.config.baseUrl)
     return this.request<InfraSkillPackage>(url, { method: 'GET' })

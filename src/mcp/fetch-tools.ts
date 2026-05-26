@@ -1,3 +1,6 @@
+/**
+ * 将已连接 MCP server 的 tools/list 结果适配为 q-code ToolDefinition。
+ */
 import type { CallToolResult, Tool as McpTool } from '@modelcontextprotocol/sdk/types.js'
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import type { ToolDefinition } from '../tools/registry'
@@ -6,6 +9,7 @@ import type { ConnectedMcpServer } from './types'
 
 const MAX_MCP_DESCRIPTION_LENGTH = 2048
 
+/** 拉取 MCP 工具列表并包装为延迟（shouldDefer）工具适配器。 */
 export async function fetchToolsForConnection(
   connection: ConnectedMcpServer
 ): Promise<ToolDefinition[]> {
