@@ -61,6 +61,11 @@ model = "gpt-5.4"
 api_key = "sk-..."
 base_url = "https://api.openai.com/v1"
 model = "gpt-5.4"
+
+[langfuse]
+enabled = false
+base_url = "https://cloud.langfuse.com"
+record_io = false
 ```
 
 也可以在项目内使用 `.q-code/config.toml` 覆盖全局配置。配置优先级为：环境变量 > 项目 `.q-code/config.toml` > 全局 `~/.q-code/config.toml` > 项目 `.env` > 内置默认值。
@@ -111,6 +116,17 @@ cp .env.example .env
 | `Q_CODE_AUDIT_MAX_QUEUE_SIZE`  | ❌   | 审计写入内存队列上限，默认 1000                              |
 | `Q_CODE_AUDIT_PII`             | ❌   | 默认不写 prompt/tool 原文；设为 `full` 才写入原文             |
 | `Q_CODE_CRASH_GUARD`           | ❌   | 崩溃保护开关，默认开启；设为 `false` 可关闭全局兜底 handler  |
+| `Q_CODE_LANGFUSE_ENABLED`      | ❌   | Langfuse/OpenTelemetry 导出开关，默认 false                  |
+| `LANGFUSE_PUBLIC_KEY`          | ❌   | Langfuse project public key，仅开启 Langfuse 时需要          |
+| `LANGFUSE_SECRET_KEY`          | ❌   | Langfuse project secret key，仅开启 Langfuse 时需要          |
+| `LANGFUSE_BASE_URL`            | ❌   | Langfuse 实例地址，默认 `https://cloud.langfuse.com`         |
+| `Q_CODE_LANGFUSE_RECORD_IO`    | ❌   | 是否上传 prompt/tool/输出原文，默认 false，仅传摘要          |
+| `Q_CODE_LANGFUSE_SAMPLE_RATE`  | ❌   | Langfuse turn 采样率，0-1，默认 1                            |
+| `Q_CODE_LANGFUSE_ENVIRONMENT`  | ❌   | Langfuse environment 标签，可用于区分 dev/prod/self-hosted   |
+| `Q_CODE_LANGFUSE_RELEASE`      | ❌   | Langfuse release 标签，可用于关联版本或提交                  |
+| `Q_CODE_LANGFUSE_FLUSH_AT`     | ❌   | Langfuse span 批量 flush 条数，默认 20                       |
+| `Q_CODE_LANGFUSE_FLUSH_INTERVAL_SECONDS` | ❌ | Langfuse 定时 flush 间隔秒数，默认 5                         |
+| `Q_CODE_LANGFUSE_TIMEOUT_SECONDS` | ❌ | Langfuse 导出请求超时秒数，默认 5                            |
 | `Q_CODE_MENTION_ALLOW_ABS`     | ❌   | 设为 true 后允许 `@file` 引用绝对路径；默认只允许当前目录内路径 |
 | `Q_CODE_SHELL_TIMEOUT_MS`      | ❌   | `f` 同步命令默认超时，默认 60000ms                           |
 | `Q_CODE_SHELL_TIMEOUT_MAX_MS`  | ❌   | `f.timeoutMs` 上限，默认 1800000ms（30 分钟）                 |
@@ -470,6 +486,24 @@ CLI 校验与查询：
 q-code audit verify --from 2026-05-25 --to 2026-05-25
 q-code audit tail --session <sessionId> --event tool.result --follow
 ```
+
+#### Langfuse 观测导出
+
+Langfuse 是可选的 OpenTelemetry 导出后端，默认关闭。开启后 q-code 会把每轮 turn、Agent step、AI SDK generation、工具调用和 token usage 作为 Langfuse trace/observation 上报；本地 NDJSON audit 和后续 `.q-code/evals` 仍是源数据，不依赖 Langfuse 才能运行。
+
+推荐在全局或项目 `.q-code/config.toml` 中配置：
+
+```toml
+[langfuse]
+enabled = true
+public_key = "pk-lf-..."
+secret_key = "sk-lf-..."
+base_url = "https://langfuse.example.com"
+record_io = false
+sample_rate = 1
+```
+
+默认 `record_io=false`，不会上传完整 prompt、文件内容、shell 输出或工具结果，只上报字符数、SHA-256 摘要、工具名、耗时、token 和错误状态。只有显式设置 `Q_CODE_LANGFUSE_RECORD_IO=true` / `record_io = true` 时，才会把输入输出原文交给 Langfuse，建议仅用于自托管实例或短期调试。
 
 #### 崩溃保护
 

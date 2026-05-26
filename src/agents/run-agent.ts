@@ -22,6 +22,7 @@ import {
   type HookRunner
 } from '../hooks'
 import { createMessageSummaryPayload, getAuditLogger } from '../observability/audit'
+import { observeLangfuseTurn } from '../observability/langfuse'
 import { createToolSearchTool } from '../tools/tool-search-tool'
 import { ToolRegistry, type TeammateIdentity, type ToolDefinition } from '../tools/registry'
 import { resolveAgentTools } from './resolve-agent-tools'
@@ -38,6 +39,7 @@ export interface RunChildAgentParams {
   prompt: string
   availableTools: ToolDefinition[]
   model: any
+  modelName?: string
   runtimeContext?: string
   agentMdContext?: string
   tokenBudget?: number
@@ -138,59 +140,78 @@ export async function runChildAgent(params: RunChildAgentParams): Promise<AgentR
 
   let loopResult: Awaited<ReturnType<typeof agentLoop>>
   try {
-    loopResult = await agentLoop(params.model, registry, messages, system, {
-      tokenBudget: params.tokenBudget,
-      maxOutputTokens: params.maxOutputTokens,
-      escalatedMaxOutputTokens: params.escalatedMaxOutputTokens,
-      maxSteps: params.agentDefinition.maxTurns ?? DEFAULT_AGENT_MAX_TURNS,
-      abortSignal: params.abortSignal,
-      sessionId,
-      hooks: params.hooks,
-      agent: agentContext,
-      quiet: params.quiet,
-      ...(params.teammateIdentity ? { teammateIdentity: params.teammateIdentity } : {}),
-      onText: (text) => {
-        params.onProgress?.({ type: 'text', text })
+    loopResult = await observeLangfuseTurn(
+      {
+        sessionId,
+        cwd,
+        modelName: params.modelName ?? params.agentDefinition.model ?? 'unknown',
+        userQuery: params.prompt,
+        agent: agentContext
       },
-      onToolProgress: (event) => {
-        if (!event.text) return
-        params.onProgress?.({
-          type: 'tool_progress',
-          toolName: event.name,
-          ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
-          text: event.text
+      async (langfuseTurn) =>
+        agentLoop(params.model, registry, messages, system, {
+          tokenBudget: params.tokenBudget,
+          maxOutputTokens: params.maxOutputTokens,
+          escalatedMaxOutputTokens: params.escalatedMaxOutputTokens,
+          maxSteps: params.agentDefinition.maxTurns ?? DEFAULT_AGENT_MAX_TURNS,
+          abortSignal: params.abortSignal,
+          sessionId,
+          hooks: params.hooks,
+          agent: agentContext,
+          quiet: params.quiet,
+          telemetry: ({ step }) => langfuseTurn.telemetryForStep(step),
+          ...(params.teammateIdentity ? { teammateIdentity: params.teammateIdentity } : {}),
+          onText: (text) => {
+            langfuseTurn.onText(text)
+            params.onProgress?.({ type: 'text', text })
+          },
+          onToolProgress: (event) => {
+            langfuseTurn.onToolProgress(event)
+            if (!event.text) return
+            params.onProgress?.({
+              type: 'tool_progress',
+              toolName: event.name,
+              ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
+              text: event.text
+            })
+          },
+          onToolEvent: (event) => {
+            langfuseTurn.onToolEvent(event)
+            if (event.phase === 'start') {
+              totalToolUseCount++
+              params.onProgress?.({
+                type: 'tool_use',
+                toolName: event.name,
+                ...(event.toolCallId ? { toolCallId: event.toolCallId } : {})
+              })
+            }
+          },
+          onToolResult: (event) => {
+            langfuseTurn.onToolResult(event)
+            params.onProgress?.({
+              type: 'tool_result',
+              toolName: event.name,
+              ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
+              isError: event.isError === true,
+              output: event.output
+            })
+          },
+          onUsage: (_turnUsage, nextTotalUsage) => {
+            langfuseTurn.onUsage(_turnUsage, nextTotalUsage)
+            totalUsage = nextTotalUsage
+            turnCount++
+            params.onProgress?.({
+              type: 'turn_usage',
+              turnUsage: _turnUsage,
+              cumulativeUsage: nextTotalUsage,
+              turnCount
+            })
+          },
+          onStepUsage: (stepUsage) => {
+            langfuseTurn.onStepUsage(stepUsage)
+          }
         })
-      },
-      onToolEvent: (event) => {
-        if (event.phase === 'start') {
-          totalToolUseCount++
-          params.onProgress?.({
-            type: 'tool_use',
-            toolName: event.name,
-            ...(event.toolCallId ? { toolCallId: event.toolCallId } : {})
-          })
-        }
-      },
-      onToolResult: (event) => {
-        params.onProgress?.({
-          type: 'tool_result',
-          toolName: event.name,
-          ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
-          isError: event.isError === true,
-          output: event.output
-        })
-      },
-      onUsage: (_turnUsage, nextTotalUsage) => {
-        totalUsage = nextTotalUsage
-        turnCount++
-        params.onProgress?.({
-          type: 'turn_usage',
-          turnUsage: _turnUsage,
-          cumulativeUsage: nextTotalUsage,
-          turnCount
-        })
-      }
-    })
+    )
   } catch (error) {
     getAuditLogger().emit(
       'subagent.fail',

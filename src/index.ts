@@ -211,6 +211,11 @@ import {
   getAuditLogger,
 } from './observability/audit';
 import {
+  initializeLangfuse,
+  observeLangfuseTurn,
+  shutdownLangfuse,
+} from './observability/langfuse';
+import {
   createFileMentionIndex,
   createUserMentionPayload,
   expandFileMentions,
@@ -261,6 +266,7 @@ const compactMaxOutputTokens = getNumberEnv('COMPACT_MAX_OUTPUT_TOKENS', 20000);
 const compactTriggerTokens = Math.floor(
   contextLimitTokens * compactTriggerRatio,
 );
+const langfuseStatus = initializeLangfuse();
 
 const registry = new ToolRegistry();
 
@@ -462,6 +468,7 @@ async function main() {
       version: packageVersion,
       cleanupHandlers: [
         () => closeMcpSubsystem(),
+        () => shutdownLangfuse(),
         () => {
           for (const agent of getAllAsyncAgents()) {
             if (agent.status === 'running') killAsyncAgent(agent.agentId);
@@ -518,6 +525,9 @@ async function main() {
   registerBuiltinTools(createToolSearchTool(registry));
   if (!dumpSystemPrompt) {
     for (const warning of customToolsBootstrap.warnings) print(`  ${warning}`);
+    if (debugMode || langfuseStatus.enabled) {
+      print(`  [Langfuse] ${langfuseStatus.message}`);
+    }
   }
   let lastInfraSync: InfraSyncResult | undefined;
   if (!dumpSystemPrompt) {
@@ -1115,6 +1125,7 @@ async function main() {
     );
     await getAuditLogger().flush();
     await closeMcpSubsystem();
+    await shutdownLangfuse();
     rl?.close();
     terminal?.instance.unmount();
   }
@@ -1267,127 +1278,139 @@ async function main() {
     const turnAbortController = new AbortController();
     activeTurnAbortController = turnAbortController;
     activeTurnInFlight = true;
-
     try {
-      const loopResult = await agentLoop(
-        model,
-        registry,
-        messages,
-        turnSystem,
+      const loopResult = await observeLangfuseTurn(
         {
-          tokenBudget,
-          maxOutputTokens: defaultMaxOutputTokens,
-          escalatedMaxOutputTokens,
-          maxSteps,
-          quiet: useTui,
-          modelName: currentModelName(),
-          abortSignal: turnAbortController.signal,
           sessionId,
-          hooks,
+          cwd: activeStore.cwd,
+          modelName: currentModelName(),
+          userQuery,
           agent: { kind: 'main' },
-          stopAfterToolNames: ['exit_plan_mode'],
-          preflight: (currentMessages, { step, usageAnchor }) =>
-            compactIfNeeded(
-              currentMessages,
-              turnSystem,
-              `Step ${step} preflight`,
-              'preflight',
-              usageAnchor,
-            ),
-          contextUsage: (currentMessages, { usageAnchor }) => {
-            const snapshot = snapshotContext(
-              currentMessages,
-              turnSystem,
-              usageAnchor,
-            );
-            emitTerminal({
-              type: 'context_usage',
-              used: snapshot.used,
-              limit: snapshot.limit,
-              state: snapshot.state,
-              detail: `JIT 快照 ${snapshot.used}/${snapshot.limit}`,
-            });
-            return {
-              used: snapshot.used,
-              limit: snapshot.limit,
-              state: snapshot.state,
-            };
-          },
-          onUsage: (turnUsage, totalUsage) => {
-            latestTotalUsage = totalUsage;
-            activeStore.appendUsage(turnUsage, totalUsage);
-            emitTerminal({ type: 'usage', turnUsage, totalUsage });
-          },
-          onStepUsage: (stepUsage) => {
-            const record = usageTracker.record(
-              stepUsage.model,
-              stepUsage.usage,
-            );
-            const totals = usageTracker.totals();
-            activeStore.appendUsageV2(record, totals);
-          },
-          onText: (text) => {
-            emitTerminal({ type: 'assistant_delta', text });
-          },
-          onToolProgress: (event) => {
-            if (event.type !== 'shell_output' || !event.text) return;
-            if (!useTui) print(`\n${event.text}`);
-            emitTerminal({ type: 'jit_context', text: event.text });
-          },
-          onToolEvent: (event) => {
-            activeStore.appendToolEvent({ type: 'tool_event', ...event });
-            if (event.phase === 'start') {
-              lastToolCall = {
-                name: event.name,
-                ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
+        },
+        async (langfuseTurn) => {
+          const result = await agentLoop(model, registry, messages, turnSystem, {
+            tokenBudget,
+            maxOutputTokens: defaultMaxOutputTokens,
+            escalatedMaxOutputTokens,
+            maxSteps,
+            quiet: useTui,
+            modelName: currentModelName(),
+            abortSignal: turnAbortController.signal,
+            sessionId,
+            hooks,
+            agent: { kind: 'main' },
+            stopAfterToolNames: ['exit_plan_mode'],
+            telemetry: ({ step }) => langfuseTurn.telemetryForStep(step),
+            preflight: (currentMessages, { step, usageAnchor }) =>
+              compactIfNeeded(
+                currentMessages,
+                turnSystem,
+                `Step ${step} preflight`,
+                'preflight',
+                usageAnchor,
+              ),
+            contextUsage: (currentMessages, { usageAnchor }) => {
+              const snapshot = snapshotContext(
+                currentMessages,
+                turnSystem,
+                usageAnchor,
+              );
+              emitTerminal({
+                type: 'context_usage',
+                used: snapshot.used,
+                limit: snapshot.limit,
+                state: snapshot.state,
+                detail: `JIT 快照 ${snapshot.used}/${snapshot.limit}`,
+              });
+              return {
+                used: snapshot.used,
+                limit: snapshot.limit,
+                state: snapshot.state,
               };
-              const tool = registry.get(event.name);
+            },
+            onUsage: (turnUsage, totalUsage) => {
+              langfuseTurn.onUsage(turnUsage, totalUsage);
+              latestTotalUsage = totalUsage;
+              activeStore.appendUsage(turnUsage, totalUsage);
+              emitTerminal({ type: 'usage', turnUsage, totalUsage });
+            },
+            onStepUsage: (stepUsage) => {
+              langfuseTurn.onStepUsage(stepUsage);
+              const record = usageTracker.record(
+                stepUsage.model,
+                stepUsage.usage,
+              );
+              const totals = usageTracker.totals();
+              activeStore.appendUsageV2(record, totals);
+            },
+            onText: (text) => {
+              langfuseTurn.onText(text);
+              emitTerminal({ type: 'assistant_delta', text });
+            },
+            onToolProgress: (event) => {
+              langfuseTurn.onToolProgress(event);
+              if (event.type !== 'shell_output' || !event.text) return;
+              if (!useTui) print(`\n${event.text}`);
+              emitTerminal({ type: 'jit_context', text: event.text });
+            },
+            onToolEvent: (event) => {
+              langfuseTurn.onToolEvent(event);
+              activeStore.appendToolEvent({ type: 'tool_event', ...event });
+              if (event.phase === 'start') {
+                lastToolCall = {
+                  name: event.name,
+                  ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
+                };
+                const tool = registry.get(event.name);
+                emitTerminal({
+                  type: 'tool_call',
+                  name: event.name,
+                  input: event.input,
+                  toolCallId: event.toolCallId,
+                  contextCost: tool?.contextCost,
+                  resultShape: tool?.resultShape,
+                });
+              }
+            },
+            onToolResult: (event) => {
+              langfuseTurn.onToolResult(event);
               emitTerminal({
-                type: 'tool_call',
+                type: 'tool_result',
                 name: event.name,
-                input: event.input,
+                output: previewTerminalValue(event.output),
                 toolCallId: event.toolCallId,
-                contextCost: tool?.contextCost,
-                resultShape: tool?.resultShape,
+                resultLength: event.resultLength,
+                isError: event.isError === true,
               });
-            }
-          },
-          onToolResult: (event) => {
-            emitTerminal({
-              type: 'tool_result',
-              name: event.name,
-              output: previewTerminalValue(event.output),
-              toolCallId: event.toolCallId,
-              resultLength: event.resultLength,
-              isError: event.isError === true,
-            });
-            if (
-              event.name === 'todo_write' &&
-              typeof event.output === 'string'
-            ) {
-              if (!useTui) print(`\n${event.output}`);
-              void emitTaskProgress();
-            }
-            if (
-              event.name.startsWith('task_') &&
-              typeof event.output === 'string'
-            ) {
-              if (!useTui) print(`\n${event.output}`);
-              void emitTaskProgress();
-            }
-            const filePaths = extractToolFilePaths(event.name, event.input);
-            const activated = activateConditionalSkillsForPaths(
-              filePaths,
-              activeStore.cwd,
-            );
-            if (activated.length > 0) {
-              print(`\n  [Skills] 条件激活: ${activated.join(', ')}`);
-              emitTerminal({
-                type: 'slash_commands',
-                commands: buildSlashCommandSuggestions(),
-              });
-            }
-          },
+              if (
+                event.name === 'todo_write' &&
+                typeof event.output === 'string'
+              ) {
+                if (!useTui) print(`\n${event.output}`);
+                void emitTaskProgress();
+              }
+              if (
+                event.name.startsWith('task_') &&
+                typeof event.output === 'string'
+              ) {
+                if (!useTui) print(`\n${event.output}`);
+                void emitTaskProgress();
+              }
+              const filePaths = extractToolFilePaths(event.name, event.input);
+              const activated = activateConditionalSkillsForPaths(
+                filePaths,
+                activeStore.cwd,
+              );
+              if (activated.length > 0) {
+                print(`\n  [Skills] 条件激活: ${activated.join(', ')}`);
+                emitTerminal({
+                  type: 'slash_commands',
+                  commands: buildSlashCommandSuggestions(),
+                });
+              }
+            },
+          });
+          return result;
         },
       );
       emitTerminal({ type: 'assistant_done' });

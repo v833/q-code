@@ -7,7 +7,7 @@
 - **Agent / 任务**：Agent Loop、Plan Mode、Task V2、TodoWrite、上下文压缩、会话持久化（JSONL append-only）、`@file` 文件引用注入、项目记忆、Skills、SubAgent、Agent Teams、Worktree 隔离。
 - **工具执行**：文件/搜索工具、可配置超时与 spill 的 Shell 工具、后台 Shell job（`f_status` / `f_tail` / `f_kill` / `f_list`）。
 - **集成扩展**：MCP server、Hooks（pre/post tool-use 决策）、Slash 命令注册表、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
-- **可观测性**：NDJSON 审计日志（默认开启）、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、Token Budget。
+- **可观测性**：NDJSON 审计日志（默认开启）、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、Token Budget。
 - **TUI**：基于 Ink 的交互式 TUI（默认）、`--classic` 经典 readline、可经管道/CI 自动降级。
 - **CLI 子命令**：`q-code help|version|update|audit`（启动前 short-circuit），其余参数走主交互循环。
 
@@ -72,7 +72,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
 - `src/skills/`：Skills 加载、预算、条件激活和斜杠命令展开。
 - `src/slash/`：斜杠命令注册表、解析、suggestions、formatHelp（`/help` 输出由此驱动）。
 - `src/hooks/`：Pre/Post tool-use Hooks 的配置加载、matcher、command-runner 与 DefaultHookRunner。
-- `src/observability/`：NDJSON 审计日志（`audit.ts`）与 `q-code audit verify|tail` 子命令实现（`audit-cli.ts`）。
+- `src/observability/`：NDJSON 审计日志（`audit.ts`）、可选 Langfuse/OpenTelemetry 导出（`langfuse.ts`）与 `q-code audit verify|tail` 子命令实现（`audit-cli.ts`）。
 - `src/runtime/`：早期 CLI 子命令路由（help/version/update/audit）、颜色环境 bootstrap、`getPackageVersion`、`runCliUpdate`、`installCrashGuard` 与崩溃报告生成。
 - `src/config/`：`runtime-config.ts` 负责加载 `~/.q-code/config.toml`、`<cwd>/.q-code/config.toml`、`.env`，统一映射到 `process.env`（支持多 section/alias）。
 - `src/session/`：`SessionStore`（JSONL append-only、原子写入、cache 模式与 usage 记录持久化）。
@@ -111,7 +111,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
 - Skills 目录支持 `~/.q-code/skills/<name>/SKILL.md`、`~/.agents/skills/<name>/SKILL.md`、`<cwd>/.q-code/skills/<name>/SKILL.md` 与 `<cwd>/.agents/skills/<name>/SKILL.md`；同名优先级为项目级 `.agents/skills` > 项目级 `.q-code/skills` > 用户级 `.agents/skills` > 用户级 `.q-code/skills`。
 - 新增 Slash 命令通过 `createSlashCommandRegistry` + `command(...)` 注册（见 `src/index.ts::createBuiltinSlashCommands`），并填好 `category`、`aliases`、`usage`，以便 `/help` 输出友好。
 - 新增 Hook 事件类型时同步更新 `src/hooks/events.ts` 与 `src/hooks/types.ts` 的导出，并在 `tests/unit/hooks.test.ts` 加覆盖。
-- 新增企业相关能力（Infra / GitLab KB / 审计 PII 模式）必须保持可禁用：环境变量缺省值不能让首次启动失败。
+- 新增企业/外部观测相关能力（Infra / GitLab KB / 审计 PII 模式 / Langfuse）必须保持可禁用：环境变量缺省值不能让首次启动失败。Langfuse 默认关闭，且 `Q_CODE_LANGFUSE_RECORD_IO` 默认不得上传 prompt、文件内容、shell 输出或工具结果原文。
 - 崩溃保护默认开启，新增崩溃处理逻辑必须避免依赖 Ink 输出；用户提示走裸 `stderr.write`，报告默认写 `<Q_CODE_HOME>/crashes`，测试里使用 `register: false` 和 mock `exit`。
 - TypeScript 严格模式 + `moduleResolution: bundler` + `target: ES2022`；优先使用 `import type`、避免 `any`，公共边界用具名 interface。
 - 不要将 `.sessions/`、`.q-code/`（含 `.q-code/logs/`、`.q-code/crashes/`、`.q-code/agents/`、`.q-code/skills/`）、`node_modules/`、`dist/`、覆盖率输出或本地 `.env` 纳入提交。
