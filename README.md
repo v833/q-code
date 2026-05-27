@@ -517,6 +517,8 @@ sample_rate = 1
 
 `q-code eval` 是本地优先的 Agent 回归框架，默认用 mock model / mock tool 跑 deterministic case，不需要真实模型 API key，也不会进入普通会话、MCP 或 TUI 初始化。每次 run 会写出：
 
+完整维护指南见 [docs/agent-evals-guide.md](docs/agent-evals-guide.md)。
+
 ```text
 .q-code/evals/runs/<run-id>/
 ├── run.json
