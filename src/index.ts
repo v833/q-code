@@ -205,6 +205,7 @@ import {
 import { runCliUpdate } from './runtime/update';
 import { installCrashGuard, sha256ForCrashGuard } from './runtime/crash-guard';
 import { runAuditCli } from './observability/audit-cli';
+import { runEvalCli } from './evals';
 import {
   createMessageSummaryPayload,
   createUserPromptPayload,
@@ -242,6 +243,10 @@ if (earlyCliCommand === 'update') {
 if (earlyCliCommand === 'audit') {
   applyRuntimeConfig();
   const code = await runAuditCli(process.argv.slice(3));
+  process.exit(code);
+}
+if (earlyCliCommand === 'eval') {
+  const code = await runEvalCli(process.argv.slice(3));
   process.exit(code);
 }
 

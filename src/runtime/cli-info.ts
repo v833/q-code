@@ -2,14 +2,14 @@
  * 早期 CLI 子命令路由与版本/帮助文案（不启动 MCP 与会话）。
  *
  * `getEarlyCliCommand` 在 `index.ts` 进入主循环前 short-circuit：
- * help、version、update、audit。
+ * help、version、update、audit、eval。
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** 在进入主交互循环前即可处理的子命令。 */
-export type EarlyCliCommand = 'help' | 'version' | 'update' | 'audit'
+export type EarlyCliCommand = 'help' | 'version' | 'update' | 'audit' | 'eval'
 
 let cachedPackageVersion: string | undefined
 
@@ -52,6 +52,7 @@ export function getEarlyCliCommand(argv: string[]): EarlyCliCommand | undefined 
   if (first === 'version' || argv.includes('--version') || argv.includes('-v')) return 'version'
   if (first === 'update') return 'update'
   if (first === 'audit') return 'audit'
+  if (first === 'eval') return 'eval'
   return undefined
 }
 
@@ -72,6 +73,12 @@ export function formatCliHelp(version: string): string {
     '  q-code update [--dry-run]',
     '  q-code audit verify [--from YYYY-MM-DD] [--to YYYY-MM-DD]',
     '  q-code audit tail [--session <id>] [--event <name>] [--follow]',
+    '  q-code eval list [path...]',
+    '  q-code eval run [path...] [--tag <tag>] [--mode <mode>] [--max-cases N] [--max-cost-usd N] [--repeat N] [--concurrency N] [--report json,md,junit] [--out <dir>]',
+    '                  [--allow-real-model] [--judge] [--langfuse-datasets]',
+    '  q-code eval compare <baseline-name|baseline-run> <candidate-run>',
+    '  q-code eval promote <run-dir|run.json> --as <baseline-name>',
+    '  q-code eval trend [--suite <name>] [--limit N]',
     '',
     'Options:',
     '  -h, --help                Show help and exit',
@@ -80,6 +87,11 @@ export function formatCliHelp(version: string): string {
     '      update --dry-run      Show the update command without running it',
     '      audit verify          Verify local NDJSON audit logs',
     '      audit tail            Print local audit records with optional filters',
+    '      eval list             List eval suites and cases',
+    '      eval run              Run deterministic Agent evals and write reports',
+    '      eval compare          Compare two eval runs',
+    '      eval promote          Save a run as a named local baseline',
+    '      eval trend            Build local trend dashboard from eval runs',
     '      --continue            Resume the latest session for this project',
     '      --session <id>        Use a specific session id',
     '      --plan                Start directly in Plan Mode',

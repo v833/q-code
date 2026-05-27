@@ -19,6 +19,10 @@ afterEach(() => {
 
 function trackHome(label?: string): TempHome {
   const home = setupTempHome(label)
+  vi.stubEnv('HOME', home.root)
+  vi.stubEnv('USERPROFILE', home.root)
+  vi.stubEnv('HOMEDRIVE', '')
+  vi.stubEnv('HOMEPATH', '')
   homes.push(home)
   return home
 }
@@ -33,7 +37,6 @@ function writeSkill(baseDir: string, dirName: string, content: string): string {
 describe('skill loader', () => {
   it('loads skills from user .q-code/skills and .agents/skills', async () => {
     const home = trackHome('q-code-skills-')
-    vi.stubEnv('HOME', home.root)
 
     writeSkill(
       getUserSkillsDir(),
@@ -60,7 +63,6 @@ describe('skill loader', () => {
 
   it('loads skills from user and project dirs with project and .agents overriding by name', async () => {
     const home = trackHome('q-code-skills-')
-    vi.stubEnv('HOME', home.root)
 
     writeSkill(
       getUserSkillsDir(),

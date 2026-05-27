@@ -81,6 +81,11 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     flush_interval_seconds: 'Q_CODE_LANGFUSE_FLUSH_INTERVAL_SECONDS',
     timeout_seconds: 'Q_CODE_LANGFUSE_TIMEOUT_SECONDS'
   },
+  eval: {
+    judge_base_url: 'Q_CODE_EVAL_JUDGE_BASE_URL',
+    judge_api_key: 'Q_CODE_EVAL_JUDGE_API_KEY',
+    judge_model: 'Q_CODE_EVAL_JUDGE_MODEL'
+  },
   shell: {
     timeout_ms: 'Q_CODE_SHELL_TIMEOUT_MS',
     timeout_max_ms: 'Q_CODE_SHELL_TIMEOUT_MAX_MS',

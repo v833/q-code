@@ -127,6 +127,9 @@ cp .env.example .env
 | `Q_CODE_LANGFUSE_FLUSH_AT`     | ❌   | Langfuse span 批量 flush 条数，默认 20                       |
 | `Q_CODE_LANGFUSE_FLUSH_INTERVAL_SECONDS` | ❌ | Langfuse 定时 flush 间隔秒数，默认 5                         |
 | `Q_CODE_LANGFUSE_TIMEOUT_SECONDS` | ❌ | Langfuse 导出请求超时秒数，默认 5                            |
+| `Q_CODE_EVAL_JUDGE_BASE_URL`   | ❌   | LLM judge 专用 OpenAI 兼容 base URL；未设时回退 `SUMMARY_BASE_URL` |
+| `Q_CODE_EVAL_JUDGE_API_KEY`    | ❌   | LLM judge 专用 API key；未设时回退 `SUMMARY_API_KEY`          |
+| `Q_CODE_EVAL_JUDGE_MODEL`      | ❌   | LLM judge 专用模型；未设时回退 `SUMMARY_MODEL`                |
 | `Q_CODE_MENTION_ALLOW_ABS`     | ❌   | 设为 true 后允许 `@file` 引用绝对路径；默认只允许当前目录内路径 |
 | `Q_CODE_SHELL_TIMEOUT_MS`      | ❌   | `f` 同步命令默认超时，默认 60000ms                           |
 | `Q_CODE_SHELL_TIMEOUT_MAX_MS`  | ❌   | `f.timeoutMs` 上限，默认 1800000ms（30 分钟）                 |
@@ -171,6 +174,11 @@ pnpm run continue       # 恢复上次会话
 | `-v`, `--version`      | 输出版本号后退出                                         |
 | `update`               | 将全局安装的 q-code 更新到 npm latest                    |
 | `update --dry-run`     | 只显示更新命令，不实际执行                               |
+| `eval list [path...]`  | 列出固定 Agent eval case，默认读取 `evals/smoke`          |
+| `eval run [path...]`   | 运行 deterministic Agent eval，输出本地报告和 trace       |
+| `eval compare <a> <b>` | 对比两个 eval run 的通过率、分数、进度、token 和成本变化  |
+| `eval promote <run> --as <name>` | 保存命名 baseline，供后续 compare 使用           |
+| `eval trend`           | 汇总 `.q-code/evals/runs` 历史 run，生成趋势看板          |
 | `--continue`           | 恢复上次会话                                             |
 | `--session=<id>`       | 指定会话 ID                                              |
 | `--dump-system-prompt` | 输出完整 System Prompt 后退出                            |
@@ -504,6 +512,40 @@ sample_rate = 1
 ```
 
 默认 `record_io=false`，不会上传完整 prompt、文件内容、shell 输出或工具结果，只上报字符数、SHA-256 摘要、工具名、耗时、token 和错误状态。只有显式设置 `Q_CODE_LANGFUSE_RECORD_IO=true` / `record_io = true` 时，才会把输入输出原文交给 Langfuse，建议仅用于自托管实例或短期调试。
+
+#### Agent Eval 与 Langfuse 评测导出
+
+`q-code eval` 是本地优先的 Agent 回归框架，默认用 mock model / mock tool 跑 deterministic case，不需要真实模型 API key，也不会进入普通会话、MCP 或 TUI 初始化。每次 run 会写出：
+
+```text
+.q-code/evals/runs/<run-id>/
+├── run.json
+├── cases.jsonl
+├── report.md
+└── traces/<case-id>-<repeat>.jsonl
+```
+
+常用命令：
+
+```bash
+q-code eval list evals/smoke
+q-code eval list evals/smoke --tag budget
+q-code eval run evals/smoke --no-langfuse
+q-code eval run evals/cli --no-langfuse
+q-code eval run evals/smoke evals/cli --tag regression --concurrency 2 --report json,md,junit --max-cases 20 --max-duration-ms 60000 --max-cost-usd 0.05
+q-code eval run evals/smoke --repeat 3 --langfuse
+q-code eval run evals/smoke --langfuse --langfuse-datasets
+q-code eval run evals/live --allow-real-model --judge --max-cost-usd 0.05
+q-code eval promote .q-code/evals/runs/<run-id> --as main
+q-code eval compare main .q-code/evals/runs/candidate
+q-code eval trend --limit 30
+```
+
+case 文件支持 `mock-agent`、`cli-subprocess` 与 `real-agent` 三种模式。`mock-agent` 用脚本化 mock model/mock tool 验证最终输出、工具轨迹和预算；`cli-subprocess` 会把 `setup.fixture` 复制到隔离 workspace，执行 `cli.command + cli.args`，再评分 stdout/stderr、退出码、文件副作用和 workspace diff；`real-agent` 会复用真实 `agentLoop + ToolRegistry + OPENAI_*` 模型配置，但必须传 `--allow-real-model` 才会执行，默认只暴露只读工具，写文件或 shell 工具必须在 case 的 `real.tools` 中显式列出。断言支持 `final.contains/regex`、`trajectory.strict|unordered|subset`、`requiredTools/forbiddenTools`、`maxExtraTools`、`expectedSteps`、`budgets.maxSteps/maxToolCalls/maxTotalTokens/maxDurationMs/maxCostUsd`、`sideEffects.files[].contains/regex`、`sideEffects.gitDiff`、`safety.forbidSecrets`、`safety.forbiddenOutputPatterns`、`safety.forbiddenToolInputPatterns`、`safety.forbiddenToolOutputPatterns`、`safety.forbiddenPaths`、`checkpoints` 和 opt-in `judge.rubric/threshold/includeTrace`。报告会输出 success、progressRate、progressTimeline、judgeScore、errorType、toolExecutionValidity、toolMetrics、usage、estimatedCostUsd、difficulty breakdown、失败复现命令、trace、stdout/stderr 与 workspace 路径。
+
+`list` 与 `run` 支持 `--grep`、`--tag`、`--exclude-tag`、`--difficulty`、`--mode` 过滤 case；`run` 还支持 `--max-cases`、`--max-duration-ms`、`--max-total-tokens`、`--max-cost-usd` 作为运行级闸门，超过时会生成 `__run_limits__.*` 失败结果并让命令非零退出。成本按 `src/usage/pricing.ts` 的模型价格表估算，mock eval 使用 `q-code-eval-mock` 价格项；缺少价格表的真实模型 case 会保留 token 指标并标记 unknown cost。`--judge` 才会运行 LLM judge，默认用 `Q_CODE_EVAL_JUDGE_*`，未配置时回退 `SUMMARY_*`。`--report` 支持 `json,md,junit`，其中 `run.json` 与 `cases.jsonl` 始终写出；`junit.xml` 用于 CI 展示。`q-code eval promote` 会把一次 run 复制到 `.q-code/evals/baselines/<name>/`，之后可以用 `q-code eval compare <name> <candidate>` 直接对比命名 baseline；`q-code eval trend` 会读取 `.q-code/evals/runs/*/run.json`，写出 `.q-code/evals/trends/trend.json` 与 `trend.md`，用于查看 pass rate、score、progress、tokens、cost 的长期变化。
+
+这套 eval 指标对应一个最小 Agent 质量平台闭环：任务成功率看 `success/passRate`，过程质量看 trajectory 与 progressTimeline，工具可靠性看 toolExecutionValidity/toolMetrics，效率看 steps/tokens/duration/cost，责任安全看 safety/policy scorer，语义质量看 opt-in LLM judge，回归治理看 baseline promote/compare、趋势看板、JUnit CI 和 `.github/workflows/eval-nightly.yml` 定期回归。开启 `Q_CODE_LANGFUSE_ENABLED=true` 时，eval run 会额外导出为 Langfuse `q-code.eval.run` evaluator trace，每个 case 作为 evaluator observation 记录 score、progressRate、errorType、工具指标、token 和估算成本；加 `--langfuse-datasets` 后还会通过 Langfuse Public API 写 dataset item、dataset run item 和 scores。Langfuse 导出失败不会让本地 eval 失败；`.q-code/evals` 仍是评测真源。
 
 #### 崩溃保护
 
@@ -1100,6 +1142,16 @@ tests/
     ├── session-recovery.test.ts
     ├── task-graph.test.ts
     └── team-flow.test.ts
+
+src/evals/                    # q-code eval 本地评测框架
+├── loader.ts                  # 读取 evals/**/*.yaml|json
+├── runner.ts                  # mock-agent / cli-subprocess / real-agent runner + artifact 输出
+├── trace-recorder.ts          # agentLoop 回调转 JSONL trace
+├── judge.ts                   # opt-in LLM-as-judge scorer
+├── scorers.ts                 # final/trajectory/budget/safety/tool/side-effect scorer
+├── langfuse-api.ts            # Langfuse dataset run items / scores Public API bridge
+├── langfuse-export.ts         # 可选 Langfuse evaluator trace 导出
+└── trend.ts                   # 本地趋势看板 JSON/Markdown
 ```
 
 ### 命令
@@ -1114,6 +1166,13 @@ tests/
 | `pnpm test:legacy`      | 跑 `src/scripts/test-*.ts` 全套端到端脚本     |
 | `pnpm test:all`         | vitest + legacy 全部                          |
 | `pnpm typecheck`        | `tsc --noEmit` 全项目类型检查                 |
+| `pnpm eval:smoke`       | 运行 deterministic smoke eval，不导出 Langfuse |
+| `pnpm eval:cli`         | 运行 cli-subprocess fixture eval，不导出 Langfuse |
+| `pnpm eval:ci`          | 运行 smoke + cli eval，并输出 JUnit 报告        |
+| `pnpm eval:smoke:langfuse` | 运行 smoke eval 并导出到配置的 Langfuse       |
+| `pnpm eval:nightly`     | 运行定期 deterministic 回归并生成趋势看板       |
+| `pnpm eval:trend`       | 从历史 eval runs 生成本地趋势看板               |
+| `pnpm eval:compare`     | 对比两个 eval run                              |
 
 ### 关键覆盖点
 
@@ -1128,6 +1187,7 @@ tests/
 | 会话恢复         | `integration/session-recovery.test.ts` — 损坏 JSONL 行被静默跳过、压缩快照分界 |
 | 任务图           | `integration/task-graph.test.ts` — CRUD + 双向依赖 + reset 不复用 id           |
 | Agent Teams      | `integration/team-flow.test.ts` — 完整流程 + reconcile + 并发邮箱 + 大小限制   |
+| Agent Eval       | `unit/evals.test.ts` — 加载 smoke/cli/live case、运行 runner、生成 trace、报告、judge 解析、趋势看板和副作用 artifact |
 
 ### Mock 基础设施
 
@@ -1261,7 +1321,8 @@ System Prompt 由 `PromptBuilder` 按管道顺序拼接，每个 Pipe 可根据�
 ├── settings.json              # 项目级 MCP 配置
 ├── AGENT.md                   # 项目级指令
 ├── skills/<name>/SKILL.md     # 项目级 Skills
-└── agents/<name>.md           # 项目级自定义 Agents
+├── agents/<name>.md           # 项目级自定义 Agents
+└── evals/runs/<run-id>/       # 本地 Agent eval artifact（run/cases/report/traces）
 
 <gitRoot>/.q-code/worktrees/
 └── <agentId>/                 # 后台 Agent worktree 隔离目录
@@ -1313,6 +1374,9 @@ TUI 状态栏默认只展示当前状态；需要查看模式、模型、cache �
 pnpm run test:agents   # SubAgents + 后台 Agent + worktree 隔离
 pnpm run test:skills   # Skills 渐进式披露
 pnpm run test:mcp      # MCP smoke test
+pnpm run eval:smoke    # deterministic Agent eval
+pnpm run eval:cli      # CLI subprocess side-effect eval
+pnpm run eval:trend    # 生成 eval 趋势看板
 pnpm exec tsc --noEmit # TypeScript 类型检查
 ```
 
