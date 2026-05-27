@@ -49,7 +49,21 @@ import {
   todoGuide,
   toolGuide,
 } from './context/prompt-builder';
-import { listProjectSessions, SessionStore } from './session/store';
+import {
+  deleteSession,
+  exportSession,
+  getSessionSummary,
+  listAllSessions,
+  listProjectSessions,
+  purgeSessions,
+  renameSession,
+  restoreSession,
+  searchSessions,
+  SessionStore,
+  type SessionExportFormat,
+  type SessionSearchMatch,
+  type SessionSummary,
+} from './session/store';
 import { microcompact, summarize } from './context/compressor';
 import {
   injectOffloadManifest,
@@ -356,6 +370,22 @@ function createSummaryModel() {
   };
 }
 
+interface ParsedSessionArgs {
+  positional: string[];
+  flags: Set<string>;
+  values: Map<string, string>;
+}
+
+interface PendingSessionSelection {
+  sessions: SessionSummary[];
+  selectedIndex: number;
+}
+
+interface PendingSessionPurge {
+  olderThanDays: number;
+  candidates: SessionSummary[];
+}
+
 /**
  * 主交互循环：会话恢复、工具/MCP/Skills 注册、TUI 或 readline、
  * 用户输入处理、agentLoop、压缩与斜杠命令。
@@ -420,7 +450,7 @@ async function main() {
       return;
     }
     const tasks = await listTasks({
-      cwd: store?.cwd ?? process.cwd(),
+      cwd: runtimeCwd,
       sessionId,
     });
     emitTerminal({
@@ -441,27 +471,29 @@ async function main() {
   if (!dumpSystemPrompt && !useTui) console.log(fmtBanner(packageVersion));
   const isContinue = process.argv.includes('--continue');
   const requestedSessionId = getStringArg('--session');
-  const store = dumpSystemPrompt
-    ? null
+  const initialStore = dumpSystemPrompt
+    ? undefined
     : new SessionStore({
         continueLatest: isContinue,
         sessionId: requestedSessionId,
       });
-  const sessionId = store?.sessionId ?? requestedSessionId ?? 'dump';
-  const runtimeCwd = store?.cwd ?? process.cwd();
-  if (store && isContinue && store.exists()) {
-    lastUserPromptDigest = findLastUserPromptDigest(store.load());
+  let sessionId = initialStore?.sessionId ?? requestedSessionId ?? 'dump';
+  const runtimeCwd = initialStore?.cwd ?? process.cwd();
+  if (initialStore && isContinue && initialStore.exists()) {
+    lastUserPromptDigest = findLastUserPromptDigest(initialStore.load());
   }
-  const planOptions: PlanFileOptions = {
+  let planOptions: PlanFileOptions = {
     cwd: runtimeCwd,
     sessionId,
   };
-  const planFilePath = getPlanFilePath(planOptions);
+  let planFilePath = getPlanFilePath(planOptions);
   let agentMode: ToolVisibilityMode = startInPlanMode ? 'plan' : 'normal';
   let taskMode: TaskMode = 'task';
   let needsPlanModeExitAttachment = false;
   let pendingPlanApproval = false;
   let pendingPlanSummary = '';
+  let pendingSessionSelection: PendingSessionSelection | undefined;
+  let pendingSessionPurge: PendingSessionPurge | undefined;
   let canEmitSessionInfo = false;
   let statusDetailsVisible = false;
   let defaultModelName: string | undefined;
@@ -473,9 +505,9 @@ async function main() {
   const currentModelNameForSnapshot = (): string | undefined =>
     sessionModelOverride ?? defaultModelName;
 
-  if (store) {
+  if (initialStore) {
     installCrashGuard({
-      sessionStore: store,
+      sessionStore: initialStore,
       getTerminal: () => terminal,
       version: packageVersion,
       cleanupHandlers: [
@@ -489,7 +521,7 @@ async function main() {
       ],
       getSnapshot: () => ({
         sessionId,
-        cwd: store.cwd,
+        cwd: initialStore.cwd,
         modelName: currentModelNameForSnapshot(),
         agentMode,
         taskMode,
@@ -591,9 +623,7 @@ async function main() {
           });
       });
   }
-  const hooksBootstrap = await loadHookConfigs(
-    store?.cwd ?? process.cwd(),
-  ).catch((error) => ({
+  const hooksBootstrap = await loadHookConfigs(runtimeCwd).catch((error) => ({
     hooks: [],
     errors: [`[Hooks] 启动失败: ${formatErrorMessage(error)}`],
     userSettingsPath: '',
@@ -604,9 +634,7 @@ async function main() {
     for (const error of hooksBootstrap.errors)
       print(`  [Hooks config] ${error}`);
   }
-  const skillsBootstrap = await bootstrapSkills(
-    store?.cwd ?? process.cwd(),
-  ).catch((error) => {
+  const skillsBootstrap = await bootstrapSkills(runtimeCwd).catch((error) => {
     if (!dumpSystemPrompt)
       print(`  [Skills] 启动失败: ${formatErrorMessage(error)}`);
     return { skillCount: 0, conditionalCount: 0, warnings: [] };
@@ -614,9 +642,7 @@ async function main() {
   if (!dumpSystemPrompt) {
     for (const warning of skillsBootstrap.warnings) print(`  ${warning}`);
   }
-  const agentsBootstrap = await bootstrapAgents(
-    store?.cwd ?? process.cwd(),
-  ).catch((error) => {
+  const agentsBootstrap = await bootstrapAgents(runtimeCwd).catch((error) => {
     if (!dumpSystemPrompt)
       print(`  [Agents] 启动失败: ${formatErrorMessage(error)}`);
     return { agentCount: 0, customCount: 0, warnings: [] };
@@ -641,6 +667,100 @@ async function main() {
       }
     }
   }
+
+  if (dumpSystemPrompt) {
+    registerBuiltinTools(
+      ...createPlanTools({
+        getMode: () => agentMode,
+        setMode: (mode) => {
+          agentMode = mode;
+          registry.setMode(mode);
+        },
+        getPlanFilePath: () => planFilePath,
+        readPlan: () => readPlan(planOptions),
+        writePlan: (content) => writePlan(planOptions, content),
+        markPlanReady: () => {
+          pendingPlanApproval = true;
+        },
+      }),
+    );
+    registerBuiltinTools(
+      ...createTaskTools({
+        getSessionId: () => sessionId,
+        getCwd: () => runtimeCwd,
+        getTaskMode: () => taskMode,
+      }),
+      createTodoWriteTool({
+        getSessionId: () => sessionId,
+        isEnabled: () => taskMode === 'todo',
+      }),
+    );
+    registerBuiltinTools(createSkillTool({ getSessionId: () => sessionId }));
+    const [runtimeContext, agentMdContext] = await Promise.all([
+      getRuntimeEnvironmentContext().then(formatRuntimeEnvironmentContext),
+      loadAgentMdContext(),
+    ]);
+    registerBuiltinTools(
+      createAgentTool({
+        createModel,
+        getDefaultModelName: () => getRequiredEnv('OPENAI_MODEL'),
+        getAvailableTools: () => registry.getVisibleTools(),
+        getRuntimeContext: () => runtimeContext,
+        getAgentMdContext: () => agentMdContext,
+        getMaxOutputTokens: () => defaultMaxOutputTokens,
+        getEscalatedMaxOutputTokens: () => escalatedMaxOutputTokens,
+        getSessionId: () => sessionId,
+        getCwd: () => runtimeCwd,
+        getHooks: () => hooks,
+      }),
+    );
+    registerBuiltinTools(
+      createTeamCreateTool(),
+      createTeamDeleteTool(),
+      createSendMessageTool(),
+    );
+    const builder = new PromptBuilder()
+      .pipe('coreRules', coreRules())
+      .pipe('modeContext', modeContext())
+      .pipe('toolGuide', toolGuide())
+      .pipe('taskGuide', taskGuide())
+      .pipe('taskContext', taskContext())
+      .pipe('todoGuide', todoGuide())
+      .pipe('todoContext', todoContext())
+      .pipe('skillsContext', skillsContext())
+      .pipe('agentsContext', agentsContext())
+      .pipe('teamsContext', teamsContext())
+      .pipe('deferredTools', deferredTools())
+      .pipe('runtimeEnvironment', runtimeEnvironment())
+      .pipe('agentMdInstructions', agentMdInstructions())
+      .pipe('projectMemory', projectMemory())
+      .pipe('sessionContext', sessionContext());
+    const promptCtx: PromptContext = {
+      toolCount: registry.getActiveTools().length,
+      deferredToolSummary: registry.getDeferredToolSummary(),
+      jitToolSummary: registry.getJitToolSummary(),
+      sessionMessageCount: 0,
+      sessionId,
+      agentMode,
+      taskMode,
+      planFilePath,
+      taskContext: undefined,
+      todoContext: undefined,
+      skillsContext: formatSkillsSystemReminder(getModelVisibleSkills()),
+      agentsContext: formatAgentsSystemReminder(getAllAgents()),
+      teamsContext: formatTeamsSystemReminder(),
+      runtimeContext,
+      agentMdContext,
+      memoryContext: await buildMemorySystemContext(),
+    };
+    console.log(builder.build(promptCtx));
+    await closeMcpSubsystem();
+    return;
+  }
+
+  if (!initialStore) throw new Error('Session store was not initialized');
+  let activeStore: SessionStore = initialStore;
+
   function setAgentMode(mode: ToolVisibilityMode): void {
     const previous = agentMode;
     agentMode = mode;
@@ -657,7 +777,7 @@ async function main() {
         { from: previous, to: mode },
         {
           sessionId,
-          cwd: store?.cwd ?? process.cwd(),
+          cwd: activeStore.cwd,
           agent: { kind: 'main' },
         },
       );
@@ -686,7 +806,7 @@ async function main() {
   registerBuiltinTools(
     ...createTaskTools({
       getSessionId: () => sessionId,
-      getCwd: () => store?.cwd ?? process.cwd(),
+      getCwd: () => activeStore.cwd,
       getTaskMode: () => taskMode,
     }),
     createTodoWriteTool({
@@ -704,9 +824,9 @@ async function main() {
   );
 
   let messages: ModelMessage[] = [];
-  if (store && isContinue && store.exists()) {
-    messages = store.load();
-    const restored = store.getSummary();
+  if (activeStore && isContinue && activeStore.exists()) {
+    messages = activeStore.load();
+    const restored = activeStore.getSummary();
     if (!dumpSystemPrompt) {
       printStartupInfo(
         `\n[Session] 恢复会话 "${sessionId}"，${messages.length} 条活跃历史消息`,
@@ -717,8 +837,8 @@ async function main() {
     if (!dumpSystemPrompt) {
       const prefix = isContinue ? '未找到可恢复会话，已创建新会话' : '新会话';
       printStartupInfo(`\n[Session] ${prefix} "${sessionId}"`);
-      if (store)
-        printStartupInfo(`  transcript: ${store.paths.transcriptPath}`);
+      if (activeStore)
+        printStartupInfo(`  transcript: ${activeStore.paths.transcriptPath}`);
     }
   }
 
@@ -814,13 +934,6 @@ async function main() {
 
   const SYSTEM = builder.build(initialPromptCtx);
 
-  if (dumpSystemPrompt) {
-    console.log(SYSTEM);
-    await closeMcpSubsystem();
-    return;
-  }
-  if (!store) throw new Error('Session store was not initialized');
-  const activeStore = store;
   registry.setCwd(activeStore.cwd);
   defaultModelName = getRequiredEnv('OPENAI_MODEL');
   let model = createModel(defaultModelName);
@@ -828,14 +941,14 @@ async function main() {
   let latestTotalUsage: TokenUsage | undefined =
     initialSessionSummary.totalUsage;
   const usageRecords = activeStore.getUsageRecords();
-  const usageTracker = new UsageTracker({
+  let usageTracker = new UsageTracker({
     cacheMode:
       activeStore.getLatestCacheMode() ??
       lastUsageRecord(usageRecords)?.cacheMode ??
       'auto',
     records: usageRecords,
   });
-  const cachePrefixTracker = new CachePrefixTracker();
+  let cachePrefixTracker = new CachePrefixTracker();
   const { model: summaryModel, name: summaryModelName } = createSummaryModel();
   canEmitSessionInfo = true;
 
@@ -1062,6 +1175,8 @@ async function main() {
       slashCommands: buildSlashCommandSuggestions(),
       fileMentionIndex,
       onSubmit: handleInput,
+      onSessionPickerSelect: (targetSessionId) =>
+        switchSession(targetSessionId, { clearTranscript: true }),
       onInterrupt: interruptActiveTurn,
       onExit: closeCli,
     });
@@ -1150,6 +1265,23 @@ async function main() {
     }
 
     try {
+      if (pendingSessionPurge && /^(y|yes|确认|是)$/i.test(trimmed)) {
+        const result = purgeSessions({
+          cwd: activeStore.cwd,
+          olderThanDays: pendingSessionPurge.olderThanDays,
+          confirm: true,
+        });
+        pendingSessionPurge = undefined;
+        print(`\n  [Sessions] 已清理 ${result.deleted.length} 个 trash 会话。`);
+        if (!closed) ask();
+        return;
+      }
+      if (pendingSessionPurge && /^(n|no|取消|否)$/i.test(trimmed)) {
+        pendingSessionPurge = undefined;
+        print('\n  [Sessions] 已取消 purge。');
+        if (!closed) ask();
+        return;
+      }
       if (trimmed.startsWith('/')) {
         const dispatched = await slashRegistry.dispatch(trimmed, {});
         if (dispatched.handled) {
@@ -1606,6 +1738,14 @@ async function main() {
         handleHistoryCommand,
       ),
       command(
+        '/sessions',
+        '管理会话：列表、切换、新建、删除、恢复、导出、搜索',
+        '/sessions [list|info|switch|new|rename|delete|restore|export|search|purge]',
+        'Core',
+        handleSessionsCommand,
+        ['/session'],
+      ),
+      command(
         '/compact',
         '压缩当前对话上下文',
         '/compact [focus]',
@@ -1746,17 +1886,438 @@ async function main() {
       return;
     }
 
-    const lines = ['Recent sessions', ''];
-    for (const item of sessions) {
-      const usage = item.totalUsage
-        ? ` tokens=${item.totalUsage.totalTokens}`
-        : '';
-      lines.push(
-        `- ${item.sessionId} messages=${item.messageCount}${usage} updated=${item.updatedAt ?? '(unknown)'}`,
-      );
-      lines.push(`  ${item.transcriptPath}`);
+    print('\n' + formatSessionsTable(sessions.slice(0, 20), sessionId));
+  }
+
+  async function switchSession(
+    targetId: string,
+    options: {
+      clearTranscript?: boolean;
+      preopenedStore?: SessionStore;
+      reason?: string;
+    } = {},
+  ): Promise<void> {
+    if (activeTurnInFlight) {
+      interruptActiveTurn();
+      print('\n  [Sessions] 当前任务仍在执行，已请求中断；请任务停止后再次切换。');
+      return;
     }
-    print('\n' + lines.join('\n'));
+    const previousSessionId = sessionId;
+    const runningAgents = getAllAsyncAgents().filter((agent) => agent.status === 'running');
+    if (!options.preopenedStore && !getSessionSummary(targetId, { cwd: activeStore.cwd })) {
+      print(`\n  [Sessions] 未找到会话: ${targetId}`);
+      return;
+    }
+    const nextStore =
+      options.preopenedStore ?? new SessionStore({ cwd: activeStore.cwd, sessionId: targetId });
+    const nextMessages = nextStore.load();
+    const usageRecords = nextStore.getUsageRecords();
+
+    activeStore = nextStore;
+    sessionId = nextStore.sessionId;
+    planOptions = { cwd: nextStore.cwd, sessionId };
+    planFilePath = getPlanFilePath(planOptions);
+    messages = nextMessages;
+    summary = '';
+    pendingPlanApproval = false;
+    pendingPlanSummary = '';
+    needsPlanModeExitAttachment = false;
+    pendingSessionSelection = undefined;
+    latestTotalUsage = nextStore.getSummary().totalUsage;
+    usageTracker = new UsageTracker({
+      cacheMode:
+        nextStore.getLatestCacheMode() ??
+        lastUsageRecord(usageRecords)?.cacheMode ??
+        'auto',
+      records: usageRecords,
+    });
+    cachePrefixTracker = new CachePrefixTracker();
+    lastUserPromptDigest = findLastUserPromptDigest(nextMessages);
+
+    registry.setCwd(nextStore.cwd);
+    if (options.clearTranscript) emitTerminal({ type: 'clear' });
+    emitSessionInfo();
+    void emitTaskProgress();
+    getAuditLogger().emit(
+      'session.switch',
+      {
+        from: previousSessionId,
+        to: sessionId,
+        messageCount: messages.length,
+        transcriptPath: nextStore.paths.transcriptPath,
+      },
+      { sessionId, cwd: nextStore.cwd, agent: { kind: 'main' } },
+    );
+    print(
+      `\n  [Sessions] 已切换到会话 ${formatSessionLabel(nextStore.getSummary())}，${messages.length} 条活跃历史。`,
+    );
+    if (options.reason) print(`  [Sessions] ${options.reason}`);
+    if (runningAgents.length > 0) {
+      print(
+        `  [Sessions] ${runningAgents.length} 个后台 SubAgent 仍在运行；它们按原 sessionId 隔离保留，可用 /agents 查看。`,
+      );
+    }
+  }
+
+  async function handleSessionsCommand(input: SlashCommandInput): Promise<void> {
+    const parsed = parseSessionArgs(input.args);
+    const subcommand = parsed.positional[0]?.toLowerCase() ?? 'list';
+    if (subcommand === 'list') {
+      const includeAllProjects = parsed.flags.has('all');
+      const sessions = includeAllProjects
+        ? listAllSessions({ cwd: activeStore.cwd })
+        : listProjectSessions({ cwd: activeStore.cwd });
+      const visible = sessions.slice(0, includeAllProjects ? sessions.length : 20);
+      pendingSessionSelection =
+        !includeAllProjects && visible.length > 0 ? { sessions: visible, selectedIndex: 0 } : undefined;
+      if (useTui && pendingSessionSelection) {
+        emitTerminal({
+          type: 'session_picker',
+          sessions: pendingSessionSelection.sessions,
+          selectedIndex: pendingSessionSelection.selectedIndex,
+          currentSessionId: sessionId,
+        });
+      }
+      print('\n' + formatSessionsTable(visible, sessionId, { includeProject: includeAllProjects }));
+      return;
+    }
+
+    if (subcommand === 'info') {
+      const targetId = parsed.positional[1] ?? sessionId;
+      const session = getSessionSummary(targetId, { cwd: activeStore.cwd, includeTrash: true });
+      if (!session) {
+        print(`\n  [Sessions] 未找到会话: ${targetId}`);
+        return;
+      }
+      print('\n' + formatSessionInfo(session));
+      return;
+    }
+
+    if (subcommand === 'switch') {
+      const targetId = parsed.positional[1];
+      if (!targetId) {
+        print('\n  [Sessions] 用法: /sessions switch <id>');
+        return;
+      }
+      await switchSession(targetId, { clearTranscript: true });
+      return;
+    }
+
+    if (subcommand === 'new') {
+      const displayName = parsed.positional.slice(1).join(' ').trim();
+      const nextStore = new SessionStore({ cwd: activeStore.cwd });
+      if (displayName) nextStore.updateMetadata({ displayName });
+      await switchSession(nextStore.sessionId, {
+        clearTranscript: true,
+        preopenedStore: nextStore,
+        reason: displayName ? `新建会话 "${displayName}"` : '新建会话',
+      });
+      return;
+    }
+
+    if (subcommand === 'rename') {
+      const targetId = parsed.positional[1];
+      const displayName = parsed.positional.slice(2).join(' ').trim();
+      if (!targetId || !displayName) {
+        print('\n  [Sessions] 用法: /sessions rename <id> "<name>"');
+        return;
+      }
+      const meta = renameSession(targetId, displayName, { cwd: activeStore.cwd });
+      print(`\n  [Sessions] 已重命名 ${targetId}: ${meta.displayName ?? '(无名)'}`);
+      return;
+    }
+
+    if (subcommand === 'delete') {
+      const targetId = parsed.positional[1];
+      if (!targetId) {
+        print('\n  [Sessions] 用法: /sessions delete <id> [--force]');
+        return;
+      }
+      if (targetId === sessionId) {
+        print('\n  [Sessions] 不能删除当前正在使用的会话；请先切换到其他会话。');
+        return;
+      }
+      const deleted = deleteSession(targetId, { cwd: activeStore.cwd, force: parsed.flags.has('force') });
+      print(
+        `\n  [Sessions] 已${parsed.flags.has('force') ? '物理删除' : '移入 trash'}: ${deleted.sessionId}`,
+      );
+      return;
+    }
+
+    if (subcommand === 'restore') {
+      const targetId = parsed.positional[1];
+      if (!targetId) {
+        print('\n  [Sessions] 用法: /sessions restore <id>');
+        return;
+      }
+      const restored = restoreSession(targetId, { cwd: activeStore.cwd });
+      print(`\n  [Sessions] 已恢复: ${restored.sessionId}`);
+      return;
+    }
+
+    if (subcommand === 'export') {
+      const targetId = parsed.positional[1];
+      if (!targetId) {
+        print('\n  [Sessions] 用法: /sessions export <id> [--format md|json|html] [--out <path>]');
+        return;
+      }
+      const format = parseSessionExportFormat(parsed.values.get('format') ?? 'md');
+      if (!format) {
+        print('\n  [Sessions] --format 仅支持 md、json、html');
+        return;
+      }
+      const result = exportSession(targetId, {
+        cwd: activeStore.cwd,
+        format,
+        outPath: parsed.values.get('out'),
+      });
+      print(`\n  [Sessions] 已导出 ${result.format}: ${result.outPath} (${result.bytes} bytes)`);
+      return;
+    }
+
+    if (subcommand === 'search') {
+      const keyword = parsed.positional.slice(1).join(' ').trim();
+      if (!keyword) {
+        print('\n  [Sessions] 用法: /sessions search <keyword> [--all]');
+        return;
+      }
+      const matches = searchSessions(keyword, {
+        cwd: activeStore.cwd,
+        allProjects: parsed.flags.has('all'),
+        limit: 50,
+      });
+      print('\n' + formatSessionSearchMatches(matches));
+      return;
+    }
+
+    if (subcommand === 'purge') {
+      const olderThanDays = parseDurationDays(parsed.values.get('older-than') ?? '30d');
+      if (olderThanDays === undefined) {
+        print('\n  [Sessions] --older-than 仅支持 Nd，例如 30d');
+        return;
+      }
+      if (parsed.flags.has('yes') || parsed.flags.has('force')) {
+        const result = purgeSessions({ cwd: activeStore.cwd, olderThanDays, confirm: true });
+        pendingSessionPurge = undefined;
+        print(`\n  [Sessions] 已清理 ${result.deleted.length} 个 trash 会话。`);
+        return;
+      }
+      const preview = purgeSessions({ cwd: activeStore.cwd, olderThanDays });
+      pendingSessionPurge = { olderThanDays, candidates: preview.candidates };
+      print('\n' + formatPurgePreview(preview.candidates, olderThanDays));
+      return;
+    }
+
+    print(
+      '\n  [Sessions] 用法: /sessions [list|info|switch|new|rename|delete|restore|export|search|purge]',
+    );
+  }
+
+  function parseSessionArgs(raw: string): ParsedSessionArgs {
+    const tokens = splitCommandArgs(raw);
+    const positional: string[] = [];
+    const flags = new Set<string>();
+    const values = new Map<string, string>();
+    for (let index = 0; index < tokens.length; index++) {
+      const token = tokens[index]!;
+      if (!token.startsWith('--')) {
+        positional.push(token);
+        continue;
+      }
+      const eqIndex = token.indexOf('=');
+      if (eqIndex > 0) {
+        values.set(token.slice(2, eqIndex), token.slice(eqIndex + 1));
+        continue;
+      }
+      const name = token.slice(2);
+      const next = tokens[index + 1];
+      if (next && !next.startsWith('--') && (name === 'format' || name === 'out' || name === 'older-than')) {
+        values.set(name, next);
+        index++;
+      } else {
+        flags.add(name);
+      }
+    }
+    return { positional, flags, values };
+  }
+
+  function splitCommandArgs(raw: string): string[] {
+    const tokens: string[] = [];
+    let current = '';
+    let quote: '"' | "'" | undefined;
+    for (let index = 0; index < raw.length; index++) {
+      const char = raw[index]!;
+      if (quote) {
+        if (char === quote) {
+          quote = undefined;
+        } else if (char === '\\' && quote === '"' && index + 1 < raw.length) {
+          current += raw[index + 1]!;
+          index++;
+        } else {
+          current += char;
+        }
+        continue;
+      }
+      if (char === '"' || char === "'") {
+        quote = char;
+        continue;
+      }
+      if (/\s/.test(char)) {
+        if (current) {
+          tokens.push(current);
+          current = '';
+        }
+        continue;
+      }
+      current += char;
+    }
+    if (current) tokens.push(current);
+    return tokens;
+  }
+
+  function formatSessionsTable(
+    sessions: SessionSummary[],
+    currentSessionId: string,
+    options: { includeProject?: boolean } = {},
+  ): string {
+    if (sessions.length === 0) return 'Sessions\n\n  当前没有可显示的会话。';
+    const headers = options.includeProject
+      ? [' ', '#', 'Session ID', 'Project', 'Name', 'Msgs', 'Tokens', 'Updated']
+      : [' ', '#', 'Session ID', 'Name', 'Msgs', 'Tokens', 'Updated'];
+    const rows = sessions.map((session, index) => {
+      const base = [
+        session.sessionId === currentSessionId ? '*' : session.trashed ? 'T' : ' ',
+        String(index + 1),
+        shortSessionId(session.sessionId),
+      ];
+      if (options.includeProject) base.push(session.projectKey);
+      base.push(
+        session.displayName ?? '(无名)',
+        String(session.messageCount),
+        formatCompactNumber(session.totalTokens ?? session.totalUsage?.totalTokens ?? 0),
+        formatSessionDate(session.updatedAt),
+      );
+      return base;
+    });
+    return [
+      'Sessions',
+      '',
+      renderPlainTable(headers, rows),
+      '',
+      options.includeProject
+        ? '  --all 显示跨项目会话；切换请回到对应项目后使用 /sessions switch <id>。'
+        : '  ↑/↓ 选择后 Enter 可切换；也可用 /sessions switch <id>。',
+      '  /sessions new "<name>" · /sessions delete <id> · /sessions export <id> --format md',
+    ].join('\n');
+  }
+
+  function formatSessionInfo(session: SessionSummary): string {
+    return [
+      'Session Info',
+      '',
+      `  id:        ${session.sessionId}`,
+      `  name:      ${session.displayName ?? '(无名)'}`,
+      `  project:   ${session.projectKey}`,
+      `  cwd:       ${session.cwd}`,
+      `  created:   ${session.startedAt ?? '(unknown)'}`,
+      `  updated:   ${session.updatedAt ?? '(unknown)'}`,
+      `  messages:  ${session.messageCount}`,
+      `  tokens:    ${session.totalTokens ?? session.totalUsage?.totalTokens ?? 0}`,
+      `  model:     ${session.model ?? '(unknown)'}`,
+      `  tags:      ${session.tags.length > 0 ? session.tags.join(', ') : '(none)'}`,
+      `  trashed:   ${session.trashed === true ? 'yes' : 'no'}`,
+      `  transcript:${session.transcriptPath}`,
+      `  meta:      ${session.metaPath}`,
+    ].join('\n');
+  }
+
+  function formatSessionSearchMatches(matches: SessionSearchMatch[]): string {
+    if (matches.length === 0) return 'Session Search\n\n  没有匹配结果。';
+    const rows = matches.map((match) => [
+      shortSessionId(match.sessionId),
+      match.displayName ?? '(无名)',
+      match.role,
+      formatSessionDate(match.timestamp),
+      match.snippet,
+    ]);
+    return ['Session Search', '', renderPlainTable(['Session', 'Name', 'Role', 'Time', 'Snippet'], rows)].join('\n');
+  }
+
+  function formatPurgePreview(candidates: SessionSummary[], olderThanDays: number): string {
+    if (candidates.length === 0) {
+      return `Sessions Purge\n\n  trash 中没有超过 ${olderThanDays} 天的会话。`;
+    }
+    return [
+      'Sessions Purge',
+      '',
+      `  将清理 ${candidates.length} 个超过 ${olderThanDays} 天的 trash 会话：`,
+      '',
+      renderPlainTable(
+        ['Session', 'Name', 'Updated'],
+        candidates.map((session) => [
+          shortSessionId(session.sessionId),
+          session.displayName ?? '(无名)',
+          formatSessionDate(session.updatedAt),
+        ]),
+      ),
+      '',
+      '  输入 yes 确认，或 no 取消。也可用 /sessions purge --force 跳过确认。',
+    ].join('\n');
+  }
+
+  function renderPlainTable(headers: string[], rows: string[][]): string {
+    const widths = headers.map((header, column) =>
+      Math.min(
+        Math.max(
+          header.length,
+          ...rows.map((row) => stripAnsi(String(row[column] ?? '')).length),
+        ),
+        column === headers.length - 1 ? 80 : 24,
+      ),
+    );
+    const renderRow = (row: string[]) =>
+      row.map((cell, index) => padCell(truncateCell(String(cell ?? ''), widths[index]!), widths[index]!)).join('  ');
+    return [renderRow(headers), renderRow(widths.map((width) => '-'.repeat(width))), ...rows.map(renderRow)]
+      .map((line) => `  ${line}`)
+      .join('\n');
+  }
+
+  function padCell(value: string, width: number): string {
+    const length = stripAnsi(value).length;
+    return length >= width ? value : `${value}${' '.repeat(width - length)}`;
+  }
+
+  function truncateCell(value: string, width: number): string {
+    return stripAnsi(value).length > width ? `${value.slice(0, Math.max(0, width - 1))}…` : value;
+  }
+
+  function shortSessionId(value: string): string {
+    return value.length > 12 ? value.slice(0, 12) : value;
+  }
+
+  function formatSessionLabel(session: SessionSummary): string {
+    return session.displayName ? `"${session.displayName}" (${session.sessionId})` : session.sessionId;
+  }
+
+  function formatCompactNumber(value: number): string {
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
+    if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+    return String(value);
+  }
+
+  function formatSessionDate(value: string | undefined): string {
+    if (!value) return '(unknown)';
+    return value.replace('T', ' ').slice(0, 16);
+  }
+
+  function parseSessionExportFormat(value: string): SessionExportFormat | undefined {
+    return value === 'md' || value === 'json' || value === 'html' ? value : undefined;
+  }
+
+  function parseDurationDays(value: string): number | undefined {
+    const match = value.trim().match(/^(\d+)d$/i);
+    if (!match) return undefined;
+    return Number.parseInt(match[1]!, 10);
   }
 
   async function handlePlanCommand(): Promise<void> {
@@ -2396,7 +2957,7 @@ async function main() {
 
   function getCurrentTaskOptions(): TaskGraphOptions {
     return {
-      cwd: store?.cwd ?? process.cwd(),
+      cwd: activeStore.cwd,
       sessionId,
     };
   }

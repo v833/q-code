@@ -75,6 +75,7 @@ describe('slash command suggestions', () => {
   const commands = [
     { name: '/help', description: 'Show commands' },
     { name: '/history', description: 'Show sessions' },
+    { name: '/sessions', description: 'Manage sessions' },
     { name: '/model', description: 'Switch model' },
     { name: '/hello', description: 'Skill hello' }
   ]
@@ -84,6 +85,12 @@ describe('slash command suggestions', () => {
       '/help',
       '/history',
       '/hello'
+    ])
+  })
+
+  it('finds the sessions command by prefix', () => {
+    expect(filterSlashCommandSuggestions('/sess', commands).map((item) => item.name)).toEqual([
+      '/sessions'
     ])
   })
 

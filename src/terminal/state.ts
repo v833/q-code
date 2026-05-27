@@ -8,6 +8,7 @@ import type {
   TerminalRole,
   TerminalStatus
 } from './events'
+import type { SessionSummary } from '../session/store'
 import type { SlashCommandSuggestion } from '../slash'
 import type { CacheMode } from '../usage'
 
@@ -74,6 +75,11 @@ export interface TerminalState {
   sessionInfo?: TerminalSessionInfo
   statusDetailsVisible: boolean
   slashCommands: SlashCommandSuggestion[]
+  sessionPicker?: {
+    sessions: SessionSummary[]
+    selectedIndex: number
+    currentSessionId: string
+  }
   progressItems: TerminalProgressItem[]
   backgroundAgents: TerminalBackgroundAgentItem[]
   jitMessages: string[]
@@ -93,6 +99,7 @@ export function createInitialTerminalState(): TerminalState {
     statusText: 'Ready',
     statusDetailsVisible: false,
     slashCommands: [],
+    sessionPicker: undefined,
     progressItems: [],
     backgroundAgents: [],
     jitMessages: [],
@@ -407,6 +414,22 @@ export function terminalReducer(state: TerminalState, event: TerminalEvent): Ter
       return {
         ...state,
         slashCommands: event.commands
+      }
+
+    case 'session_picker':
+      return {
+        ...state,
+        sessionPicker: {
+          sessions: event.sessions,
+          selectedIndex: event.selectedIndex,
+          currentSessionId: event.currentSessionId
+        }
+      }
+
+    case 'session_picker_close':
+      return {
+        ...state,
+        sessionPicker: undefined
       }
 
     case 'progress':

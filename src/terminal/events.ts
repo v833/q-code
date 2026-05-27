@@ -3,6 +3,7 @@
  * 以及内存实现的 {@link TerminalEventBus}。
  */
 import type { TokenUsage } from '../context/token-budget'
+import type { SessionSummary } from '../session/store'
 import type { SlashCommandSuggestion } from '../slash'
 import type { CacheMode } from '../usage'
 
@@ -133,6 +134,15 @@ export type TerminalEvent =
   | (TerminalBaseEvent & {
       type: 'slash_commands'
       commands: SlashCommandSuggestion[]
+    })
+  | (TerminalBaseEvent & {
+      type: 'session_picker'
+      sessions: SessionSummary[]
+      selectedIndex: number
+      currentSessionId: string
+    })
+  | (TerminalBaseEvent & {
+      type: 'session_picker_close'
     })
 
 export type TerminalEventListener = (event: TerminalEvent) => void

@@ -4,7 +4,7 @@
 
 `q-code` 是一个基于 Vercel AI SDK 的 TypeScript 命令行 Agent 框架。核心能力包括：
 
-- **Agent / 任务**：Agent Loop、Plan Mode、Task V2、TodoWrite、上下文压缩、会话持久化（JSONL append-only）、`@file` 文件引用注入、项目记忆、Skills、SubAgent、Agent Teams、Worktree 隔离。
+- **Agent / 任务**：Agent Loop、Plan Mode、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、`@file` 文件引用注入、项目记忆、Skills、SubAgent、Agent Teams、Worktree 隔离。
 - **工具执行**：文件/搜索工具、可配置超时与 spill 的 Shell 工具、后台 Shell job（`f_status` / `f_tail` / `f_kill` / `f_list`）。
 - **集成扩展**：MCP server、Hooks（pre/post tool-use 决策）、Slash 命令注册表、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
 - **可观测性**：NDJSON 审计日志（默认开启）、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警。
@@ -91,7 +91,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
 - `src/evals/`：Agent eval 子系统，包含 case loader、mock/cli-subprocess/real-agent runner、trace recorder、deterministic scorers、LLM judge、报告、Langfuse eval trace/dataset/scores 导出、趋势看板与 `q-code eval` CLI。
 - `src/runtime/`：早期 CLI 子命令路由（help/version/update/audit/init/eval）、`init-cli` 交互式配置向导、颜色环境 bootstrap、`getPackageVersion`、`runCliUpdate`、`installCrashGuard` 与崩溃报告生成。
 - `src/config/`：`runtime-config.ts` 负责加载 `~/.q-code/config.toml`、`<cwd>/.q-code/config.toml`、`.env`，统一映射到 `process.env`（支持多 section/alias）。
-- `src/session/`：`SessionStore`（JSONL append-only、原子写入、cache 模式与 usage 记录持久化）。
+- `src/session/`：`SessionStore`（JSONL append-only、metadata、trash/restore、export/search、cache 模式与 usage 记录持久化）。
 - `src/mentions/`：`@file` 文件引用解析、git/递归文件索引、fuzzy 排序、路径安全校验、文件内容截断和本轮上下文注入。
 - `src/usage/`：token 归一化、定价、cache 策略、`UsageTracker` 与 `/usage` 渲染。
 - `src/infra/`：企业 AI 基建配置同步（base URL / token / sync 状态 / 知识候选上报）。
@@ -144,6 +144,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
   - Shell 工具改动：`vitest run tests/unit/shell-tools.test.ts tests/integration/shell-streaming.test.ts`
   - 自定义工具目录改动：`vitest run tests/unit/custom-tools.test.ts tests/unit/tool-registry.test.ts`
   - `@file` 文件引用：`vitest run tests/unit/file-mentions.test.ts tests/unit/terminal.test.ts tests/unit/runtime-config.test.ts`
+  - 会话管理：`vitest run tests/unit/session-management.test.ts tests/integration/session-recovery.test.ts tests/unit/terminal.test.ts`
   - 终端/输入状态机改动：`vitest run tests/unit/terminal.test.ts`
   - 运行时配置/CLI 子命令：`vitest run tests/unit/runtime-config.test.ts tests/unit/cli-info.test.ts tests/unit/update.test.ts tests/unit/init-cli.test.ts`
   - 崩溃保护：`vitest run tests/unit/crash-guard.test.ts tests/unit/mcp-bootstrap.test.ts tests/unit/audit-logger.test.ts`

@@ -3,7 +3,7 @@
  * 处理键盘输入（含斜杠补全、中断、历史）并回调 `onSubmit` / `onInterrupt` / `onExit`。
  */
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { Box, Static, useApp, useInput, useStdin, useStdout } from 'ink'
+import { Box, Static, Text, useApp, useInput, useStdin, useStdout } from 'ink'
 import type { TerminalEventBus } from './events'
 import { createInitialTerminalState, terminalReducer, type TranscriptItem } from './state'
 import {
@@ -42,6 +42,7 @@ import {
   searchFileMentionIndex,
   type FileMentionIndex
 } from '../mentions'
+import type { SessionSummary } from '../session/store'
 
 const ASSISTANT_STREAM_FLUSH_MS = 80
 const CLEAR_TERMINAL = '\u001B[2J\u001B[3J\u001B[H'
@@ -52,6 +53,7 @@ export interface TerminalAppProps {
   bus: TerminalEventBus
   /** 用户按 Enter 提交非空输入时调用。 */
   onSubmit: (input: string) => Promise<void> | void
+  onSessionPickerSelect?: (sessionId: string) => Promise<void> | void
   /** 忙碌时 Ctrl+C 首次按下时调用，用于中断当前 Agent 轮次。 */
   onInterrupt?: () => Promise<void> | void
   /** 空闲时 Ctrl+C 或忙碌时连按 Ctrl+C 时调用，随后退出 Ink。 */
@@ -65,6 +67,70 @@ export interface TerminalAppProps {
   /** 斜杠命令补全候选；运行中可被 `slash_commands` 事件覆盖。 */
   slashCommands?: SlashCommandSuggestion[]
   fileMentionIndex?: FileMentionIndex
+}
+
+function SessionPickerPanel({
+  picker
+}: {
+  picker?: {
+    sessions: SessionSummary[]
+    selectedIndex: number
+    currentSessionId: string
+  }
+}): React.JSX.Element | null {
+  if (!picker || picker.sessions.length === 0) return null
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Box>
+        <Box width={3}><Text color="yellow"> </Text></Box>
+        <Box width={14}><Text color="cyan">Session</Text></Box>
+        <Box width={22}><Text color="cyan">Name</Text></Box>
+        <Box width={8}><Text color="cyan">Msgs</Text></Box>
+        <Box width={10}><Text color="cyan">Tokens</Text></Box>
+        <Text color="cyan">Updated</Text>
+      </Box>
+      {picker.sessions.map((session, index) => {
+        const selected = index === picker.selectedIndex
+        const current = session.sessionId === picker.currentSessionId
+        return (
+          <Box key={session.sessionId}>
+            <Box width={3}>
+              <Text color={selected ? 'yellow' : 'gray'}>{selected ? '›' : current ? '*' : ' '}</Text>
+            </Box>
+            <Box width={14}>
+              <Text color={selected ? 'yellow' : 'gray'}>{shortSession(session.sessionId)}</Text>
+            </Box>
+            <Box width={22}>
+              <Text color={selected ? 'white' : 'gray'}>{truncate(session.displayName ?? '(无名)', 20)}</Text>
+            </Box>
+            <Box width={8}><Text color="gray">{String(session.messageCount)}</Text></Box>
+            <Box width={10}><Text color="gray">{formatCompactNumber(session.totalTokens ?? session.totalUsage?.totalTokens ?? 0)}</Text></Box>
+            <Text color="gray">{formatShortDate(session.updatedAt)}</Text>
+          </Box>
+        )
+      })}
+      <Text color="gray">  ↑/↓ 选择 · Enter 切换 · Esc 关闭</Text>
+    </Box>
+  )
+}
+
+function shortSession(value: string): string {
+  return value.length > 12 ? value.slice(0, 12) : value
+}
+
+function truncate(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value
+}
+
+function formatCompactNumber(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
+  return String(value)
+}
+
+function formatShortDate(value: string | undefined): string {
+  if (!value) return '(unknown)'
+  return value.replace('T', ' ').slice(0, 16)
 }
 
 /**
@@ -223,6 +289,56 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
 
     if (isBusy && !isCtrlC) return
 
+    if (state.sessionPicker && !isBusy) {
+      if (key.upArrow) {
+        const count = state.sessionPicker.sessions.length
+        if (count > 0) {
+          const selectedIndex =
+            state.sessionPicker.selectedIndex <= 0
+              ? count - 1
+              : state.sessionPicker.selectedIndex - 1
+          dispatch({
+            type: 'session_picker',
+            sessions: state.sessionPicker.sessions,
+            selectedIndex,
+            currentSessionId: state.sessionPicker.currentSessionId
+          })
+        }
+        return
+      }
+      if (key.downArrow) {
+        const count = state.sessionPicker.sessions.length
+        if (count > 0) {
+          const selectedIndex =
+            state.sessionPicker.selectedIndex >= count - 1
+              ? 0
+              : state.sessionPicker.selectedIndex + 1
+          dispatch({
+            type: 'session_picker',
+            sessions: state.sessionPicker.sessions,
+            selectedIndex,
+            currentSessionId: state.sessionPicker.currentSessionId
+          })
+        }
+        return
+      }
+      if (key.escape) {
+        dispatch({ type: 'session_picker_close' })
+        return
+      }
+      if (key.return) {
+        const selected = state.sessionPicker.sessions[state.sessionPicker.selectedIndex]
+        dispatch({ type: 'session_picker_close' })
+        if (selected) {
+          setIsBusy(true)
+          void Promise.resolve(props.onSessionPickerSelect?.(selected.sessionId))
+            .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+            .finally(() => setIsBusy(false))
+        }
+        return
+      }
+    }
+
     if (isCtrlC && isBusy) {
       if (interruptRequested) {
         void Promise.resolve(props.onExit()).finally(() => exit())
@@ -369,9 +485,14 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
         {(item) => <ConversationView key={item.id} items={[item]} />}
       </Static>
       <Box flexDirection="column" paddingX={1}>
-        <Header title={props.title ?? 'q-code'} sessionId={props.sessionId} cwd={props.cwd} />
+        <Header
+          title={props.title ?? 'q-code'}
+          sessionId={state.sessionInfo?.sessionId ?? props.sessionId}
+          cwd={state.sessionInfo?.cwd ?? props.cwd}
+        />
         <ConversationView items={liveItems} />
         <StatusBar state={state} isBusy={isBusy} hasStreamingAssistant={hasStreamingAssistant} />
+        <SessionPickerPanel picker={state.sessionPicker} />
         <CommandSuggestions
           suggestions={showFileMentions ? renderedFileMentions : renderedSlashCommands}
           notice={suggestionNotice}

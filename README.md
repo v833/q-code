@@ -1069,6 +1069,23 @@ prefix = "q-code-kb"
 - 崩溃恢复：逐行解析，损坏行跳过
 - 压缩快照全量写入，恢复时从最后快照后加载
 
+每个会话会同步维护 `.sessions/projects/<projectKey>/<sessionId>.meta.json`，记录展示名、创建/更新时间、消息数、tokens、首条用户输入摘要、模型和 tags。老会话没有 meta 时，`/sessions` 首次列表会从 JSONL 自动回填。
+
+TUI 内可直接使用 `/sessions` 管理会话，不需要重启进程：
+
+| 命令 | 说明 |
+| ---- | ---- |
+| `/sessions` 或 `/sessions list [--all]` | 列出最近会话；TUI 中可用 ↑/↓ 选择并 Enter 切换 |
+| `/sessions info [<id>]` | 查看当前或指定会话详情 |
+| `/sessions switch <id>` | 不重启进程切换到指定会话 |
+| `/sessions new ["<displayName>"]` | 新建会话并立即切换 |
+| `/sessions rename <id> "<name>"` | 修改展示名 |
+| `/sessions delete <id> [--force]` | 默认软删到 `.trash`；`--force` 物理删除 |
+| `/sessions restore <id>` | 从 `.trash` 恢复 |
+| `/sessions export <id> [--format md|json|html] [--out <path>]` | 导出会话，默认写入 `exports/` |
+| `/sessions search <keyword> [--all]` | 跨会话搜索 user/assistant 文本 |
+| `/sessions purge [--older-than 30d]` | 预览并确认清理过期 trash 会话 |
+
 #### 项目记忆系统
 
 q-code 内置跨对话持久化的项目记忆，让 Agent 能在多次对话间保留和检索关键信息。
@@ -1346,6 +1363,8 @@ TUI 状态栏默认只展示当前状态；需要查看模式、模型、cache �
 | 命令                    | 说明                   |
 | ----------------------- | ---------------------- |
 | `/context`              | 查看上下文占用矩阵     |
+| `/sessions`             | 列出/切换/管理会话     |
+| `/history`              | `/sessions list` 的兼容视图 |
 | `/usage`                | 查看 token/cache/成本  |
 | `/cost`                 | `/usage` 的兼容别名    |
 | `/cache [status|auto|on|off]` | 查看或切换 cache 策略 |

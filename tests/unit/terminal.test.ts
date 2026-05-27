@@ -268,6 +268,44 @@ describe('terminal state reducer', () => {
     expect(state.transcript).toHaveLength(0)
   })
 
+  it('tracks session picker state without adding transcript noise', () => {
+    let state = createInitialTerminalState()
+    state = terminalReducer(state, {
+      type: 'session_picker',
+      currentSessionId: 's1',
+      selectedIndex: 1,
+      sessions: [
+        {
+          sessionId: 's1',
+          cwd: '/tmp/project',
+          projectKey: 'project-1',
+          transcriptPath: '/tmp/project/.sessions/s1.jsonl',
+          metaPath: '/tmp/project/.sessions/s1.meta.json',
+          messageCount: 1,
+          tags: []
+        },
+        {
+          sessionId: 's2',
+          displayName: 'OAuth 调试',
+          cwd: '/tmp/project',
+          projectKey: 'project-1',
+          transcriptPath: '/tmp/project/.sessions/s2.jsonl',
+          metaPath: '/tmp/project/.sessions/s2.meta.json',
+          messageCount: 2,
+          totalTokens: 1200,
+          tags: []
+        }
+      ]
+    })
+
+    expect(state.sessionPicker?.selectedIndex).toBe(1)
+    expect(state.sessionPicker?.sessions[1]?.displayName).toBe('OAuth 调试')
+    expect(state.transcript).toHaveLength(0)
+
+    state = terminalReducer(state, { type: 'session_picker_close' })
+    expect(state.sessionPicker).toBeUndefined()
+  })
+
   it('keeps status details hidden by default and toggles them without transcript noise', () => {
     let state = createInitialTerminalState()
     expect(state.statusDetailsVisible).toBe(false)

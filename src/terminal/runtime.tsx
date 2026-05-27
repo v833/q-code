@@ -19,6 +19,7 @@ export interface TerminalRuntimeOptions {
   slashCommands?: SlashCommandSuggestion[]
   fileMentionIndex?: FileMentionIndex
   onSubmit: (input: string) => Promise<void> | void
+  onSessionPickerSelect?: (sessionId: string) => Promise<void> | void
   onInterrupt?: () => Promise<void> | void
   onExit: () => Promise<void> | void
 }
@@ -49,6 +50,7 @@ export function startTerminalRuntime(options: TerminalRuntimeOptions): TerminalR
       slashCommands={options.slashCommands}
       fileMentionIndex={options.fileMentionIndex}
       onSubmit={options.onSubmit}
+      onSessionPickerSelect={options.onSessionPickerSelect}
       onInterrupt={options.onInterrupt}
       onExit={options.onExit}
     />,
