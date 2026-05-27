@@ -1,5 +1,5 @@
 /**
- * q-code CLI 主入口：早期子命令短路（help/version/update/audit）、运行时配置、
+ * q-code CLI 主入口：早期子命令短路（help/version/update/audit/init）、运行时配置、
  * MCP/Skills/Agents 引导、Ink TUI 或经典 readline 交互循环，以及 Agent Loop 编排。
  */
 import './runtime/color-bootstrap';
@@ -205,6 +205,7 @@ import {
 import { runCliUpdate } from './runtime/update';
 import { installCrashGuard, sha256ForCrashGuard } from './runtime/crash-guard';
 import { runAuditCli } from './observability/audit-cli';
+import { runInitCli } from './runtime/init-cli';
 import {
   createMessageSummaryPayload,
   createUserPromptPayload,
@@ -237,6 +238,13 @@ if (earlyCliCommand === 'update') {
 if (earlyCliCommand === 'audit') {
   applyRuntimeConfig();
   const code = await runAuditCli(process.argv.slice(3));
+  process.exit(code);
+}
+if (earlyCliCommand === 'init') {
+  const code = await runInitCli({
+    argv: process.argv.slice(3),
+    cwd: process.cwd(),
+  });
   process.exit(code);
 }
 

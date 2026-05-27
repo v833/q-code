@@ -5,9 +5,9 @@
  * 加载顺序：项目 `.env` → 用户 toml（含 `[env].file`）→ 项目 toml。
  * TOML 键经 `ROOT_ALIASES` / `SECTION_ALIASES` 映射为标准 `ENV_NAME`。
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { parse as parseDotenv } from 'dotenv'
 
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1'
@@ -116,8 +116,26 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
   }
 }
 
+/** TOML 各 section 的键值表（section 名为空字符串表示根级键）。 */
+export type TomlConfigEntries = Record<string, Record<string, string | number | boolean>>
+
 interface ParsedTomlConfig {
-  entries: Record<string, Record<string, string | number | boolean>>
+  entries: TomlConfigEntries
+}
+
+/**
+ * 读取 `config.toml`；文件不存在时返回仅含空根 section 的结构。
+ */
+export function readTomlConfigFile(filePath: string): TomlConfigEntries {
+  return readTomlConfig(filePath).entries
+}
+
+/**
+ * 将配置条目序列化并写入 `config.toml`（自动创建父目录）。
+ */
+export function writeTomlConfigFile(filePath: string, entries: TomlConfigEntries): void {
+  mkdirSync(dirname(filePath), { recursive: true })
+  writeFileSync(filePath, serializeTomlConfig(entries), 'utf-8')
 }
 
 /** `applyRuntimeConfig` 实际读取的配置文件路径。 */
@@ -260,10 +278,47 @@ function resolveEnvName(section: string, key: string): string | undefined {
   return isEnvName(envName) ? envName : undefined
 }
 
+function serializeTomlConfig(entries: TomlConfigEntries): string {
+  const lines: string[] = []
+  const preferredSections = ['openai', 'summary', 'env', 'gitlab_kb']
+  const sections = [
+    ...preferredSections.filter(
+      (section) => entries[section] && Object.keys(entries[section]).length > 0
+    ),
+    ...Object.keys(entries)
+      .filter(
+        (section) =>
+          section !== '' &&
+          !preferredSections.includes(section) &&
+          Object.keys(entries[section] ?? {}).length > 0
+      )
+      .sort()
+  ]
+
+  for (const section of sections) {
+    const sectionEntries = entries[section]
+    if (!sectionEntries || Object.keys(sectionEntries).length === 0) continue
+
+    lines.push(`[${section}]`)
+    for (const [key, value] of Object.entries(sectionEntries)) {
+      lines.push(`${key} = ${formatTomlScalar(value)}`)
+    }
+    lines.push('')
+  }
+
+  return `${lines.join('\n').trimEnd()}\n`
+}
+
+function formatTomlScalar(value: string | number | boolean): string {
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (typeof value === 'number') return String(value)
+  return JSON.stringify(value)
+}
+
 function parseSimpleToml(
   content: string,
   filePath: string
-): Record<string, Record<string, string | number | boolean>> {
+): TomlConfigEntries {
   const result: Record<string, Record<string, string | number | boolean>> = { '': {} }
   let section = ''
 

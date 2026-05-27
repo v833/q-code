@@ -35,6 +35,16 @@ q-code update
 q-code update --dry-run  # 仅查看将执行的更新命令
 ```
 
+首次使用可运行交互式初始化向导，生成 `config.toml`：
+
+```bash
+q-code init              # 默认写入 ~/.q-code/config.toml
+q-code init --local      # 写入当前项目的 .q-code/config.toml
+q-code init --user       # 显式写入用户目录（与默认行为相同）
+```
+
+向导会引导填写 OpenAI 兼容 API 的 `base_url`、`api_key`，通过 `/models` 接口校验并选择主模型与摘要模型，可选配置 `[env].file` 复用项目 `.env`；并可选开启 GitLab Wiki 集成（写入 `[gitlab_kb]` 的 `url`、`token`、`prefix`）。
+
 也可以不全局安装，直接临时运行：
 
 ```bash

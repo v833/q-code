@@ -24,6 +24,11 @@ describe('cli info', () => {
     expect(getEarlyCliCommand(['update', '--dry-run'])).toBe('update')
   })
 
+  it('detects init command', () => {
+    expect(getEarlyCliCommand(['init'])).toBe('init')
+    expect(getEarlyCliCommand(['init', '--local'])).toBe('init')
+  })
+
   it('leaves interactive flags alone', () => {
     expect(getEarlyCliCommand(['--continue'])).toBeUndefined()
     expect(getEarlyCliCommand(['--session', 'demo'])).toBeUndefined()
@@ -50,6 +55,7 @@ describe('cli info', () => {
     expect(help).toContain('-h, --help')
     expect(help).toContain('-v, --version')
     expect(help).toContain('q-code update')
+    expect(help).toContain('q-code init')
     expect(help).toContain('--continue')
     expect(help).toContain('--no-color')
     expect(help).toContain('--debug')

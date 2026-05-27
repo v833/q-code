@@ -13,13 +13,19 @@ import type { Skill, SkillSource } from './types';
 
 const SKILL_FILE = 'SKILL.md';
 
+/** 解析用户主目录；单测可通过 `HOME` 覆盖，否则回退 `os.homedir()`。 */
+function getUserHomeDir(): string {
+  const home = process.env.HOME?.trim();
+  return home ? home : os.homedir();
+}
+
 /** 解析 q-code 主目录。 */
 export function getQCodeHome(): string {
-  return process.env.Q_CODE_HOME?.trim() || path.join(os.homedir(), '.q-code');
+  return process.env.Q_CODE_HOME?.trim() || path.join(getUserHomeDir(), '.q-code');
 }
 
 export function getUserAgentsSkillsDir(): string {
-  return path.join(os.homedir(), '.agents', 'skills');
+  return path.join(getUserHomeDir(), '.agents', 'skills');
 }
 
 export function getProjectAgentsSkillsDir(cwd: string): string {

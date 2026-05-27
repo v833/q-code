@@ -9,7 +9,7 @@
 - **集成扩展**：MCP server、Hooks（pre/post tool-use 决策）、Slash 命令注册表、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
 - **可观测性**：NDJSON 审计日志（默认开启）、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、Token Budget。
 - **TUI**：基于 Ink 的交互式 TUI（默认）、`--classic` 经典 readline、可经管道/CI 自动降级。
-- **CLI 子命令**：`q-code help|version|update|audit`（启动前 short-circuit），其余参数走主交互循环。
+- **CLI 子命令**：`q-code help|version|update|audit|init`（启动前 short-circuit），其余参数走主交互循环。
 
 ## 环境与工具
 
@@ -58,6 +58,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
 - `q-code update [--dry-run]`：把全局 `@q-code-cli/q-code` 升级到 npm latest。
 - `q-code audit verify [--from YYYY-MM-DD] [--to YYYY-MM-DD]`：校验本地 NDJSON 审计日志。
 - `q-code audit tail [--session <id>] [--event <name>] [--follow]`：按会话/事件过滤查看审计日志。
+- `q-code init [--user|-u] [--local|-l]`：交互式初始化 `config.toml`（默认用户目录；`--local` 写入项目 `.q-code/config.toml`）。
 
 主交互循环还接受以下启动参数：`--continue`、`--session <id>`、`--plan`、`--agent-teams`、`--classic`、`--debug`、`--dump-system-prompt`。
 
@@ -73,7 +74,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
 - `src/slash/`：斜杠命令注册表、解析、suggestions、formatHelp（`/help` 输出由此驱动）。
 - `src/hooks/`：Pre/Post tool-use Hooks 的配置加载、matcher、command-runner 与 DefaultHookRunner。
 - `src/observability/`：NDJSON 审计日志（`audit.ts`）与 `q-code audit verify|tail` 子命令实现（`audit-cli.ts`）。
-- `src/runtime/`：早期 CLI 子命令路由（help/version/update/audit）、颜色环境 bootstrap、`getPackageVersion`、`runCliUpdate`、`installCrashGuard` 与崩溃报告生成。
+- `src/runtime/`：早期 CLI 子命令路由（help/version/update/audit/init）、`init-cli` 交互式配置向导、颜色环境 bootstrap、`getPackageVersion`、`runCliUpdate`、`installCrashGuard` 与崩溃报告生成。
 - `src/config/`：`runtime-config.ts` 负责加载 `~/.q-code/config.toml`、`<cwd>/.q-code/config.toml`、`.env`，统一映射到 `process.env`（支持多 section/alias）。
 - `src/session/`：`SessionStore`（JSONL append-only、原子写入、cache 模式与 usage 记录持久化）。
 - `src/mentions/`：`@file` 文件引用解析、git/递归文件索引、fuzzy 排序、路径安全校验、文件内容截断和本轮上下文注入。
@@ -127,7 +128,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
   - 自定义工具目录改动：`vitest run tests/unit/custom-tools.test.ts tests/unit/tool-registry.test.ts`
   - `@file` 文件引用：`vitest run tests/unit/file-mentions.test.ts tests/unit/terminal.test.ts tests/unit/runtime-config.test.ts`
   - 终端/输入状态机改动：`vitest run tests/unit/terminal.test.ts`
-  - 运行时配置/CLI 子命令：`vitest run tests/unit/runtime-config.test.ts tests/unit/cli-info.test.ts tests/unit/update.test.ts`
+  - 运行时配置/CLI 子命令：`vitest run tests/unit/runtime-config.test.ts tests/unit/cli-info.test.ts tests/unit/update.test.ts tests/unit/init-cli.test.ts`
   - 崩溃保护：`vitest run tests/unit/crash-guard.test.ts tests/unit/mcp-bootstrap.test.ts tests/unit/audit-logger.test.ts`
   - Infra / GitLab KB：`vitest run tests/unit/infra.test.ts tests/unit/infra-candidate.test.ts tests/unit/gitlab-kb.test.ts`
 - 类型、接口或公共工具改动：运行 `pnpm typecheck`。
