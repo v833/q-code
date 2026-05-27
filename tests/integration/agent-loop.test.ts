@@ -86,6 +86,28 @@ describe('agentLoop 集成（mock model + mock tools）', () => {
     expect(text.join('')).toContain('代码结构分析完成')
   })
 
+  it('默认不再按 TOKEN_BUDGET 或 MAX_STEPS 硬停主循环', async () => {
+    const probe = makeMockTool('probe', () => 'ok')
+    const registry = makeRegistry(probe)
+    const turns = [
+      ...Array.from({ length: 90 }, (_, index) => ({
+        tools: [{ name: 'probe', input: { index } }],
+        usage: { inputTokens: 300000, outputTokens: 1, totalTokens: 300001 }
+      })),
+      { text: '超过旧限制后仍完成。', finishReason: 'stop' as const }
+    ]
+    const { model, callCount } = createMockModel(turns)
+
+    const text: string[] = []
+    await agentLoop(model, registry, [{ role: 'user', content: '连续执行很多步' }], 'sys', {
+      quiet: true,
+      onText: (delta) => text.push(delta)
+    })
+
+    expect(callCount()).toBe(91)
+    expect(text.join('')).toContain('超过旧限制后仍完成')
+  })
+
   it('provider 在工具结果后不发送 finish 时也会收束本步并继续', async () => {
     const probe = makeMockTool('task_list', () => 'Tasks: 当前没有任务。')
     const registry = makeRegistry(probe)
@@ -221,7 +243,7 @@ describe('agentLoop 集成（mock model + mock tools）', () => {
   it('stopAfterToolNames：相同 tool-call 重复时由检测器 + stopAfter 共同保证不卡死', async () => {
     // 实际语义：stopAfterToolNames 在拿到对应 tool-result 时把循环结束标志置位；
     // loop-detection 也会在同参重复 8 次后熔断。无论哪个先触发，循环都不会
-    // 跑满 maxSteps（默认 50）。这是用户视角真正在意的不变式。
+    // 继续跑到脚本末尾。这是用户视角真正在意的不变式。
     const exitTool = makeMockTool('exit_plan_mode', () => 'planned')
     const registry = makeRegistry(exitTool)
 
@@ -235,7 +257,7 @@ describe('agentLoop 集成（mock model + mock tools）', () => {
       stopAfterToolNames: ['exit_plan_mode']
     })
 
-    expect(callCount()).toBeLessThan(50) // 没卡满 maxSteps（默认 50）
+    expect(callCount()).toBeLessThan(50)
   })
 
   it('maxSteps 限制：超过后强制退出', async () => {

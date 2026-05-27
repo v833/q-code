@@ -106,9 +106,7 @@ cp .env.example .env
 | `SUMMARY_BASE_URL`             | ❌   | 摘要模型 API 地址，默认复用 `OPENAI_BASE_URL`                  |
 | `SUMMARY_API_KEY`              | ❌   | 摘要模型 API Key，默认复用 `OPENAI_API_KEY`                    |
 | `SUMMARY_MODEL`                | ❌   | 摘要模型名称，默认复用 `OPENAI_MODEL`                          |
-| `TOKEN_BUDGET`                 | ❌   | 单轮执行 token 预算，默认 256000                              |
 | `CONTEXT_LIMIT_TOKENS`         | ❌   | 上下文窗口上限，默认 256000                                   |
-| `MAX_STEPS`                    | ❌   | 单轮 Agent 最大步数，默认 88                                 |
 | `COMPACT_TRIGGER_RATIO`        | ❌   | 压缩触发比例，默认 0.85                                       |
 | `WARNING_TRIGGER_RATIO`        | ❌   | 上下文预警比例，默认 0.80                                     |
 | `BLOCKING_TRIGGER_RATIO`       | ❌   | 强制停止比例，默认 0.98，会预留普通输出预算                   |
@@ -253,7 +251,7 @@ src/
 │   ├── prompt-builder.ts # System Prompt 管道组装
 │   ├── compressor.ts     # Microcompact + Summarization
 │   ├── offload.ts        # Context Offloading：大工具结果落盘
-│   ├── token-budget.ts   # Token 预算估算与状态追踪
+│   ├── token-budget.ts   # 上下文 token 估算与状态追踪
 │   ├── auto-compact.ts   # 压缩熔断器
 │   ├── agent-md.ts       # AGENT.md 项目指令加载
 │   ├── plan-attachments.ts# Plan Mode 内部提醒
@@ -345,7 +343,7 @@ src/
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Agent Loop (最多 50 步)                    │
+│                    Agent Loop (无默认步数硬限制)              │
 │                                                              │
 │  ┌──→ Step N:                                               │
 │  │   1. Preflight: 检查上下文占用，超阈值则压缩              │
@@ -354,9 +352,8 @@ src/
 │  │   4. 输出触顶? → 升级 maxOutputTokens 重试                │
 │  │   5. 执行工具 (并发控制 + 结果截断)                       │
 │  │   6. 死循环检测 (三种检测器)                              │
-│  │   7. 累计 token 预算检查                                  │
-│  │   8. stopAfterToolNames 检查 (如 exit_plan_mode)          │
-│  │   9. 无工具调用 → 退出循环                                │
+│  │   7. stopAfterToolNames 检查 (如 exit_plan_mode)          │
+│  │   8. 无工具调用 → 退出循环                                │
 │  └─── 有工具调用 → 继续                                      │
 │                                                              │
 └───────────────────────────┬─────────────────────────────────┘
@@ -376,14 +373,14 @@ src/
 
 ### 1. Agent Loop — 核心推理循环
 
-采用 ReAct（推理-行动交替）模式，单轮最多 50 步：
+采用 ReAct（推理-行动交替）模式，主会话不再按默认步数或执行 token 预算硬停：
 
 1. **构建 System Prompt** — 根据用户输入动态构建 `buildSystemPrompt(userQuery)`，使记忆上下文响应当前意图
 2. **Preflight** — 检查上下文占用，超阈值则压缩
 3. **LLM 推理** — 流式调用模型
 4. **工具执行** — 根据模型输出执行对应工具
 5. **循环检测** — 识别重复调用并干预
-6. **预算检查** — 累计 token 超预算则强制停止
+6. **早停检查** — 如 `exit_plan_mode` 等 stopAfterToolNames 命中则停止
 7. 无工具调用时退出循环
 
 **步骤级重试**：失败自动重试最多 3 次，带指数退避。

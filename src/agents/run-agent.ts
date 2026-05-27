@@ -42,7 +42,6 @@ export interface RunChildAgentParams {
   modelName?: string
   runtimeContext?: string
   agentMdContext?: string
-  tokenBudget?: number
   maxOutputTokens?: number
   escalatedMaxOutputTokens?: number
   /** 覆盖进程 cwd（worktree 隔离时使用）。 */
@@ -150,7 +149,6 @@ export async function runChildAgent(params: RunChildAgentParams): Promise<AgentR
       },
       async (langfuseTurn) =>
         agentLoop(params.model, registry, messages, system, {
-          tokenBudget: params.tokenBudget,
           maxOutputTokens: params.maxOutputTokens,
           escalatedMaxOutputTokens: params.escalatedMaxOutputTokens,
           maxSteps: params.agentDefinition.maxTurns ?? DEFAULT_AGENT_MAX_TURNS,

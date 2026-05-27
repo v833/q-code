@@ -94,16 +94,6 @@ export function fmtContextUsage(used: number, limit: number, state = 'normal'): 
   return `  ${c.gray('上下文')} ${color(bar)} ${c.bold(`${used}`)}/${limit} ${c.dim(`(${pct}%)`)}${label}`
 }
 
-/** 格式化本轮累计执行 token */
-export function fmtTurnTokenUsage(used: number, budget: number): string {
-  const pct = Math.round((used / budget) * 100)
-  const barLen = 12
-  const filled = Math.min(barLen, Math.round((pct / 100) * barLen))
-  const bar = '█'.repeat(filled) + '░'.repeat(barLen - filled)
-  const color = pct > 80 ? c.red : pct > 50 ? c.yellow : c.green
-  return `  ${c.gray('本轮消耗')} ${color(bar)} ${c.bold(`${used}`)}/${budget} ${c.dim(`(${pct}%)`)}`
-}
-
 /** 格式化首 Token 时间 (TTFT) */
 export function fmtTTFT(ms: number): string {
   const color = ms < 500 ? c.green : ms < 1500 ? c.yellow : c.red

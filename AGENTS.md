@@ -7,7 +7,7 @@
 - **Agent / 任务**：Agent Loop、Plan Mode、Task V2、TodoWrite、上下文压缩、会话持久化（JSONL append-only）、`@file` 文件引用注入、项目记忆、Skills、SubAgent、Agent Teams、Worktree 隔离。
 - **工具执行**：文件/搜索工具、可配置超时与 spill 的 Shell 工具、后台 Shell job（`f_status` / `f_tail` / `f_kill` / `f_list`）。
 - **集成扩展**：MCP server、Hooks（pre/post tool-use 决策）、Slash 命令注册表、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
-- **可观测性**：NDJSON 审计日志（默认开启）、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、Token Budget。
+- **可观测性**：NDJSON 审计日志（默认开启）、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警。
 - **评测**：`q-code eval` 本地优先 Agent 质量平台，覆盖固定任务集、mock/cli/真实模型 runner、LLM judge（opt-in）、工具轨迹、预算/成本、进度、文件副作用、策略安全、JSONL trace、Markdown/JUnit 报告、baseline 对比、趋势看板、定期回归与可选 Langfuse evaluator trace / dataset / scores 导出。
 - **TUI**：基于 Ink 的交互式 TUI（默认）、`--classic` 经典 readline、可经管道/CI 自动降级。
 - **CLI 子命令**：`q-code help|version|update|audit|init`（启动前 short-circuit），其余参数走主交互循环。
@@ -109,6 +109,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
 - 代码注释保持克制，只解释复杂流程或非显然约束。
 - **源码文档**：`src/` 生产模块在文件头写模块级中文说明；对外导出符号配 JSDoc（以当前实现为准，不写推测性措辞）；复杂流程可加少量行内「为何」注释。约定详见 README「源码文档约定」；`tests/`、`dist/` 等目录不在此要求内。
 - 修改用户可见行为时，同步更新 README 中对应命令、架构、环境变量或工作流说明。
+- 主会话不再支持 `TOKEN_BUDGET` 与 `MAX_STEPS` 环境变量硬限制；如需防 runaway，优先依赖上下文 blocking、循环检测、显式 `AbortSignal`、子 Agent `maxTurns` 或 eval case 的局部预算。
 - Eval 默认本地优先，artifact 写 `.q-code/evals/runs/<run-id>/`；Langfuse 仅为可选外部后端，trace/dataset/scores 导出失败不得让本地 eval 失败。CI 脚本优先使用 deterministic smoke/cli eval、case 过滤、运行级资源闸门与 JUnit 报告；trajectory scorer 应优先用 `requiredTools`、`forbiddenTools`、`maxExtraTools` 和 `expectedSteps` 做确定性覆盖；预算 scorer 要覆盖 steps/tools/duration/tokens/cost，成本按 `src/usage/pricing.ts` 估算；safety scorer 要覆盖泄密、禁止输出/工具输入/工具输出模式和禁止路径；`cli-subprocess` case 必须使用隔离 fixture/workspace 并声明期望副作用；`real-agent` 默认只暴露只读工具，写入/shell 工具必须在 `real.tools` 显式列出；真实模型和 LLM judge 必须 CLI opt-in。命名 baseline 写 `.q-code/evals/baselines/<name>/`，趋势看板写 `.q-code/evals/trends/`，都不要纳入提交。
 - **新增/移除模块、目录、CLI 子命令、Slash 命令、Hook 事件、环境变量、测试脚本或协作约定时，必须同步改写本 `AGENTS.md`**，按以下对应关系补充：
   - 新模块/新顶层目录 → `## 目录边界`

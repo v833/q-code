@@ -34,6 +34,8 @@ const ENV_KEYS = [
   'SUMMARY_BASE_URL',
   'SUMMARY_API_KEY',
   'SUMMARY_MODEL',
+  'CONTEXT_LIMIT_TOKENS',
+  'MAX_STEPS',
   'TOKEN_BUDGET'
 ]
 
@@ -162,7 +164,9 @@ describe('runtime config', () => {
         'OPENAI_API_KEY = "root-key"',
         'openai_model = "alias-model"',
         '[runtime]',
-        'token_budget = 12345',
+        'context_limit_tokens = 12345',
+        'token_budget = 999999',
+        'max_steps = 3',
         '[q_code]',
         'debug = true',
         'theme = "light"',
@@ -199,7 +203,9 @@ describe('runtime config', () => {
 
     expect(process.env.OPENAI_API_KEY).toBe('root-key')
     expect(process.env.OPENAI_MODEL).toBe('alias-model')
-    expect(process.env.TOKEN_BUDGET).toBe('12345')
+    expect(process.env.CONTEXT_LIMIT_TOKENS).toBe('12345')
+    expect(process.env.TOKEN_BUDGET).toBeUndefined()
+    expect(process.env.MAX_STEPS).toBeUndefined()
     expect(process.env.Q_CODE_DEBUG).toBe('true')
     expect(process.env.Q_CODE_THEME).toBe('light')
     expect(process.env.Q_CODE_LANGFUSE_ENABLED).toBe('true')

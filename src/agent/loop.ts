@@ -2,7 +2,7 @@
  * Agent 主循环：基于 Vercel AI SDK `streamText` 的多步推理与工具执行。
  *
  * 每步包含可选 preflight、流式消费（文本/工具调用/结果）、循环检测、
- * 步骤级重试、token 预算与 `stopAfterToolNames` 早停。工具经 `ToolRegistry`
+ * 步骤级重试、可选 `maxSteps` 与 `stopAfterToolNames` 早停。工具经 `ToolRegistry`
  * 包装审计与 Hooks；步骤事件写入 NDJSON 审计（`agent.step.start` / `end`）。
  */
 import { streamText, type LanguageModelUsage, type ModelMessage, type TelemetrySettings } from 'ai'
@@ -29,7 +29,6 @@ import {
   fmtLoopWarning,
   fmtRetry,
   fmtContextUsage,
-  fmtTurnTokenUsage,
   fmtStop,
   fmtContinue,
   fmtStepPerf,
@@ -38,9 +37,7 @@ import {
 } from '../utils/logger'
 import { auditContext, getAuditLogger } from '../observability/audit'
 
-const DEFAULT_MAX_STEPS = 88
 const MAX_RETRIES = 3
-const DEFAULT_TOKEN_BUDGET = 256000
 const DEFAULT_MAX_OUTPUT_TOKENS = 8000
 const DEFAULT_ESCALATED_MAX_OUTPUT_TOKENS = 64000
 const DEFAULT_TOOL_STEP_IDLE_TIMEOUT_MS = Number(process.env.TOOL_STEP_IDLE_TIMEOUT_MS?.trim() || 5000)
@@ -105,9 +102,9 @@ export interface AgentStepUsage {
 
 /** `agentLoop` 的可选配置与回调。 */
 export interface AgentLoopOptions {
-  tokenBudget?: number
   maxOutputTokens?: number
   escalatedMaxOutputTokens?: number
+  /** 显式限制 Agent step 数；不传时主循环不按步数硬停。 */
   maxSteps?: number
   preflight?: (
     messages: ModelMessage[],
@@ -156,7 +153,7 @@ type ToolResultOutput =
   | { type: 'error-text'; value: string }
 
 /**
- * 运行多步 Agent 循环直至无工具调用、触发停止条件或达到 `maxSteps`。
+ * 运行多步 Agent 循环直至无工具调用、触发停止条件或达到显式 `maxSteps`。
  *
  * @param model - AI SDK 语言模型实例
  * @param registry - 工具注册表（含审计/Hooks 包装）
@@ -175,10 +172,8 @@ export async function agentLoop(
   let step = 0
   let totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
   let usageAnchor: UsageAnchor | undefined
-  const tokenBudget = options.tokenBudget ?? DEFAULT_TOKEN_BUDGET
   const maxOutputTokens = options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
-  const maxSteps =
-    options.maxSteps ?? (Number(process.env.MAX_STEPS?.trim() || '') || DEFAULT_MAX_STEPS)
+  const maxSteps = normalizeMaxSteps(options.maxSteps)
   const escalatedMaxOutputTokens =
     options.escalatedMaxOutputTokens ?? DEFAULT_ESCALATED_MAX_OUTPUT_TOKENS
   const toolStepIdleTimeoutMs = normalizeIdleTimeout(options.toolStepIdleTimeoutMs)
@@ -187,7 +182,7 @@ export async function agentLoop(
   const quiet = options.quiet === true
   resetHistory()
 
-  while (step < maxSteps) {
+  while (maxSteps === undefined || step < maxSteps) {
     throwIfAborted(options.abortSignal)
     step++
     const stepAuditCtx = auditContext({
@@ -545,13 +540,6 @@ export async function agentLoop(
       const context = options.contextUsage(messages, { usageAnchor })
       if (!quiet) console.log(fmtContextUsage(context.used, context.limit, context.state))
     }
-    if (totalUsage.totalTokens > tokenBudget) {
-      if (!quiet) {
-        console.log(fmtTurnTokenUsage(totalUsage.totalTokens, tokenBudget))
-        console.log(fmtStop('本轮执行预算耗尽，强制停止'))
-      }
-      break
-    }
     if (stopAfterStepReason) {
       if (!quiet) console.log(`  ${stopAfterStepReason}`)
       break
@@ -565,7 +553,7 @@ export async function agentLoop(
     if (!quiet) console.log(fmtContinue())
   }
 
-  if (step >= maxSteps) {
+  if (maxSteps !== undefined && step >= maxSteps) {
     if (!quiet) console.log(fmtStop('达到最大步数限制，强制停止'))
   }
 
@@ -653,6 +641,12 @@ function normalizeIdleTimeout(value: number | undefined): number {
   if (value === undefined) return DEFAULT_TOOL_STEP_IDLE_TIMEOUT_MS
   if (!Number.isFinite(value) || value <= 0) return DEFAULT_TOOL_STEP_IDLE_TIMEOUT_MS
   return value
+}
+
+function normalizeMaxSteps(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined
+  if (!Number.isFinite(value) || value <= 0) return undefined
+  return Math.floor(value)
 }
 
 function buildStepMessages(
