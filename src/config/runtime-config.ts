@@ -37,9 +37,7 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     api_key: 'SUMMARY_API_KEY'
   },
   runtime: {
-    token_budget: 'TOKEN_BUDGET',
     context_limit_tokens: 'CONTEXT_LIMIT_TOKENS',
-    max_steps: 'MAX_STEPS',
     compact_trigger_ratio: 'COMPACT_TRIGGER_RATIO',
     warning_trigger_ratio: 'WARNING_TRIGGER_RATIO',
     blocking_trigger_ratio: 'BLOCKING_TRIGGER_RATIO',

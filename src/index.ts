@@ -253,9 +253,7 @@ if (earlyCliCommand === 'eval') {
 applyRuntimeConfig();
 
 const debugMode = isDebugMode(process.argv.slice(2));
-const tokenBudget = getNumberEnv('TOKEN_BUDGET', 256000);
 const contextLimitTokens = getNumberEnv('CONTEXT_LIMIT_TOKENS', 256000);
-const maxSteps = getNumberEnv('MAX_STEPS', 88);
 const compactTriggerRatio = getRatioEnv('COMPACT_TRIGGER_RATIO', 0.85);
 const warningTriggerRatio = getRatioEnv(
   'WARNING_TRIGGER_RATIO',
@@ -728,7 +726,6 @@ async function main() {
       getAvailableTools: () => registry.getVisibleTools(),
       getRuntimeContext: () => runtimeContext,
       getAgentMdContext: () => agentMdContext,
-      getTokenBudget: () => tokenBudget,
       getMaxOutputTokens: () => defaultMaxOutputTokens,
       getEscalatedMaxOutputTokens: () => escalatedMaxOutputTokens,
       getSessionId: () => sessionId,
@@ -1080,7 +1077,7 @@ async function main() {
     print(
       `Context 上限: ${contextLimitTokens} tokens，压缩阈值: ${compactTriggerTokens} tokens (${Math.round(
         compactTriggerRatio * 100,
-      )}%)，执行预算: ${tokenBudget} tokens，输出预算: ${defaultMaxOutputTokens}/${escalatedMaxOutputTokens}/${compactMaxOutputTokens}`,
+      )}%)，输出预算: ${defaultMaxOutputTokens}/${escalatedMaxOutputTokens}/${compactMaxOutputTokens}`,
     );
   }
 
@@ -1294,10 +1291,8 @@ async function main() {
         },
         async (langfuseTurn) => {
           const result = await agentLoop(model, registry, messages, turnSystem, {
-            tokenBudget,
             maxOutputTokens: defaultMaxOutputTokens,
             escalatedMaxOutputTokens,
-            maxSteps,
             quiet: useTui,
             modelName: currentModelName(),
             abortSignal: turnAbortController.signal,
