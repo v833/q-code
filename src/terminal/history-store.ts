@@ -2,10 +2,10 @@
  * TUI 输入历史持久化：按项目/全局 JSONL 保存 prompt，提供过滤、合并、轮转与本会话开关。
  */
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import { appendFile, mkdir, open, readFile, rm, stat } from 'node:fs/promises'
+import { constants, existsSync, readFileSync } from 'node:fs'
+import { lstat, mkdir, open, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { writeTextAtomic } from '../utils/atomic-write'
 import { isTrueEnv } from '../utils/env'
 
@@ -39,6 +39,8 @@ export interface HistoryStoreConfig {
   maxLineBytes: number
   searchMode: HistorySearchMode
   excludePatterns: RegExp[]
+  cwd: string
+  qCodeHome: string
   globalPath: string
   projectPath: string
 }
@@ -93,10 +95,15 @@ const DEFAULT_MAX_LINES = 20_000
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024
 const DEFAULT_RUNTIME_LIMIT = 2_000
 const DEFAULT_MAX_LINE_BYTES = 32 * 1024
-const LOCK_STALE_MS = 10_000
+const HISTORY_MAX_BYTES_LIMIT = 100 * 1024 * 1024
+const HISTORY_MAX_LINE_BYTES_LIMIT = 1024 * 1024
+const HISTORY_RUNTIME_LIMIT_LIMIT = 100_000
+const HISTORY_MAX_LINES_LIMIT = 1_000_000
+const LOCK_STALE_MS = 60_000
 const LOCK_RETRY_DELAY_MS = 20
 const LOCK_ATTEMPTS = 200
 const DEFAULT_EXCLUDE_PATTERNS = [/password\s*=/i, /api[_-]?key\s*=/i, /token\s*=/i]
+const OPEN_NOFOLLOW = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0
 
 /** 创建一个面向当前 cwd/session 的输入历史存储。 */
 export function createHistoryStore(options: CreateHistoryStoreOptions): HistoryStore {
@@ -159,7 +166,7 @@ class JsonlHistoryStore implements HistoryStore {
     if (this.isDisabled()) return []
     const files = getReadFiles(this.config)
     const loaded = await Promise.all(
-      files.map(async (file) => readHistoryEntries(file.path, file.scope))
+      files.map(async (file) => readHistoryEntries(file.path, file.scope, this.config))
     )
     return mergeHistoryEntries(loaded.flat(), limit)
   }
@@ -185,7 +192,7 @@ class JsonlHistoryStore implements HistoryStore {
     const entry = createHistoryEntry(evaluation.value, this.context, this.config, this.now())
     const paths: string[] = []
     for (const file of files) {
-      const appended = await appendEntry(file.path, entry, this.config)
+      const appended = await appendEntry(file.path, file.scope, entry, this.config)
       if (appended) paths.push(file.path)
     }
     if (paths.length > 0) this.notify()
@@ -196,9 +203,11 @@ class JsonlHistoryStore implements HistoryStore {
     const files = getFilesForScope(this.config, scope)
     await Promise.all(
       files.map(async (file) => {
-        await mkdir(dirname(file.path), { recursive: true })
+        if (!(await isSafeHistoryTarget(file.path, file.scope, this.config, { createDir: true }))) return
         await withFileLock(file.path, async () => {
-          await writeTextAtomic(file.path, '')
+          if (await isSafeHistoryTarget(file.path, file.scope, this.config, { createDir: true })) {
+            await writeTextAtomic(file.path, '')
+          }
         })
       })
     )
@@ -268,6 +277,21 @@ function resolveHistoryConfig(
   const scope = parseScope(options.env.Q_CODE_HISTORY_SCOPE) ?? 'both'
   const searchMode =
     parseSearchMode(options.env.Q_CODE_HISTORY_SEARCH) ?? settings.search ?? 'substring'
+  const maxLineBytes = parseBoundedPositiveInt(
+    options.env.Q_CODE_HISTORY_MAX_LINE_BYTES,
+    DEFAULT_MAX_LINE_BYTES,
+    1024,
+    HISTORY_MAX_LINE_BYTES_LIMIT
+  )
+  const maxBytes = Math.max(
+    maxLineBytes,
+    parseBoundedPositiveInt(
+      options.env.Q_CODE_HISTORY_MAX_BYTES,
+      DEFAULT_MAX_BYTES,
+      1024,
+      HISTORY_MAX_BYTES_LIMIT
+    )
+  )
   const excludePatterns = [
     ...(settings.excludeDefaults === false ? [] : DEFAULT_EXCLUDE_PATTERNS),
     ...(settings.excludePatterns ?? []).flatMap((pattern) => compilePattern(pattern))
@@ -277,12 +301,24 @@ function resolveHistoryConfig(
     disabled: isTrueEnv(options.env.Q_CODE_HISTORY_DISABLED),
     scope,
     redact: isTrueEnv(options.env.Q_CODE_HISTORY_REDACT),
-    maxLines: parsePositiveInt(options.env.Q_CODE_HISTORY_MAX_LINES, DEFAULT_MAX_LINES),
-    maxBytes: parsePositiveInt(options.env.Q_CODE_HISTORY_MAX_BYTES, DEFAULT_MAX_BYTES),
-    runtimeLimit: parsePositiveInt(options.env.Q_CODE_HISTORY_RUNTIME_LIMIT, DEFAULT_RUNTIME_LIMIT),
-    maxLineBytes: parsePositiveInt(options.env.Q_CODE_HISTORY_MAX_LINE_BYTES, DEFAULT_MAX_LINE_BYTES),
+    maxLines: parseBoundedPositiveInt(
+      options.env.Q_CODE_HISTORY_MAX_LINES,
+      DEFAULT_MAX_LINES,
+      1,
+      HISTORY_MAX_LINES_LIMIT
+    ),
+    maxBytes,
+    runtimeLimit: parseBoundedPositiveInt(
+      options.env.Q_CODE_HISTORY_RUNTIME_LIMIT,
+      DEFAULT_RUNTIME_LIMIT,
+      1,
+      HISTORY_RUNTIME_LIMIT_LIMIT
+    ),
+    maxLineBytes,
     searchMode,
     excludePatterns,
+    cwd: resolve(cwd),
+    qCodeHome,
     globalPath: join(qCodeHome, 'history', 'global.jsonl'),
     projectPath: join(resolve(cwd), '.q-code', 'history.jsonl')
   }
@@ -375,20 +411,32 @@ function enforceLineLimit(entry: HistoryEntry, maxLineBytes: number): HistoryEnt
 
 async function appendEntry(
   filePath: string,
+  scope: Exclude<HistoryScope, 'both'>,
   entry: HistoryEntry,
   config: HistoryStoreConfig
 ): Promise<boolean> {
-  await mkdir(dirname(filePath), { recursive: true })
+  if (!(await isSafeHistoryTarget(filePath, scope, config, { createDir: true }))) return false
   return withFileLock(filePath, async () => {
+    if (!(await isSafeHistoryTarget(filePath, scope, config, { createDir: true }))) return false
     const last = await readLastHistoryEntry(filePath)
-    if (last?.value === entry.value) return false
-    await appendFile(filePath, `${JSON.stringify(stripRuntimeScope(entry))}\n`, {
-      encoding: 'utf-8',
-      flag: 'a'
-    })
+    if (last && isSameHistoryValue(last, entry)) return false
+    await appendHistoryLine(filePath, `${JSON.stringify(stripRuntimeScope(entry))}\n`)
     await rotateHistoryFile(filePath, config)
     return true
   })
+}
+
+async function appendHistoryLine(filePath: string, line: string): Promise<void> {
+  const handle = await open(
+    filePath,
+    constants.O_APPEND | constants.O_CREAT | constants.O_WRONLY | OPEN_NOFOLLOW,
+    0o600
+  )
+  try {
+    await handle.writeFile(line, 'utf-8')
+  } finally {
+    await handle.close()
+  }
 }
 
 async function rotateHistoryFile(filePath: string, config: HistoryStoreConfig): Promise<void> {
@@ -406,8 +454,10 @@ async function rotateHistoryFile(filePath: string, config: HistoryStoreConfig): 
 
 async function readHistoryEntries(
   filePath: string,
-  scope: Exclude<HistoryScope, 'both'>
+  scope: Exclude<HistoryScope, 'both'>,
+  config?: HistoryStoreConfig
 ): Promise<HistoryEntry[]> {
+  if (config && !(await isSafeHistoryTarget(filePath, scope, config, { createDir: false }))) return []
   const text = await readTextOrEmpty(filePath)
   if (!text) return []
   return text
@@ -485,6 +535,11 @@ function mergeHistoryEntries(entries: HistoryEntry[], limit: number): HistoryEnt
   return merged
 }
 
+function isSameHistoryValue(a: HistoryEntry, b: HistoryEntry): boolean {
+  if (a.sha256 && b.sha256) return a.sha256 === b.sha256
+  return a.value === b.value
+}
+
 function compareHistoryTimeDesc(a: HistoryEntry, b: HistoryEntry): number {
   return safeTime(b.ts) - safeTime(a.ts)
 }
@@ -535,6 +590,41 @@ async function withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<
     await handle.close().catch(() => undefined)
     await rm(lockPath, { force: true }).catch(() => undefined)
   }
+}
+
+async function isSafeHistoryTarget(
+  filePath: string,
+  scope: Exclude<HistoryScope, 'both'>,
+  config: HistoryStoreConfig,
+  options: { createDir: boolean }
+): Promise<boolean> {
+  const dir = dirname(filePath)
+  if (options.createDir) await mkdir(dir, { recursive: true })
+  if (await isSymlink(filePath)) return false
+  if (scope !== 'project') return true
+
+  try {
+    const [root, targetDir] = await Promise.all([realpath(config.cwd), realpath(dir)])
+    return isPathInside(targetDir, root)
+  } catch (error) {
+    if (isNotFoundError(error)) return false
+    throw error
+  }
+}
+
+async function isSymlink(filePath: string): Promise<boolean> {
+  try {
+    return (await lstat(filePath)).isSymbolicLink()
+  } catch (error) {
+    if (isNotFoundError(error)) return false
+    throw error
+  }
+}
+
+function isPathInside(targetPath: string, rootPath: string): boolean {
+  const target = resolve(targetPath)
+  const root = resolve(rootPath)
+  return target === root || target.startsWith(`${root}${sep}`)
 }
 
 async function acquireLock(lockPath: string): Promise<Awaited<ReturnType<typeof open>>> {
@@ -600,10 +690,15 @@ function parseSearchMode(value: unknown): HistorySearchMode | undefined {
   return value
 }
 
-function parsePositiveInt(value: string | undefined, fallback: number): number {
+function parseBoundedPositiveInt(
+  value: string | undefined,
+  fallback: number,
+  min: number,
+  max: number
+): number {
   const parsed = Number(value)
-  if (!Number.isInteger(parsed) || parsed <= 0) return fallback
-  return parsed
+  if (!Number.isInteger(parsed) || parsed < min) return fallback
+  return Math.min(parsed, max)
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

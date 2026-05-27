@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -138,6 +146,71 @@ describe('history store', () => {
     expect(readFileSync(join(home, 'history', 'global.jsonl'), 'utf-8')).toBe('')
   })
 
+  it('deduplicates redacted history by hash instead of preview text', async () => {
+    const { cwd, home } = createRoots()
+    const store = createHistoryStore({
+      cwd,
+      qCodeHome: home,
+      sessionId: 's1',
+      now: createClock(),
+      env: {
+        Q_CODE_HISTORY_SCOPE: 'project',
+        Q_CODE_HISTORY_REDACT: 'true'
+      }
+    })
+
+    await store.append(`${'a'.repeat(50)}1`)
+    await store.append(`${'a'.repeat(50)}2`)
+
+    const lines = readJsonl(join(cwd, '.q-code', 'history.jsonl'))
+    expect(lines).toHaveLength(2)
+    expect(lines[0]?.value).toBe(lines[1]?.value)
+    expect(lines[0]?.sha256).not.toBe(lines[1]?.sha256)
+    expect(await store.load()).toHaveLength(2)
+  })
+
+  it('does not follow a project .q-code symlink outside the cwd', async () => {
+    const { cwd, home, root } = createRoots()
+    const outside = join(root, 'outside-q-code')
+    mkdirSync(outside, { recursive: true })
+    symlinkSync(outside, join(cwd, '.q-code'), process.platform === 'win32' ? 'junction' : 'dir')
+    const store = createHistoryStore({
+      cwd,
+      qCodeHome: home,
+      sessionId: 's1',
+      env: { Q_CODE_HISTORY_SCOPE: 'project' }
+    })
+
+    const result = await store.append('pnpm test')
+
+    expect(result.persisted).toBe(false)
+    expect(existsSync(join(outside, 'history.jsonl'))).toBe(false)
+    expect(await store.load()).toEqual([])
+  })
+
+  it('bounds history sizing config to conservative limits', () => {
+    const { cwd, home } = createRoots()
+    const store = createHistoryStore({
+      cwd,
+      qCodeHome: home,
+      sessionId: 's1',
+      env: {
+        Q_CODE_HISTORY_SCOPE: 'project',
+        Q_CODE_HISTORY_MAX_LINES: '9999999',
+        Q_CODE_HISTORY_MAX_BYTES: '1',
+        Q_CODE_HISTORY_RUNTIME_LIMIT: '9999999',
+        Q_CODE_HISTORY_MAX_LINE_BYTES: '9999999'
+      }
+    })
+
+    expect(store.getConfig()).toMatchObject({
+      maxLines: 1_000_000,
+      runtimeLimit: 100_000,
+      maxLineBytes: 1024 * 1024,
+      maxBytes: 5 * 1024 * 1024
+    })
+  })
+
   it('reads exclude patterns and search mode from history settings', async () => {
     const { cwd, home } = createRoots()
     const store = createHistoryStore({
@@ -190,14 +263,14 @@ describe('history store', () => {
   })
 })
 
-function createRoots(): { cwd: string; home: string } {
+function createRoots(): { root: string; cwd: string; home: string } {
   const root = mkdtempSync(join(tmpdir(), 'q-code-history-'))
   roots.push(root)
   const cwd = join(root, 'repo')
   const home = join(root, 'home')
   mkdirSync(cwd, { recursive: true })
   mkdirSync(home, { recursive: true })
-  return { cwd, home }
+  return { root, cwd, home }
 }
 
 function createClock(): () => Date {
