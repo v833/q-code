@@ -59,6 +59,7 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     audit_pii: 'Q_CODE_AUDIT_PII',
     crash_guard: 'Q_CODE_CRASH_GUARD',
     mention_allow_abs: 'Q_CODE_MENTION_ALLOW_ABS',
+    file_index_ignore: 'Q_CODE_FILE_INDEX_IGNORE',
     shell_timeout_ms: 'Q_CODE_SHELL_TIMEOUT_MS',
     shell_timeout_max_ms: 'Q_CODE_SHELL_TIMEOUT_MAX_MS',
     shell_max_buffer: 'Q_CODE_SHELL_MAX_BUFFER',
@@ -111,6 +112,9 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
   },
   mention: {
     allow_abs: 'Q_CODE_MENTION_ALLOW_ABS'
+  },
+  file_index: {
+    ignore: 'Q_CODE_FILE_INDEX_IGNORE'
   },
   audit: {
     enabled: 'Q_CODE_AUDIT_ENABLED',

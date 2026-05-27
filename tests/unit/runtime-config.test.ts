@@ -31,6 +31,7 @@ const ENV_KEYS = [
   'Q_CODE_GITLAB_PROJECT_ID',
   'Q_CODE_GITLAB_KB_PREFIX',
   'Q_CODE_MENTION_ALLOW_ABS',
+  'Q_CODE_FILE_INDEX_IGNORE',
   'Q_CODE_SHELL_TIMEOUT_MS',
   'Q_CODE_SHELL_TIMEOUT_MAX_MS',
   'Q_CODE_SHELL_MAX_BUFFER',
@@ -202,6 +203,8 @@ describe('runtime config', () => {
         'timeout_seconds = 4',
         '[mention]',
         'allow_abs = false',
+        '[file_index]',
+        'ignore = "build,out"',
         '[gitlab_kb]',
         'url = "https://gitlab.example.com/group/project"',
         'token = "glpat-test"',
@@ -244,6 +247,7 @@ describe('runtime config', () => {
     expect(process.env.Q_CODE_LANGFUSE_FLUSH_INTERVAL_SECONDS).toBe('2')
     expect(process.env.Q_CODE_LANGFUSE_TIMEOUT_SECONDS).toBe('4')
     expect(process.env.Q_CODE_MENTION_ALLOW_ABS).toBe('false')
+    expect(process.env.Q_CODE_FILE_INDEX_IGNORE).toBe('build,out')
     expect(process.env.Q_CODE_SHELL_TIMEOUT_MS).toBe('90000')
     expect(process.env.Q_CODE_SHELL_TIMEOUT_MAX_MS).toBe('120000')
     expect(process.env.Q_CODE_SHELL_MAX_BUFFER).toBe('2097152')

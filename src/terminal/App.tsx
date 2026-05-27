@@ -41,7 +41,8 @@ import {
   findFileMentionAtCursor,
   formatFileMentionTarget,
   searchFileMentionIndex,
-  type FileMentionIndex
+  type FileMentionIndex,
+  type FileMentionIndexStore
 } from '../mentions'
 import type { SessionSummary } from '../session/store'
 import type { HistoryStore } from './history-store'
@@ -69,6 +70,7 @@ export interface TerminalAppProps {
   /** 斜杠命令补全候选；运行中可被 `slash_commands` 事件覆盖。 */
   slashCommands?: SlashCommandSuggestion[]
   fileMentionIndex?: FileMentionIndex
+  fileMentionIndexStore?: FileMentionIndexStore
   inputHistoryStore?: HistoryStore
 }
 
@@ -160,9 +162,15 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
   const hasStreamingAssistant = state.activeAssistantId !== undefined
   const slashCommands =
     state.slashCommands.length > 0 ? state.slashCommands : props.slashCommands ?? []
+  const [storedFileMentionIndex, setStoredFileMentionIndex] = useState<FileMentionIndex | undefined>(
+    () => props.fileMentionIndexStore?.getSnapshot()
+  )
   const fileMentionIndex = useMemo(
-    () => props.fileMentionIndex ?? createEmptyFileMentionIndex(props.cwd ?? process.cwd()),
-    [props.cwd, props.fileMentionIndex]
+    () =>
+      props.fileMentionIndex ??
+      storedFileMentionIndex ??
+      createEmptyFileMentionIndex(props.cwd ?? process.cwd()),
+    [props.cwd, props.fileMentionIndex, storedFileMentionIndex]
   )
   const fileMentionAtCursor = useMemo(
     () => findFileMentionAtCursor(input.value, input.cursor),
@@ -284,6 +292,16 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
       internal_eventEmitter.removeListener('input', rememberRawInput)
     }
   }, [internal_eventEmitter])
+
+  useEffect(() => {
+    const store = props.fileMentionIndexStore
+    if (!store) {
+      setStoredFileMentionIndex(undefined)
+      return undefined
+    }
+    setStoredFileMentionIndex(store.getSnapshot())
+    return store.subscribe((index) => setStoredFileMentionIndex(index))
+  }, [props.fileMentionIndexStore])
 
   useEffect(() => {
     const store = props.inputHistoryStore

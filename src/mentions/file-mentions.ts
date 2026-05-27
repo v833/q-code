@@ -51,7 +51,7 @@ const GIT_LOCAL_ENV_KEYS = [
 ]
 
 /** 文件索引的构建来源。 */
-export type FileMentionIndexSource = 'git' | 'walk' | 'empty'
+export type FileMentionIndexSource = 'git' | 'walk' | 'empty' | 'cache'
 
 /** `@file` 补全用的 cwd 内相对路径索引。 */
 export interface FileMentionIndex {
@@ -63,6 +63,10 @@ export interface FileMentionIndex {
   /** 是否因上限未收录全部文件。 */
   truncated: boolean
   source: FileMentionIndexSource
+  /** 缓存索引的原始构建来源。 */
+  cachedSource?: Exclude<FileMentionIndexSource, 'cache' | 'empty'>
+  /** 索引刷新完成时间。 */
+  updatedAt?: string
   /** 索引构建失败时的说明。 */
   error?: string
 }
@@ -138,12 +142,13 @@ export interface ExpandFileMentionsOptions {
  */
 export async function createFileMentionIndex(
   cwd: string,
-  maxFiles = FILE_MENTION_MAX_INDEX_FILES
+  maxFiles = FILE_MENTION_MAX_INDEX_FILES,
+  options: { ignoreDirs?: Iterable<string> } = {}
 ): Promise<FileMentionIndex> {
   const root = resolve(cwd)
   const fromGit = await readGitFileIndex(root, maxFiles)
   if (fromGit) return fromGit
-  return walkFileIndex(root, maxFiles)
+  return walkFileIndex(root, maxFiles, options.ignoreDirs)
 }
 
 /** 返回空索引（TUI 在索引尚未就绪时使用）。 */
@@ -410,6 +415,7 @@ export function createUserMentionPayload(expansion: FileMentionExpansion): Recor
 
 /** 索引被裁剪时返回 TUI 提示文案；未裁剪时返回 `undefined`。 */
 export function fileMentionIndexNotice(index: FileMentionIndex): string | undefined {
+  if (index.error) return `@file 索引刷新失败，继续使用现有候选: ${compactNotice(index.error)}`
   if (!index.truncated) return undefined
   return `@file 候选已裁剪到 ${FILE_MENTION_MAX_INDEX_FILES} 个文件，继续输入可缩小范围`
 }
@@ -649,10 +655,15 @@ function createGitFileIndexEnv(): NodeJS.ProcessEnv {
   return env
 }
 
-function walkFileIndex(cwd: string, maxFiles: number): FileMentionIndex {
+function walkFileIndex(
+  cwd: string,
+  maxFiles: number,
+  extraIgnoreDirs: Iterable<string> = []
+): FileMentionIndex {
   const files: string[] = []
   const stack = [cwd]
   let seen = 0
+  const skipDirs = new Set([...FALLBACK_SKIP_DIRS, ...extraIgnoreDirs].filter(Boolean))
 
   while (stack.length > 0) {
     const dir = stack.pop()
@@ -676,7 +687,7 @@ function walkFileIndex(cwd: string, maxFiles: number): FileMentionIndex {
 
       if (stat.isSymbolicLink()) continue
       if (stat.isDirectory()) {
-        if (!FALLBACK_SKIP_DIRS.has(entry)) stack.push(absolutePath)
+        if (!skipDirs.has(entry)) stack.push(absolutePath)
         continue
       }
       if (!stat.isFile()) continue
@@ -725,6 +736,11 @@ function normalizeQuery(value: string): string {
 
 function normalizeDisplayPath(value: string): string {
   return value.replaceAll(sep, '/').replace(/\\/g, '/').replace(/^\.\//, '')
+}
+
+function compactNotice(value: string): string {
+  const singleLine = value.replace(/\s+/g, ' ').trim()
+  return singleLine.length > 80 ? `${singleLine.slice(0, 79)}…` : singleLine
 }
 
 function isPathBoundary(char: string | undefined): boolean {

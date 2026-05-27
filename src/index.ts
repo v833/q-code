@@ -237,10 +237,10 @@ import {
   shutdownLangfuse,
 } from './observability/langfuse';
 import {
-  createFileMentionIndex,
+  createFileMentionIndexStore,
   createUserMentionPayload,
   expandFileMentions,
-  type FileMentionIndex,
+  type FileMentionIndexStore,
 } from './mentions';
 
 const packageVersion = getPackageVersion();
@@ -1106,8 +1106,8 @@ async function main() {
       category: 'Skills',
     })),
   ];
-  const fileMentionIndex: FileMentionIndex | undefined = useTui
-    ? await createFileMentionIndex(activeStore.cwd)
+  const fileMentionIndexStore: FileMentionIndexStore | undefined = useTui
+    ? createFileMentionIndexStore(activeStore.cwd)
     : undefined;
 
   if (useTui) {
@@ -1121,7 +1121,7 @@ async function main() {
       cwd: activeStore.cwd,
       initialEvents: pendingTerminalEvents,
       slashCommands: buildSlashCommandSuggestions(),
-      fileMentionIndex,
+      fileMentionIndexStore,
       inputHistoryStore,
       onSubmit: handleInput,
       onSessionPickerSelect: (targetSessionId) =>
@@ -1199,6 +1199,7 @@ async function main() {
       { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
     );
     await getAuditLogger().flush();
+    fileMentionIndexStore?.close();
     await closeMcpSubsystem();
     await shutdownLangfuse();
     rl?.close();

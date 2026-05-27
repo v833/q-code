@@ -147,6 +147,7 @@ cp .env.example .env
 | `Q_CODE_EVAL_JUDGE_API_KEY`    | ❌   | LLM judge 专用 API key；未设时回退 `SUMMARY_API_KEY`          |
 | `Q_CODE_EVAL_JUDGE_MODEL`      | ❌   | LLM judge 专用模型；未设时回退 `SUMMARY_MODEL`                |
 | `Q_CODE_MENTION_ALLOW_ABS`     | ❌   | 设为 true 后允许 `@file` 引用绝对路径；默认只允许当前目录内路径 |
+| `Q_CODE_FILE_INDEX_IGNORE`     | ❌   | 非 git fallback walk 额外跳过的目录名，逗号分隔              |
 | `Q_CODE_SHELL_TIMEOUT_MS`      | ❌   | `f` 同步命令默认超时，默认 60000ms                           |
 | `Q_CODE_SHELL_TIMEOUT_MAX_MS`  | ❌   | `f.timeoutMs` 上限，默认 1800000ms（30 分钟）                 |
 | `Q_CODE_SHELL_MAX_BUFFER`      | ❌   | `f` 同步输出内存阈值，默认 4194304（4MB），超出后落盘 spill   |
@@ -220,7 +221,7 @@ pnpm run continue       # 恢复上次会话
 路径含空格 @"My Project/notes.md"
 ```
 
-默认只允许引用当前工作目录内的文件，并会校验 symlink 指向的真实路径；绝对路径如 `@/etc/passwd` 会被阻止，确需引用绝对路径时设置 `Q_CODE_MENTION_ALLOW_ABS=true`。单个引用最多注入 50KB，单轮全部引用合计最多 200KB，超出时会截断或明确提示丢弃。文件候选优先使用 git 索引，非 git 目录会回退递归扫描；超过 20000 个文件时候选会裁剪并在 TUI 中提示。
+默认只允许引用当前工作目录内的文件，并会校验 symlink 指向的真实路径；绝对路径如 `@/etc/passwd` 会被阻止，确需引用绝对路径时设置 `Q_CODE_MENTION_ALLOW_ABS=true`。单个引用最多注入 50KB，单轮全部引用合计最多 200KB，超出时会截断或明确提示丢弃。文件候选优先使用 git 索引，非 git 目录会回退递归扫描；索引会缓存到 `<cwd>/.q-code/file-mention-index.json`，下次启动先用缓存并在后台刷新。TUI 会监听文件变更并 debounce 刷新候选，刷新失败时继续使用旧索引并显示简短提示；超过 20000 个文件时候选会裁剪并在 TUI 中提示。fallback walk 默认跳过 `.q-code`、`.sessions` 等本地目录，可用 `Q_CODE_FILE_INDEX_IGNORE=build,out` 追加忽略目录。
 
 ### npm 发布
 
@@ -273,7 +274,7 @@ src/
 │       └── memory-types.ts# 记忆类型定义与引导指令
 ├── session/
 │   └── store.ts          # JSONL 会话持久化
-├── mentions/             # @file 文件引用解析、索引、fuzzy 补全和上下文注入
+├── mentions/             # @file 文件引用解析、索引缓存/刷新、fuzzy 补全和上下文注入
 ├── skills/               # SKILL.md 加载、渐进式披露、条件激活
 ├── agents/
 │   ├── bootstrap.ts      # SubAgent 启动加载
@@ -1357,6 +1358,7 @@ System Prompt 由 `PromptBuilder` 按管道顺序拼接，每个 Pipe 可根据�
 <cwd>/.q-code/
 ├── settings.json              # 项目级 MCP 配置
 ├── AGENT.md                   # 项目级指令
+├── file-mention-index.json    # TUI @file 候选索引缓存
 ├── history.jsonl              # 项目级 TUI 输入历史
 ├── skills/<name>/SKILL.md     # 项目级 Skills
 ├── agents/<name>.md           # 项目级自定义 Agents
