@@ -41,4 +41,9 @@ export class CompactionCircuitBreaker {
   recordFailure(): void {
     this.consecutiveFailures++
   }
+
+  /** 显式重置熔断器状态；切换会话时避免继承上一会话的失败计数。 */
+  reset(): void {
+    this.consecutiveFailures = 0
+  }
 }

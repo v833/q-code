@@ -1166,6 +1166,7 @@ tests/
 └── integration/              # 跨模块集成 + 真实文件系统
     ├── agent-loop.test.ts    # mock model 驱动 ReAct 循环
     ├── session-recovery.test.ts
+    ├── session-switch.test.ts
     ├── task-graph.test.ts
     └── team-flow.test.ts
 
@@ -1210,7 +1211,7 @@ src/evals/                    # q-code eval 本地评测框架
 | 并发锁           | `unit/tool-registry.test.ts` — 独占/共享锁、cwd/abort/identity 透传            |
 | Prompt 管道      | `unit/prompt-builder.test.ts` — pipe 顺序、空跳过、各内置 pipe 字段透传        |
 | Agent ReAct 循环 | `integration/agent-loop.test.ts` — mock 模型 + mock 工具的多步 ReAct + abort   |
-| 会话恢复         | `integration/session-recovery.test.ts` — 损坏 JSONL 行被静默跳过、压缩快照分界 |
+| 会话恢复/切换    | `integration/session-recovery.test.ts` / `integration/session-switch.test.ts` — 损坏 JSONL 行恢复、压缩快照分界、无重启切换 |
 | 任务图           | `integration/task-graph.test.ts` — CRUD + 双向依赖 + reset 不复用 id           |
 | Agent Teams      | `integration/team-flow.test.ts` — 完整流程 + reconcile + 并发邮箱 + 大小限制   |
 | Agent Eval       | `unit/evals.test.ts` — 加载 smoke/cli/live case、运行 runner、生成 trace、报告、judge 解析、趋势看板和副作用 artifact |

@@ -1863,6 +1863,7 @@ async function main() {
     pendingPlanSummary = '';
     needsPlanModeExitAttachment = false;
     pendingSessionSelection = undefined;
+    compactionBreaker.reset();
     latestTotalUsage = nextStore.getSummary().totalUsage;
     usageTracker = new UsageTracker({
       cacheMode:

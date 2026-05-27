@@ -144,7 +144,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
   - Shell 工具改动：`vitest run tests/unit/shell-tools.test.ts tests/integration/shell-streaming.test.ts`
   - 自定义工具目录改动：`vitest run tests/unit/custom-tools.test.ts tests/unit/tool-registry.test.ts`
   - `@file` 文件引用：`vitest run tests/unit/file-mentions.test.ts tests/unit/terminal.test.ts tests/unit/runtime-config.test.ts`
-  - 会话管理：`vitest run tests/unit/session-management.test.ts tests/integration/session-recovery.test.ts tests/unit/terminal.test.ts`
+  - 会话管理：`vitest run tests/unit/session-management.test.ts tests/integration/session-recovery.test.ts tests/integration/session-switch.test.ts tests/unit/terminal.test.ts`
   - 终端/输入状态机改动：`vitest run tests/unit/terminal.test.ts`
   - 运行时配置/CLI 子命令：`vitest run tests/unit/runtime-config.test.ts tests/unit/cli-info.test.ts tests/unit/update.test.ts tests/unit/init-cli.test.ts`
   - 崩溃保护：`vitest run tests/unit/crash-guard.test.ts tests/unit/mcp-bootstrap.test.ts tests/unit/audit-logger.test.ts`
