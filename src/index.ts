@@ -10,6 +10,11 @@ import { applyRuntimeConfig } from './config/runtime-config';
 import { fmtBanner, fmtContextUsage, fmtStop } from './utils/logger';
 import { createInterface } from 'node:readline';
 import { startTerminalRuntime, type TerminalRuntime } from './terminal/runtime';
+import {
+  createHistoryStore,
+  formatHistoryEntries,
+  type HistoryScope,
+} from './terminal/history-store';
 import type { TerminalEvent } from './terminal/events';
 import {
   formatStartupDuckBanner,
@@ -820,6 +825,10 @@ async function main() {
   if (!initialStore) throw new Error('Session store was not initialized');
   let activeStore: SessionStore = initialStore;
   activeStoreRef.current = activeStore;
+  const inputHistoryStore = createHistoryStore({
+    cwd: activeStore.cwd,
+    sessionId,
+  });
 
   registerConversationTools({
     getCwd: () => activeStore.cwd,
@@ -1113,6 +1122,7 @@ async function main() {
       initialEvents: pendingTerminalEvents,
       slashCommands: buildSlashCommandSuggestions(),
       fileMentionIndex,
+      inputHistoryStore,
       onSubmit: handleInput,
       onSessionPickerSelect: (targetSessionId) =>
         switchSession(targetSessionId, { clearTranscript: true }),
@@ -1671,8 +1681,8 @@ async function main() {
       ),
       command(
         '/history',
-        '查看当前项目已保存会话',
-        '/history',
+        '查看或管理输入历史',
+        '/history [clear|on|off]',
         'Core',
         handleHistoryCommand,
       ),
@@ -1813,19 +1823,58 @@ async function main() {
     print(`\n  [Model] 本会话模型已切换为: ${requested}`);
   }
 
-  function handleHistoryCommand(input: SlashCommandInput): void {
-    if (input.args) {
-      print('\n  [History] 用法: /history');
+  async function handleHistoryCommand(input: SlashCommandInput): Promise<void> {
+    const args = input.args.trim().split(/\s+/).filter(Boolean);
+    const subcommand = args[0]?.toLowerCase();
+
+    if (!subcommand) {
+      const entries = await inputHistoryStore.loadEntries(30);
+      print('\n' + formatHistoryEntries(entries));
       return;
     }
 
-    const sessions = listProjectSessions({ cwd: activeStore.cwd });
-    if (sessions.length === 0) {
-      print('\nRecent sessions\n\n  当前项目还没有保存过会话。');
+    if (subcommand === 'clear') {
+      const scope = parseHistoryScopeArg(args[1]);
+      if (!scope) {
+        print('\n  [History] 用法: /history clear [global|project|both]');
+        return;
+      }
+      await inputHistoryStore.clear(scope);
+      print(`\n  [History] 已清空 ${formatHistoryScope(scope)} 输入历史。`);
       return;
     }
 
-    print('\n' + formatSessionsTable(sessions.slice(0, 20), sessionId));
+    if (subcommand === 'off') {
+      inputHistoryStore.setSessionEnabled(false);
+      print('\n  [History] 本会话已暂停记录输入历史。');
+      return;
+    }
+
+    if (subcommand === 'on') {
+      inputHistoryStore.setSessionEnabled(true);
+      const suffix = inputHistoryStore.isDisabled()
+        ? ' 但 Q_CODE_HISTORY_DISABLED=true 仍会阻止持久化。'
+        : '';
+      print(`\n  [History] 本会话已恢复记录输入历史。${suffix}`);
+      return;
+    }
+
+    print('\n  [History] 用法: /history [clear [global|project|both]|on|off]');
+  }
+
+  function parseHistoryScopeArg(value: string | undefined): HistoryScope | undefined {
+    if (!value) return inputHistoryStore.getConfig().scope;
+    const normalized = value.toLowerCase();
+    if (normalized === 'global' || normalized === 'project' || normalized === 'both') {
+      return normalized;
+    }
+    return undefined;
+  }
+
+  function formatHistoryScope(scope: HistoryScope): string {
+    if (scope === 'global') return '全局'
+    if (scope === 'project') return '项目'
+    return '项目和全局'
   }
 
   async function switchSession(
@@ -1855,6 +1904,7 @@ async function main() {
     activeStore = nextStore;
     activeStoreRef.current = activeStore;
     sessionId = nextStore.sessionId;
+    inputHistoryStore.setContext({ cwd: activeStore.cwd, sessionId });
     planOptions = { cwd: nextStore.cwd, sessionId };
     planFilePath = getPlanFilePath(planOptions);
     messages = nextMessages;

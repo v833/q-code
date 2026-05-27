@@ -17,6 +17,10 @@ export interface InputState {
   historySearchQuery?: string;
   /** 反向搜索当前命中的历史索引。 */
   historySearchIndex?: number;
+  /** 当前匹配在全部匹配中的序号（1 表示最新命中）。 */
+  historySearchMatchIndex?: number;
+  /** 当前查询的全部匹配数量。 */
+  historySearchMatchCount?: number;
   /** Esc 清空后暂存、以便再次 Esc 恢复的内容。 */
   clearedValue?: string;
   /** 与 {@link InputState.clearedValue} 对应的光标位置。 */
@@ -30,6 +34,15 @@ export function createInputState(history: string[] = []): InputState {
     cursor: 0,
     history,
   };
+}
+
+/** Ctrl+R 历史搜索模式。 */
+export type InputHistorySearchMode = 'substring' | 'fuzzy';
+
+/** 提交输入时的历史记录选项。 */
+export interface SubmitInputOptions {
+  shouldRecord?: (input: string) => boolean;
+  maxHistory?: number;
 }
 
 /** 在光标处插入文本（含粘贴规范化与字素簇光标）。 */
@@ -114,14 +127,15 @@ export function replaceRange(
 /**
  * 提交当前输入：返回 trim 后的字符串，并重置编辑区、更新历史（最多 100 条）。
  */
-export function submitInput(state: InputState): {
+export function submitInput(state: InputState, options: SubmitInputOptions = {}): {
   input: string;
   state: InputState;
 } {
   const input = state.value.trimEnd();
-  const history = input.trim()
-    ? [...state.history.filter((entry) => entry !== input), input].slice(-100)
-    : state.history;
+  const history =
+    input.trim() && (options.shouldRecord?.(input) ?? true)
+      ? appendRuntimeHistory(state.history, input, options.maxHistory)
+      : state.history;
   return {
     input,
     state: {
@@ -130,6 +144,15 @@ export function submitInput(state: InputState): {
       history,
       historyIndex: undefined,
     },
+  };
+}
+
+/** 替换已加载历史，同时保留当前编辑区内容。 */
+export function replaceHistory(state: InputState, history: string[]): InputState {
+  return {
+    ...clearTransientInputState(state),
+    history,
+    historyIndex: undefined,
   };
 }
 
@@ -227,16 +250,25 @@ export function clearOrRestoreInput(state: InputState): InputState {
 }
 
 /** Ctrl+R：按当前查询串反向搜索历史，无查询则等同 {@link recallPrevious}。 */
-export function searchHistoryPrevious(state: InputState): InputState {
+export function searchHistoryPrevious(
+  state: InputState,
+  options: { mode?: InputHistorySearchMode } = {},
+): InputState {
   if (state.history.length === 0) return state;
   const query = state.historySearchQuery ?? state.value.trim();
   if (!query) return recallPrevious(state);
 
   const start = state.historySearchIndex ?? state.history.length;
-  const match = findPreviousHistoryMatch(state.history, query, start);
+  const matches = findHistoryMatches(
+    state.history,
+    query,
+    options.mode ?? 'substring',
+  );
+  const match = findPreviousHistoryMatch(matches, start);
   if (match === -1) return state;
 
   const value = state.history[match] ?? '';
+  const ascendingPosition = matches.indexOf(match);
   return {
     ...state,
     value,
@@ -244,6 +276,9 @@ export function searchHistoryPrevious(state: InputState): InputState {
     historyIndex: match,
     historySearchQuery: query,
     historySearchIndex: match,
+    historySearchMatchIndex:
+      ascendingPosition === -1 ? undefined : matches.length - ascendingPosition,
+    historySearchMatchCount: matches.length,
   };
 }
 
@@ -286,24 +321,60 @@ export function normalizePastedText(text: string): string {
   return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
 
-function findPreviousHistoryMatch(
+function appendRuntimeHistory(
+  history: readonly string[],
+  input: string,
+  maxHistory = 2_000,
+): string[] {
+  if (history[history.length - 1] === input) return [...history];
+  return [...history, input].slice(-Math.max(1, maxHistory));
+}
+
+function findHistoryMatches(
   history: readonly string[],
   query: string,
-  start: number,
-): number {
-  for (let index = start - 1; index >= 0; index--) {
-    if (history[index]?.includes(query)) return index;
+  mode: InputHistorySearchMode,
+): number[] {
+  const matches: number[] = [];
+  for (let index = 0; index < history.length; index += 1) {
+    if (matchesHistoryEntry(history[index] ?? '', query, mode)) matches.push(index);
   }
-  for (let index = history.length - 1; index >= start; index--) {
-    if (history[index]?.includes(query)) return index;
+  return matches;
+}
+
+function findPreviousHistoryMatch(matches: readonly number[], start: number): number {
+  for (let index = matches.length - 1; index >= 0; index -= 1) {
+    const match = matches[index] ?? -1;
+    if (match < start) return match;
   }
+  if (matches.length > 0) return matches[matches.length - 1] ?? -1;
   return -1;
+}
+
+function matchesHistoryEntry(
+  value: string,
+  query: string,
+  mode: InputHistorySearchMode,
+): boolean {
+  const candidate = value.toLowerCase();
+  const normalizedQuery = query.toLowerCase();
+  if (mode === 'substring') return candidate.includes(normalizedQuery);
+
+  let cursor = 0;
+  for (const char of normalizedQuery) {
+    cursor = candidate.indexOf(char, cursor);
+    if (cursor === -1) return false;
+    cursor += 1;
+  }
+  return true;
 }
 
 function clearTransientInputState(state: InputState): InputState {
   const {
     historySearchQuery: _historySearchQuery,
     historySearchIndex: _historySearchIndex,
+    historySearchMatchIndex: _historySearchMatchIndex,
+    historySearchMatchCount: _historySearchMatchCount,
     clearedValue: _clearedValue,
     clearedCursor: _clearedCursor,
     ...stable

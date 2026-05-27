@@ -488,10 +488,43 @@ describe('terminal input state', () => {
 
     expect(state.value).toBe('pnpm typecheck')
     expect(state.historySearchQuery).toBe('pnpm')
+    expect(state.historySearchMatchIndex).toBe(1)
+    expect(state.historySearchMatchCount).toBe(2)
 
     state = searchHistoryPrevious(state)
     expect(state.value).toBe('pnpm test')
     expect(state.historySearchQuery).toBe('pnpm')
+    expect(state.historySearchMatchIndex).toBe(2)
+    expect(state.historySearchMatchCount).toBe(2)
+  })
+
+  it('wraps Ctrl+R search and supports fuzzy matching', () => {
+    let state = insertText(
+      createInputState(['pnpm test', 'pnpm typecheck', 'git status']),
+      'ptc'
+    )
+
+    state = searchHistoryPrevious(state, { mode: 'fuzzy' })
+    expect(state.value).toBe('pnpm typecheck')
+    expect(state.historySearchMatchIndex).toBe(1)
+    expect(state.historySearchMatchCount).toBe(1)
+
+    state = insertText(createInputState(['one pnpm', 'two pnpm']), 'pnpm')
+    state = searchHistoryPrevious(state)
+    expect(state.value).toBe('two pnpm')
+    state = searchHistoryPrevious(state)
+    expect(state.value).toBe('one pnpm')
+    state = searchHistoryPrevious(state)
+    expect(state.value).toBe('two pnpm')
+  })
+
+  it('keeps non-consecutive duplicate history but skips consecutive duplicates', () => {
+    let state = submitInput(insertText(createInputState(), 'a')).state
+    state = submitInput(insertText(state, 'a')).state
+    state = submitInput(insertText(state, 'b')).state
+    state = submitInput(insertText(state, 'a')).state
+
+    expect(state.history).toEqual(['a', 'b', 'a'])
   })
 
   it('treats x7f delete events as terminal backspace', () => {

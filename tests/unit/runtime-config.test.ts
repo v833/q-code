@@ -18,6 +18,14 @@ const ENV_KEYS = [
   'Q_CODE_LANGFUSE_FLUSH_AT',
   'Q_CODE_LANGFUSE_FLUSH_INTERVAL_SECONDS',
   'Q_CODE_LANGFUSE_TIMEOUT_SECONDS',
+  'Q_CODE_HISTORY_SCOPE',
+  'Q_CODE_HISTORY_DISABLED',
+  'Q_CODE_HISTORY_REDACT',
+  'Q_CODE_HISTORY_SEARCH',
+  'Q_CODE_HISTORY_MAX_LINES',
+  'Q_CODE_HISTORY_MAX_BYTES',
+  'Q_CODE_HISTORY_RUNTIME_LIMIT',
+  'Q_CODE_HISTORY_MAX_LINE_BYTES',
   'Q_CODE_GITLAB_URL',
   'Q_CODE_GITLAB_TOKEN',
   'Q_CODE_GITLAB_PROJECT_ID',
@@ -170,6 +178,14 @@ describe('runtime config', () => {
         '[q_code]',
         'debug = true',
         'theme = "light"',
+        'history_scope = "project"',
+        'history_disabled = false',
+        'history_redact = true',
+        'history_search = "fuzzy"',
+        'history_max_lines = 100',
+        'history_max_bytes = 2048',
+        'history_runtime_limit = 50',
+        'history_max_line_bytes = 4096',
         'mention_allow_abs = true',
         'shell_timeout_ms = 90000',
         '[langfuse]',
@@ -208,6 +224,14 @@ describe('runtime config', () => {
     expect(process.env.MAX_STEPS).toBeUndefined()
     expect(process.env.Q_CODE_DEBUG).toBe('true')
     expect(process.env.Q_CODE_THEME).toBe('light')
+    expect(process.env.Q_CODE_HISTORY_SCOPE).toBe('project')
+    expect(process.env.Q_CODE_HISTORY_DISABLED).toBe('false')
+    expect(process.env.Q_CODE_HISTORY_REDACT).toBe('true')
+    expect(process.env.Q_CODE_HISTORY_SEARCH).toBe('fuzzy')
+    expect(process.env.Q_CODE_HISTORY_MAX_LINES).toBe('100')
+    expect(process.env.Q_CODE_HISTORY_MAX_BYTES).toBe('2048')
+    expect(process.env.Q_CODE_HISTORY_RUNTIME_LIMIT).toBe('50')
+    expect(process.env.Q_CODE_HISTORY_MAX_LINE_BYTES).toBe('4096')
     expect(process.env.Q_CODE_LANGFUSE_ENABLED).toBe('true')
     expect(process.env.LANGFUSE_PUBLIC_KEY).toBe('pk-test')
     expect(process.env.LANGFUSE_SECRET_KEY).toBe('sk-test')
@@ -239,6 +263,35 @@ describe('runtime config', () => {
       userConfigPath: join(home, 'config.toml'),
       projectConfigPath: join(cwd, '.q-code', 'config.toml')
     })
+  })
+
+  it('loads history section aliases', () => {
+    const { cwd, home } = setupConfigFixture()
+    writeFileSync(
+      join(home, 'config.toml'),
+      [
+        '[history]',
+        'scope = "global"',
+        'disabled = true',
+        'redact = true',
+        'search = "fuzzy"',
+        'max_lines = 10',
+        'max_bytes = 1024',
+        'runtime_limit = 20',
+        'max_line_bytes = 2048'
+      ].join('\n')
+    )
+
+    applyRuntimeConfig(cwd)
+
+    expect(process.env.Q_CODE_HISTORY_SCOPE).toBe('global')
+    expect(process.env.Q_CODE_HISTORY_DISABLED).toBe('true')
+    expect(process.env.Q_CODE_HISTORY_REDACT).toBe('true')
+    expect(process.env.Q_CODE_HISTORY_SEARCH).toBe('fuzzy')
+    expect(process.env.Q_CODE_HISTORY_MAX_LINES).toBe('10')
+    expect(process.env.Q_CODE_HISTORY_MAX_BYTES).toBe('1024')
+    expect(process.env.Q_CODE_HISTORY_RUNTIME_LIMIT).toBe('20')
+    expect(process.env.Q_CODE_HISTORY_MAX_LINE_BYTES).toBe('2048')
   })
 })
 

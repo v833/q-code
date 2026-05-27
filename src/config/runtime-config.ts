@@ -64,7 +64,25 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     shell_max_buffer: 'Q_CODE_SHELL_MAX_BUFFER',
     shell_allow_abs_cwd: 'Q_CODE_SHELL_ALLOW_ABS_CWD',
     shell_kill_bg_on_exit: 'Q_CODE_SHELL_KILL_BG_ON_EXIT',
-    theme: 'Q_CODE_THEME'
+    theme: 'Q_CODE_THEME',
+    history_scope: 'Q_CODE_HISTORY_SCOPE',
+    history_disabled: 'Q_CODE_HISTORY_DISABLED',
+    history_redact: 'Q_CODE_HISTORY_REDACT',
+    history_search: 'Q_CODE_HISTORY_SEARCH',
+    history_max_lines: 'Q_CODE_HISTORY_MAX_LINES',
+    history_max_bytes: 'Q_CODE_HISTORY_MAX_BYTES',
+    history_runtime_limit: 'Q_CODE_HISTORY_RUNTIME_LIMIT',
+    history_max_line_bytes: 'Q_CODE_HISTORY_MAX_LINE_BYTES'
+  },
+  history: {
+    scope: 'Q_CODE_HISTORY_SCOPE',
+    disabled: 'Q_CODE_HISTORY_DISABLED',
+    redact: 'Q_CODE_HISTORY_REDACT',
+    search: 'Q_CODE_HISTORY_SEARCH',
+    max_lines: 'Q_CODE_HISTORY_MAX_LINES',
+    max_bytes: 'Q_CODE_HISTORY_MAX_BYTES',
+    runtime_limit: 'Q_CODE_HISTORY_RUNTIME_LIMIT',
+    max_line_bytes: 'Q_CODE_HISTORY_MAX_LINE_BYTES'
   },
   langfuse: {
     enabled: 'Q_CODE_LANGFUSE_ENABLED',

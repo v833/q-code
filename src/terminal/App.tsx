@@ -17,6 +17,7 @@ import {
   recallNext,
   recallPrevious,
   replaceRange,
+  replaceHistory,
   searchHistoryPrevious,
   submitInput
 } from './input'
@@ -43,6 +44,7 @@ import {
   type FileMentionIndex
 } from '../mentions'
 import type { SessionSummary } from '../session/store'
+import type { HistoryStore } from './history-store'
 
 const ASSISTANT_STREAM_FLUSH_MS = 80
 const CLEAR_TERMINAL = '\u001B[2J\u001B[3J\u001B[H'
@@ -67,6 +69,7 @@ export interface TerminalAppProps {
   /** 斜杠命令补全候选；运行中可被 `slash_commands` 事件覆盖。 */
   slashCommands?: SlashCommandSuggestion[]
   fileMentionIndex?: FileMentionIndex
+  inputHistoryStore?: HistoryStore
 }
 
 function SessionPickerPanel({
@@ -178,6 +181,7 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
   )
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(-1)
   const [selectedFileMentionIndex, setSelectedFileMentionIndex] = useState(-1)
+  const historySearchLabel = formatHistorySearchLabel(input)
   const renderedSlashCommands = useMemo(
     () =>
       filteredSlashCommands.map((item, index) => ({
@@ -281,6 +285,27 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
     }
   }, [internal_eventEmitter])
 
+  useEffect(() => {
+    const store = props.inputHistoryStore
+    if (!store) return undefined
+
+    let cancelled = false
+    const reload = () => {
+      void store
+        .load()
+        .then((history) => {
+          if (!cancelled) setInput((current) => replaceHistory(current, history))
+        })
+        .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+    }
+    reload()
+    const unsubscribe = store.subscribe(reload)
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [props.inputHistoryStore])
+
   useInput((value, key) => {
     const rawInput = lastRawInput.current
     const isCtrlC = key.ctrl && value === 'c'
@@ -358,7 +383,11 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
     }
 
     if (key.ctrl && value === 'r') {
-      setInput((current) => searchHistoryPrevious(current))
+      setInput((current) =>
+        searchHistoryPrevious(current, {
+          mode: props.inputHistoryStore?.getSearchMode() ?? 'substring'
+        })
+      )
       return
     }
 
@@ -424,10 +453,19 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
         setInput((current) => newline(current))
         return
       }
-      const submitted = submitInput(input)
+      const shouldRecord = (value: string) => props.inputHistoryStore?.shouldRecord(value) ?? true
+      const submitted = submitInput(input, {
+        shouldRecord,
+        maxHistory: props.inputHistoryStore?.getRuntimeLimit()
+      })
       const text = submitted.input.trim()
       setInput(submitted.state)
       if (!text) return
+      if (shouldRecord(submitted.input)) {
+        void props.inputHistoryStore
+          ?.append(submitted.input)
+          .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+      }
       dispatch({ type: 'message', role: 'user', text })
       setIsBusy(true)
       setInterruptRequested(false)
@@ -501,10 +539,18 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
           value={input.value}
           cursor={input.cursor}
           isBusy={isBusy}
-          isHistorySearch={input.historySearchQuery !== undefined}
+          historySearchLabel={historySearchLabel}
           hasUndoClear={!input.value && input.clearedValue !== undefined}
         />
       </Box>
     </>
   )
+}
+
+function formatHistorySearchLabel(input: ReturnType<typeof createInputState>): string | undefined {
+  if (input.historySearchQuery === undefined) return undefined
+  if (input.historySearchMatchIndex && input.historySearchMatchCount) {
+    return `Ctrl+R 历史搜索中 (${input.historySearchMatchIndex}/${input.historySearchMatchCount})`
+  }
+  return 'Ctrl+R 历史搜索中'
 }

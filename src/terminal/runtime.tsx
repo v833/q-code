@@ -8,6 +8,7 @@ import { InMemoryTerminalEventBus, type TerminalEvent, type TerminalEventBus } f
 import { TerminalApp } from './App'
 import type { SlashCommandSuggestion } from '../slash'
 import type { FileMentionIndex } from '../mentions'
+import type { HistoryStore } from './history-store'
 
 /** {@link startTerminalRuntime} 的启动选项。 */
 export interface TerminalRuntimeOptions {
@@ -18,6 +19,7 @@ export interface TerminalRuntimeOptions {
   initialEvents?: TerminalEvent[]
   slashCommands?: SlashCommandSuggestion[]
   fileMentionIndex?: FileMentionIndex
+  inputHistoryStore?: HistoryStore
   onSubmit: (input: string) => Promise<void> | void
   onSessionPickerSelect?: (sessionId: string) => Promise<void> | void
   onInterrupt?: () => Promise<void> | void
@@ -49,6 +51,7 @@ export function startTerminalRuntime(options: TerminalRuntimeOptions): TerminalR
       cwd={options.cwd}
       slashCommands={options.slashCommands}
       fileMentionIndex={options.fileMentionIndex}
+      inputHistoryStore={options.inputHistoryStore}
       onSubmit={options.onSubmit}
       onSessionPickerSelect={options.onSessionPickerSelect}
       onInterrupt={options.onInterrupt}

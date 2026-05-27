@@ -14,13 +14,13 @@ export function InputPrompt({
   value,
   cursor,
   isBusy,
-  isHistorySearch,
+  historySearchLabel,
   hasUndoClear
 }: {
   value: string
   cursor: number
   isBusy: boolean
-  isHistorySearch?: boolean
+  historySearchLabel?: string
   hasUndoClear?: boolean
 }): React.JSX.Element {
   const inputRef = useRef<DOMElement>(null)
@@ -34,8 +34,8 @@ export function InputPrompt({
       {hasUndoClear ? (
         <Text color={animeTheme.textDim}>  Esc 恢复刚清空的输入</Text>
       ) : null}
-      {isHistorySearch ? (
-        <Text color={animeTheme.sky}>  Ctrl+R 历史搜索中</Text>
+      {historySearchLabel ? (
+        <Text color={animeTheme.sky}>  {historySearchLabel}</Text>
       ) : null}
       <Box>
         <Text color={animeTheme.mint} bold>{formatPromptGlyph()}</Text>
