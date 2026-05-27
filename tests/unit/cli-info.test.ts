@@ -29,6 +29,11 @@ describe('cli info', () => {
     expect(getEarlyCliCommand(['init', '--local'])).toBe('init')
   })
 
+  it('detects eval command', () => {
+    expect(getEarlyCliCommand(['eval'])).toBe('eval')
+    expect(getEarlyCliCommand(['eval', 'run', 'evals/smoke'])).toBe('eval')
+  })
+
   it('leaves interactive flags alone', () => {
     expect(getEarlyCliCommand(['--continue'])).toBeUndefined()
     expect(getEarlyCliCommand(['--session', 'demo'])).toBeUndefined()
@@ -56,6 +61,10 @@ describe('cli info', () => {
     expect(help).toContain('-v, --version')
     expect(help).toContain('q-code update')
     expect(help).toContain('q-code init')
+    expect(help).toContain('q-code eval run')
+    expect(help).toContain('--max-cost-usd')
+    expect(help).toContain('--allow-real-model')
+    expect(help).toContain('q-code eval trend')
     expect(help).toContain('--continue')
     expect(help).toContain('--no-color')
     expect(help).toContain('--debug')

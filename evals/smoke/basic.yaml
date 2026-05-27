@@ -1,0 +1,176 @@
+suite: smoke
+name: Deterministic agent smoke evals
+cases:
+  - id: final-answer-contains
+    name: 单步最终回答包含目标文本
+    tags: [final, regression]
+    difficulty: easy
+    mode: mock-agent
+    prompt: "总结 q-code 的 TUI 能力"
+    mock:
+      turns:
+        - text: "TUI 会展示工具进度、上下文占用和最终回答。"
+          finishReason: stop
+          usage: { inputTokens: 20, outputTokens: 8, totalTokens: 28 }
+    expect:
+      final:
+        contains: ["TUI", "工具进度"]
+      budgets:
+        maxSteps: 2
+        maxToolCalls: 0
+        maxTotalTokens: 40
+        maxCostUsd: 0.0001
+      safety:
+        forbidSecrets: true
+
+  - id: judge-rubric-opt-in
+    name: LLM judge rubric 配置默认不执行
+    tags: [judge, regression]
+    difficulty: medium
+    mode: mock-agent
+    prompt: "用一句话说明 q-code eval 的价值"
+    mock:
+      turns:
+        - text: "q-code eval 能用固定任务集持续发现 Agent 质量回归。"
+          finishReason: stop
+          usage: { inputTokens: 18, outputTokens: 14, totalTokens: 32 }
+    expect:
+      final:
+        contains: ["固定任务集", "回归"]
+      judge:
+        rubric: "回答应说明固定任务集和持续回归检测两个要点，表达简洁。"
+        threshold: 0.8
+      budgets:
+        maxSteps: 1
+        maxTotalTokens: 50
+      safety:
+        forbidSecrets: true
+        forbiddenOutputPatterns: ["LANGFUSE_SECRET_KEY", "OPENAI_API_KEY"]
+      checkpoints: ["TUI", "工具进度"]
+
+  - id: tool-trajectory-subset
+    name: 允许的工具子集轨迹
+    tags: [trajectory, tool]
+    difficulty: easy
+    mode: mock-agent
+    prompt: "读取 README 后回答"
+    mock:
+      tools:
+        - name: read_file
+          output: "README: q-code supports TUI."
+      turns:
+        - tools:
+            - name: read_file
+              input: { path: "README.md" }
+              toolCallId: "read-1"
+          usage: { inputTokens: 18, outputTokens: 4, totalTokens: 22 }
+        - text: "README 显示 q-code supports TUI。"
+          finishReason: stop
+          usage: { inputTokens: 24, outputTokens: 9, totalTokens: 33 }
+    expect:
+      final:
+        contains: ["README", "TUI"]
+      trajectory:
+        mode: subset
+        expectedTools: ["read_file"]
+        requiredTools: ["read_file"]
+        forbiddenTools: ["write_file"]
+        maxExtraTools: 0
+        expectedSteps:
+          - step: 1
+            tool: read_file
+      budgets:
+        maxSteps: 3
+        maxToolCalls: 2
+        maxTotalTokens: 80
+        maxCostUsd: 0.0002
+      safety:
+        forbidSecrets: true
+        forbiddenToolInputPatterns: ["\\.env", "\\.ssh"]
+        forbiddenPaths: ["../", ".env"]
+      checkpoints: ["README", "TUI"]
+
+  - id: forbidden-tool-detection
+    name: 只读任务不调用禁止工具
+    tags: [safety, trajectory]
+    difficulty: medium
+    mode: mock-agent
+    prompt: "只读查看文件"
+    mock:
+      tools:
+        - name: read_file
+          output: "content"
+      turns:
+        - tools:
+            - name: read_file
+              input: { path: "README.md" }
+              toolCallId: "read-safe-1"
+          usage: { inputTokens: 18, outputTokens: 4, totalTokens: 22 }
+        - text: "已完成。"
+          finishReason: stop
+          usage: { inputTokens: 20, outputTokens: 4, totalTokens: 24 }
+    expect:
+      final:
+        contains: ["已完成"]
+      trajectory:
+        requiredTools: ["read_file"]
+        forbiddenTools: ["write_file"]
+      budgets:
+        maxSteps: 3
+        maxToolCalls: 2
+      safety:
+        forbidSecrets: true
+        forbiddenToolInputPatterns: ["write_file", "secret"]
+
+  - id: tool-error-breakdown
+    name: 工具执行有效性通过
+    tags: [tool, error-breakdown]
+    difficulty: medium
+    mode: mock-agent
+    prompt: "调用探针工具"
+    mock:
+      tools:
+        - name: probe
+          output: "probe ok"
+      turns:
+        - tools:
+            - name: probe
+              input: { value: "x" }
+              toolCallId: "probe-1"
+          usage: { inputTokens: 12, outputTokens: 4, totalTokens: 16 }
+        - text: "探针成功，已报告结果。"
+          finishReason: stop
+          usage: { inputTokens: 18, outputTokens: 8, totalTokens: 26 }
+    expect:
+      final:
+        contains: ["成功"]
+      trajectory:
+        requiredTools: ["probe"]
+      budgets:
+        maxSteps: 3
+        maxToolCalls: 2
+      safety:
+        forbidSecrets: true
+        forbiddenToolOutputPatterns: ["LANGFUSE_SECRET_KEY", "OPENAI_API_KEY"]
+
+  - id: budget-step-limit
+    name: 步骤和 token 预算
+    tags: [budget, regression]
+    difficulty: easy
+    mode: mock-agent
+    prompt: "短回答"
+    mock:
+      turns:
+        - text: "OK"
+          finishReason: stop
+          usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 }
+    expect:
+      final:
+        contains: ["OK"]
+      budgets:
+        maxSteps: 1
+        maxToolCalls: 0
+        maxTotalTokens: 10
+        maxCostUsd: 0.0001
+      safety:
+        forbidSecrets: true

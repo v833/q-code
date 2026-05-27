@@ -1,0 +1,56 @@
+# q-code 定期 Agent 质量回归
+#
+# 默认只跑 deterministic smoke/cli eval，不要求真实模型密钥。
+# 如果仓库配置了 Langfuse 环境变量，脚本会同步 evaluator trace、dataset run items 和 scores。
+name: Eval Nightly
+
+on:
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: eval-nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    name: deterministic eval regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: 安装依赖（lockfile 严格模式）
+        run: pnpm install --frozen-lockfile
+
+      - name: 运行定期 eval 回归
+        run: pnpm eval:nightly
+        env:
+          Q_CODE_LANGFUSE_ENABLED: ${{ vars.Q_CODE_LANGFUSE_ENABLED || 'false' }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
+          Q_CODE_LANGFUSE_RECORD_IO: 'false'
+
+      - name: 上传 eval artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: q-code-eval-nightly
+          path: .q-code/evals
+          if-no-files-found: ignore
