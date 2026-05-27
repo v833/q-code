@@ -477,6 +477,7 @@ async function main() {
         continueLatest: isContinue,
         sessionId: requestedSessionId,
       });
+  const activeStoreRef: { current?: SessionStore } = { current: initialStore };
   let sessionId = initialStore?.sessionId ?? requestedSessionId ?? 'dump';
   const runtimeCwd = initialStore?.cwd ?? process.cwd();
   if (initialStore && isContinue && initialStore.exists()) {
@@ -508,6 +509,7 @@ async function main() {
   if (initialStore) {
     installCrashGuard({
       sessionStore: initialStore,
+      getSessionStore: () => activeStoreRef.current,
       getTerminal: () => terminal,
       version: packageVersion,
       cleanupHandlers: [
@@ -521,7 +523,7 @@ async function main() {
       ],
       getSnapshot: () => ({
         sessionId,
-        cwd: initialStore.cwd,
+        cwd: activeStoreRef.current?.cwd ?? runtimeCwd,
         modelName: currentModelNameForSnapshot(),
         agentMode,
         taskMode,
@@ -668,58 +670,14 @@ async function main() {
     }
   }
 
-  if (dumpSystemPrompt) {
-    registerBuiltinTools(
-      ...createPlanTools({
-        getMode: () => agentMode,
-        setMode: (mode) => {
-          agentMode = mode;
-          registry.setMode(mode);
-        },
-        getPlanFilePath: () => planFilePath,
-        readPlan: () => readPlan(planOptions),
-        writePlan: (content) => writePlan(planOptions, content),
-        markPlanReady: () => {
-          pendingPlanApproval = true;
-        },
-      }),
-    );
-    registerBuiltinTools(
-      ...createTaskTools({
-        getSessionId: () => sessionId,
-        getCwd: () => runtimeCwd,
-        getTaskMode: () => taskMode,
-      }),
-      createTodoWriteTool({
-        getSessionId: () => sessionId,
-        isEnabled: () => taskMode === 'todo',
-      }),
-    );
-    registerBuiltinTools(createSkillTool({ getSessionId: () => sessionId }));
-    const [runtimeContext, agentMdContext] = await Promise.all([
-      getRuntimeEnvironmentContext().then(formatRuntimeEnvironmentContext),
-      loadAgentMdContext(),
-    ]);
-    registerBuiltinTools(
-      createAgentTool({
-        createModel,
-        getDefaultModelName: () => getRequiredEnv('OPENAI_MODEL'),
-        getAvailableTools: () => registry.getVisibleTools(),
-        getRuntimeContext: () => runtimeContext,
-        getAgentMdContext: () => agentMdContext,
-        getMaxOutputTokens: () => defaultMaxOutputTokens,
-        getEscalatedMaxOutputTokens: () => escalatedMaxOutputTokens,
-        getSessionId: () => sessionId,
-        getCwd: () => runtimeCwd,
-        getHooks: () => hooks,
-      }),
-    );
-    registerBuiltinTools(
-      createTeamCreateTool(),
-      createTeamDeleteTool(),
-      createSendMessageTool(),
-    );
-    const builder = new PromptBuilder()
+  const [runtimeContext, agentMdContext] = await Promise.all([
+    getRuntimeEnvironmentContext().then(formatRuntimeEnvironmentContext),
+    loadAgentMdContext(),
+  ]);
+  const builder = createSystemPromptBuilder();
+
+  function createSystemPromptBuilder(): PromptBuilder {
+    return new PromptBuilder()
       .pipe('coreRules', coreRules())
       .pipe('modeContext', modeContext())
       .pipe('toolGuide', toolGuide())
@@ -735,31 +693,7 @@ async function main() {
       .pipe('agentMdInstructions', agentMdInstructions())
       .pipe('projectMemory', projectMemory())
       .pipe('sessionContext', sessionContext());
-    const promptCtx: PromptContext = {
-      toolCount: registry.getActiveTools().length,
-      deferredToolSummary: registry.getDeferredToolSummary(),
-      jitToolSummary: registry.getJitToolSummary(),
-      sessionMessageCount: 0,
-      sessionId,
-      agentMode,
-      taskMode,
-      planFilePath,
-      taskContext: undefined,
-      todoContext: undefined,
-      skillsContext: formatSkillsSystemReminder(getModelVisibleSkills()),
-      agentsContext: formatAgentsSystemReminder(getAllAgents()),
-      teamsContext: formatTeamsSystemReminder(),
-      runtimeContext,
-      agentMdContext,
-      memoryContext: await buildMemorySystemContext(),
-    };
-    console.log(builder.build(promptCtx));
-    await closeMcpSubsystem();
-    return;
   }
-
-  if (!initialStore) throw new Error('Session store was not initialized');
-  let activeStore: SessionStore = initialStore;
 
   function setAgentMode(mode: ToolVisibilityMode): void {
     const previous = agentMode;
@@ -771,13 +705,14 @@ async function main() {
     if (previous === 'plan' && mode !== 'plan') {
       needsPlanModeExitAttachment = true;
     }
-    if (previous !== mode) {
+    const auditStore = activeStoreRef.current;
+    if (previous !== mode && auditStore) {
       getAuditLogger().emit(
         'mode.change',
         { from: previous, to: mode },
         {
           sessionId,
-          cwd: activeStore.cwd,
+          cwd: auditStore.cwd,
           agent: { kind: 'main' },
         },
       );
@@ -785,36 +720,111 @@ async function main() {
     emitSessionInfoIfReady();
   }
 
-  registerBuiltinTools(
-    ...createPlanTools({
-      getMode: () => agentMode,
-      setMode: (mode) => setAgentMode(mode),
-      getPlanFilePath: () => planFilePath,
-      readPlan: () => readPlan(planOptions),
-      writePlan: (content) => writePlan(planOptions, content),
-      markPlanReady: (summary) => {
-        pendingPlanApproval = true;
-        pendingPlanSummary = summary;
-        getAuditLogger().emit(
-          'plan.markReady',
-          createMessageSummaryPayload(summary),
-          { sessionId, cwd: planOptions.cwd, agent: { kind: 'main' } },
-        );
-      },
-    }),
-  );
-  registerBuiltinTools(
-    ...createTaskTools({
-      getSessionId: () => sessionId,
-      getCwd: () => activeStore.cwd,
-      getTaskMode: () => taskMode,
-    }),
-    createTodoWriteTool({
-      getSessionId: () => sessionId,
-      isEnabled: () => taskMode === 'todo',
-    }),
-  );
-  registerBuiltinTools(createSkillTool({ getSessionId: () => sessionId }));
+  function registerConversationTools(options: {
+    getCwd: () => string;
+    getDefaultModelName: () => string;
+  }): void {
+    registerBuiltinTools(
+      ...createPlanTools({
+        getMode: () => agentMode,
+        setMode: (mode) => setAgentMode(mode),
+        getPlanFilePath: () => planFilePath,
+        readPlan: () => readPlan(planOptions),
+        writePlan: (content) => writePlan(planOptions, content),
+        markPlanReady: (summary) => {
+          pendingPlanApproval = true;
+          pendingPlanSummary = summary;
+          if (activeStoreRef.current) {
+            getAuditLogger().emit(
+              'plan.markReady',
+              createMessageSummaryPayload(summary),
+              { sessionId, cwd: planOptions.cwd, agent: { kind: 'main' } },
+            );
+          }
+        },
+      }),
+    );
+    registerBuiltinTools(
+      ...createTaskTools({
+        getSessionId: () => sessionId,
+        getCwd: options.getCwd,
+        getTaskMode: () => taskMode,
+      }),
+      createTodoWriteTool({
+        getSessionId: () => sessionId,
+        isEnabled: () => taskMode === 'todo',
+      }),
+    );
+    registerBuiltinTools(createSkillTool({ getSessionId: () => sessionId }));
+    registerBuiltinTools(
+      createAgentTool({
+        createModel,
+        getDefaultModelName: options.getDefaultModelName,
+        getAvailableTools: () => registry.getVisibleTools(),
+        getRuntimeContext: () => runtimeContext,
+        getAgentMdContext: () => agentMdContext,
+        getMaxOutputTokens: () => defaultMaxOutputTokens,
+        getEscalatedMaxOutputTokens: () => escalatedMaxOutputTokens,
+        getSessionId: () => sessionId,
+        getCwd: options.getCwd,
+        getHooks: () => hooks,
+      }),
+    );
+    registerBuiltinTools(
+      createTeamCreateTool(),
+      createTeamDeleteTool(),
+      createSendMessageTool(),
+    );
+  }
+
+  async function buildPromptContext(options: {
+    sessionMessageCount: number;
+    userQuery?: string;
+    taskContext?: string;
+    todoContext?: string;
+  }): Promise<PromptContext> {
+    const memoryContext =
+      options.userQuery === undefined
+        ? await buildMemorySystemContext()
+        : await buildMemorySystemContext({ userQuery: options.userQuery });
+    return {
+      toolCount: registry.getActiveTools().length,
+      deferredToolSummary: registry.getDeferredToolSummary(),
+      jitToolSummary: registry.getJitToolSummary(),
+      sessionMessageCount: options.sessionMessageCount,
+      sessionId,
+      agentMode,
+      taskMode,
+      planFilePath,
+      taskContext: options.taskContext,
+      todoContext: options.todoContext,
+      skillsContext: formatSkillsSystemReminder(getModelVisibleSkills()),
+      agentsContext: formatAgentsSystemReminder(getAllAgents()),
+      teamsContext: formatTeamsSystemReminder(),
+      runtimeContext,
+      agentMdContext,
+      memoryContext,
+    };
+  }
+
+  if (dumpSystemPrompt) {
+    registerConversationTools({
+      getCwd: () => runtimeCwd,
+      getDefaultModelName: () => getRequiredEnv('OPENAI_MODEL'),
+    });
+    console.log(builder.build(await buildPromptContext({ sessionMessageCount: 0 })));
+    await closeMcpSubsystem();
+    return;
+  }
+
+  if (!initialStore) throw new Error('Session store was not initialized');
+  let activeStore: SessionStore = initialStore;
+  activeStoreRef.current = activeStore;
+
+  registerConversationTools({
+    getCwd: () => activeStore.cwd,
+    getDefaultModelName: currentModelName,
+  });
   registry.setMode(agentMode);
   const unsubscribeTodos = subscribeTodos((changedSessionId, todos) => {
     if (changedSessionId === sessionId) emitTodoProgress(todos);
@@ -844,93 +854,22 @@ async function main() {
 
   let summary = '';
   const compactionBreaker = new CompactionCircuitBreaker();
-  const [runtimeContext, agentMdContext] = await Promise.all([
-    getRuntimeEnvironmentContext().then(formatRuntimeEnvironmentContext),
-    loadAgentMdContext(),
-  ]);
-  registerBuiltinTools(
-    createAgentTool({
-      createModel,
-      getDefaultModelName: currentModelName,
-      getAvailableTools: () => registry.getVisibleTools(),
-      getRuntimeContext: () => runtimeContext,
-      getAgentMdContext: () => agentMdContext,
-      getMaxOutputTokens: () => defaultMaxOutputTokens,
-      getEscalatedMaxOutputTokens: () => escalatedMaxOutputTokens,
-      getSessionId: () => sessionId,
-      getCwd: () => activeStore.cwd,
-      getHooks: () => hooks,
-    }),
-  );
-
-  // Agent Teams (stage 21): the three coordination tools. Their
-  // isEnabled() gate hides them from the model schema unless the
-  // feature flag is on, so registering unconditionally is safe.
-  registerBuiltinTools(
-    createTeamCreateTool(),
-    createTeamDeleteTool(),
-    createSendMessageTool(),
-  );
-
-  // Prompt Pipe 组装 system prompt
-  const builder = new PromptBuilder()
-    .pipe('coreRules', coreRules())
-    .pipe('modeContext', modeContext())
-    .pipe('toolGuide', toolGuide())
-    .pipe('taskGuide', taskGuide())
-    .pipe('taskContext', taskContext())
-    .pipe('todoGuide', todoGuide())
-    .pipe('todoContext', todoContext())
-    .pipe('skillsContext', skillsContext())
-    .pipe('agentsContext', agentsContext())
-    .pipe('teamsContext', teamsContext())
-    .pipe('deferredTools', deferredTools())
-    .pipe('runtimeEnvironment', runtimeEnvironment())
-    .pipe('agentMdInstructions', agentMdInstructions())
-    .pipe('projectMemory', projectMemory())
-    .pipe('sessionContext', sessionContext());
 
   async function buildSystemPrompt(userQuery?: string): Promise<string> {
-    const memoryContext = await buildMemorySystemContext({ userQuery });
-    const promptCtx: PromptContext = {
-      toolCount: registry.getActiveTools().length,
-      deferredToolSummary: registry.getDeferredToolSummary(),
-      jitToolSummary: registry.getJitToolSummary(),
+    const promptCtx = await buildPromptContext({
       sessionMessageCount: messages.length,
-      sessionId,
-      agentMode,
-      taskMode,
-      planFilePath,
+      userQuery,
       taskContext: await getCurrentTaskContext(),
       todoContext: getCurrentTodoContext(),
-      skillsContext: formatSkillsSystemReminder(getModelVisibleSkills()),
-      agentsContext: formatAgentsSystemReminder(getAllAgents()),
-      teamsContext: formatTeamsSystemReminder(),
-      runtimeContext,
-      agentMdContext,
-      memoryContext,
-    };
+    });
     return builder.build(promptCtx);
   }
 
-  const initialPromptCtx: PromptContext = {
-    toolCount: registry.getActiveTools().length,
-    deferredToolSummary: registry.getDeferredToolSummary(),
-    jitToolSummary: registry.getJitToolSummary(),
+  const initialPromptCtx = await buildPromptContext({
     sessionMessageCount: messages.length,
-    sessionId,
-    agentMode,
-    taskMode,
-    planFilePath,
     taskContext: await getCurrentTaskContext(),
     todoContext: getCurrentTodoContext(),
-    skillsContext: formatSkillsSystemReminder(getModelVisibleSkills()),
-    agentsContext: formatAgentsSystemReminder(getAllAgents()),
-    teamsContext: formatTeamsSystemReminder(),
-    runtimeContext,
-    agentMdContext,
-    memoryContext: await buildMemorySystemContext(),
-  };
+  });
 
   const SYSTEM = builder.build(initialPromptCtx);
 
@@ -1914,6 +1853,7 @@ async function main() {
     const usageRecords = nextStore.getUsageRecords();
 
     activeStore = nextStore;
+    activeStoreRef.current = activeStore;
     sessionId = nextStore.sessionId;
     planOptions = { cwd: nextStore.cwd, sessionId };
     planFilePath = getPlanFilePath(planOptions);

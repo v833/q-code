@@ -123,6 +123,42 @@ describe('crash guard', () => {
     })
   })
 
+  it('崩溃标记写入崩溃瞬间的当前会话', async () => {
+    home = setupTempHome('crash-guard-active-session-')
+    const firstStore = new SessionStore({ cwd: home.cwd, sessionId: 'first' })
+    const activeStore = new SessionStore({ cwd: home.cwd, sessionId: 'active' })
+    let currentStore = firstStore
+    const exits: number[] = []
+    resetAuditLoggerForTests(createAuditStub([]))
+
+    const guard = installCrashGuard({
+      register: false,
+      sessionStore: firstStore,
+      getSessionStore: () => currentStore,
+      cleanupHandlers: [],
+      reportDir: join(home.root, 'crashes'),
+      getSnapshot: () => ({
+        sessionId: currentStore.sessionId,
+        cwd: home!.cwd,
+        activeTurnInFlight: true
+      }),
+      stderr: { write: () => true },
+      exit: (code) => {
+        exits.push(code)
+      }
+    })
+
+    currentStore = activeStore
+    guard.handleUncaughtException(new Error('boom'))
+
+    await vi.waitFor(() => expect(exits).toEqual([1]))
+    expect(firstStore.load()).toEqual([])
+    expect(activeStore.load().at(-1)).toEqual({
+      role: 'assistant',
+      content: '[crashed mid-stream]'
+    })
+  })
+
   it('快照采集失败时仍写出原始崩溃报告', async () => {
     home = setupTempHome('crash-guard-snapshot-error-')
     const reports: Array<{ report: any }> = []

@@ -16,7 +16,10 @@ import { isFalseEnv } from '../utils/env'
 
 /** `installCrashGuard` 的配置与可测试注入点。 */
 export interface CrashGuardOptions {
+  /** 兼容旧调用方的固定会话存储；若提供 getSessionStore 则以后者为准。 */
   sessionStore?: SessionStore
+  /** 在崩溃发生时动态获取当前会话存储，避免会话切换后写错 transcript。 */
+  getSessionStore?: () => SessionStore | undefined
   terminal?: TerminalRuntime
   getTerminal?: () => TerminalRuntime | undefined
   cleanupHandlers: Array<() => Promise<void> | void>
@@ -209,9 +212,10 @@ async function runCrashShutdown(args: {
   args.markHandling()
 
   const baseSnapshot = safeGetSnapshot(args.options)
-  if (baseSnapshot.activeTurnInFlight && args.options.sessionStore) {
+  const sessionStore = safeGetSessionStore(args.options)
+  if (baseSnapshot.activeTurnInFlight && sessionStore) {
     try {
-      args.options.sessionStore.append({ role: 'assistant', content: '[crashed mid-stream]' })
+      sessionStore.append({ role: 'assistant', content: '[crashed mid-stream]' })
     } catch {
       // Best-effort crash marker. The crash report still carries activeTurnInFlight.
     }
@@ -366,6 +370,14 @@ function safeGetSnapshot(options: CrashGuardOptions): Partial<CrashReport> {
     return options.getSnapshot?.() ?? {}
   } catch (error) {
     return { snapshotError: serializeError(error) }
+  }
+}
+
+function safeGetSessionStore(options: CrashGuardOptions): SessionStore | undefined {
+  try {
+    return options.getSessionStore?.() ?? options.sessionStore
+  } catch {
+    return options.sessionStore
   }
 }
 

@@ -699,6 +699,11 @@ function buildSessionSummaryFromPaths(params: {
   metaPath: string
   trashed?: boolean
 }): SessionSummary {
+  const metadata = readMetadata(params.metaPath)
+  if (metadata && shouldUseMetadataFastPath(params, metadata)) {
+    return summarizeSessionFromMetadata(params, metadata)
+  }
+
   const entries = readEntriesFromPath(params.transcriptPath)
   const summary = summarizeSession({
     cwd: params.storage.cwd,
@@ -721,6 +726,50 @@ function buildSessionSummaryFromPaths(params: {
     return { ...summary, ...metadataToSummaryFields(metadata) }
   }
   return summary
+}
+
+function shouldUseMetadataFastPath(
+  params: {
+    sessionId: string
+    transcriptPath: string
+    metaPath: string
+    trashed?: boolean
+  },
+  metadata: SessionMetadata
+): boolean {
+  if (metadata.sessionId !== params.sessionId) return false
+  const metaMtime = fileMtimeMs(params.metaPath)
+  const transcriptMtime = fileMtimeMs(params.transcriptPath)
+  if (transcriptMtime === undefined) return params.trashed === true
+  return metaMtime !== undefined && metaMtime >= transcriptMtime
+}
+
+function summarizeSessionFromMetadata(
+  params: {
+    storage: ProjectStorageInfo
+    sessionId: string
+    transcriptPath: string
+    metaPath: string
+    trashed?: boolean
+  },
+  metadata: SessionMetadata
+): SessionSummary {
+  return {
+    sessionId: params.sessionId,
+    cwd: metadata.cwd ?? params.storage.cwd,
+    projectKey: metadata.projectKey ?? params.storage.projectKey,
+    transcriptPath: params.transcriptPath,
+    metaPath: params.metaPath,
+    startedAt: metadata.createdAt,
+    updatedAt: metadata.updatedAt,
+    messageCount: metadata.messageCount,
+    totalTokens: metadata.totalTokens,
+    ...(metadata.displayName ? { displayName: metadata.displayName } : {}),
+    ...(metadata.lastUserPromptDigest ? { lastUserPromptDigest: metadata.lastUserPromptDigest } : {}),
+    ...(metadata.model ? { model: metadata.model } : {}),
+    tags: metadata.tags,
+    ...(params.trashed ? { trashed: true } : {})
+  }
 }
 
 function sortSessionsByUpdatedAt(a: SessionSummary, b: SessionSummary): number {
@@ -1114,6 +1163,14 @@ function rmIfExists(path: string): void {
 function fileMtimeIso(path: string): string | undefined {
   try {
     return statSync(path).mtime.toISOString()
+  } catch {
+    return undefined
+  }
+}
+
+function fileMtimeMs(path: string): number | undefined {
+  try {
+    return statSync(path).mtimeMs
   } catch {
     return undefined
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   deleteSession,
@@ -50,6 +50,33 @@ describe('session management', () => {
     const [summary] = listProjectSessions({ cwd: home.cwd, sessionDir: '.sessions' })
     expect(summary?.sessionId).toBe('oauth-debug')
     expect(summary?.lastUserPromptDigest).toContain('OAuth callback')
+  })
+
+  it('uses fresh metadata as the list fast path', () => {
+    const store = makeStore('metadata-fast-path')
+    store.append({ role: 'user', content: 'single transcript message' })
+    const metadata = JSON.parse(readFileSync(store.paths.metaPath, 'utf-8')) as Record<string, unknown>
+    writeFileSync(
+      store.paths.metaPath,
+      `${JSON.stringify(
+        {
+          ...metadata,
+          displayName: 'Fast Path',
+          messageCount: 42,
+          totalTokens: 9001,
+          updatedAt: new Date(Date.now() + 1000).toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      'utf-8'
+    )
+
+    const [summary] = listProjectSessions({ cwd: home.cwd, sessionDir: '.sessions' })
+
+    expect(summary?.displayName).toBe('Fast Path')
+    expect(summary?.messageCount).toBe(42)
+    expect(summary?.totalTokens).toBe(9001)
   })
 
   it('renames sessions without changing transcript id', () => {
