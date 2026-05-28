@@ -10,11 +10,12 @@ import {
 } from '../input'
 import { animeTheme, formatPromptGlyph } from '../theme/index'
 
-function getInlineCursorBlinkMs(env: NodeJS.ProcessEnv = process.env): number {
+export function getInlineCursorBlinkMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.Q_CODE_TUI_CURSOR_BLINK_MS?.trim()
   if (!raw) return 500
   const value = Number(raw)
   if (!Number.isFinite(value)) return 500
+  if (value <= 0) return 0
   // 防止过小导致高频重渲染；也避免过大导致“像卡住”。
   return Math.max(100, Math.min(10_000, Math.floor(value)))
 }
@@ -45,9 +46,14 @@ export function InputPrompt({
       setInlineCursorVisible(true)
       return
     }
+    const blinkMs = getInlineCursorBlinkMs()
+    if (blinkMs <= 0) {
+      setInlineCursorVisible(true)
+      return
+    }
     const timer = setInterval(() => {
       setInlineCursorVisible((current) => !current)
-    }, getInlineCursorBlinkMs())
+    }, blinkMs)
     return () => clearInterval(timer)
   }, [isBusy, realCursorEnabled])
 

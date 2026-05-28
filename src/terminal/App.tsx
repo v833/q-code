@@ -419,7 +419,7 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
     const rawInput = lastRawInput.current
     const isCtrlC = key.ctrl && value === 'c'
     const isMultilineShortcut =
-      (key.return && key.shift) || (key.ctrl && (value === 'j' || value === '\n')) || (key.meta && key.return)
+      (key.ctrl && (value === 'j' || value === '\n')) || (key.meta && key.return)
 
     if (isBusy && !isCtrlC) return
 

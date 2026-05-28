@@ -25,7 +25,7 @@ export function Header({
         <Text color={animeTheme.textDim}>{compactCwd ? `  ${compactCwd}` : ''}</Text>
       </Box>
       <Box>
-        <Text color={animeTheme.textDim}>Enter 发送 · Shift+Enter/Ctrl+J 换行 · Ctrl+R 搜历史 · Esc 清空/恢复 · Ctrl+C 中断/退出</Text>
+        <Text color={animeTheme.textDim}>Enter 发送 · Ctrl+J 换行 · Ctrl+R 搜历史 · Esc 清空/恢复 · Ctrl+C 中断/退出</Text>
       </Box>
     </Box>
   )
