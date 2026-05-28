@@ -2097,6 +2097,29 @@ async function main() {
   }
 
   async function handleSessionsCommand(input: SlashCommandInput): Promise<void> {
+    const reopenSessionPicker = (options: { preferSessionId?: string } = {}): void => {
+      if (!useTui) return;
+      const sessions = listProjectSessionsFast({ cwd: activeStore.cwd });
+      const visible = sessions.slice(0, 20);
+      if (visible.length === 0) {
+        pendingSessionSelection = undefined;
+        emitTerminal({ type: 'session_picker_close' });
+        return;
+      }
+      const preferredIndex =
+        options.preferSessionId
+          ? visible.findIndex((session) => session.sessionId === options.preferSessionId)
+          : -1;
+      const selectedIndex = preferredIndex >= 0 ? preferredIndex : 0;
+      pendingSessionSelection = { sessions: visible, selectedIndex };
+      emitTerminal({
+        type: 'session_picker',
+        sessions: visible,
+        selectedIndex,
+        currentSessionId: sessionId,
+      });
+    };
+
     const parsed = parseSessionArgs(input.args);
     const subcommand = parsed.positional[0]?.toLowerCase() ?? 'list';
     if (subcommand === 'list') {
@@ -2114,6 +2137,8 @@ async function main() {
           selectedIndex: pendingSessionSelection.selectedIndex,
           currentSessionId: sessionId,
         });
+        // TUI 下 session_picker 已提供交互式列表；避免再打印一份纯文本表格导致重复展示。
+        return;
       }
       print('\n' + formatSessionsTable(visible, sessionId, { includeProject: includeAllProjects }));
       return;
@@ -2161,6 +2186,7 @@ async function main() {
       }
       const meta = renameSession(targetId, displayName, { cwd: activeStore.cwd });
       print(`\n  [Sessions] 已重命名 ${targetId}: ${meta.displayName ?? '(无名)'}`);
+      reopenSessionPicker({ preferSessionId: targetId });
       return;
     }
 
@@ -2178,6 +2204,7 @@ async function main() {
       print(
         `\n  [Sessions] 已${parsed.flags.has('force') ? '物理删除' : '移入 trash'}: ${deleted.sessionId}`,
       );
+      reopenSessionPicker();
       return;
     }
 

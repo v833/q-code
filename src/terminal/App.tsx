@@ -50,6 +50,10 @@ import type { HistoryStore } from './history-store'
 const ASSISTANT_STREAM_FLUSH_MS = 80
 const CLEAR_TERMINAL = '\u001B[2J\u001B[3J\u001B[H'
 
+function escapeDoubleQuotes(value: string): string {
+  return value.replaceAll('"', '\\"')
+}
+
 /** {@link TerminalApp} 的 props：事件总线与用户输入/生命周期回调。 */
 export interface TerminalAppProps {
   /** 终端事件总线，驱动 transcript 与状态栏更新。 */
@@ -75,15 +79,21 @@ export interface TerminalAppProps {
 }
 
 function SessionPickerPanel({
-  picker
+  picker,
+  renaming
 }: {
   picker?: {
     sessions: SessionSummary[]
     selectedIndex: number
     currentSessionId: string
   }
+  renaming?: {
+    sessionId: string
+    value: string
+  }
 }): React.JSX.Element | null {
   if (!picker || picker.sessions.length === 0) return null
+  const selectedSession = picker.sessions[picker.selectedIndex]
   return (
     <Box flexDirection="column" marginTop={1}>
       <Box>
@@ -114,7 +124,17 @@ function SessionPickerPanel({
           </Box>
         )
       })}
-      <Text color="gray">  ↑/↓ 选择 · Enter 切换 · Esc 关闭</Text>
+      {renaming && selectedSession && renaming.sessionId === selectedSession.sessionId ? (
+        <>
+          <Text color="gray">
+            {'  '}重命名 {shortSession(selectedSession.sessionId)}：
+            <Text color="white">{renaming.value}</Text>
+          </Text>
+          <Text color="gray">  输入名称 · Enter 确认 · Esc 取消</Text>
+        </>
+      ) : (
+        <Text color="gray">  ↑/↓ 选择 · Enter 切换 · r 重命名 · d 删除 · Esc 关闭</Text>
+      )}
     </Box>
   )
 }
@@ -144,6 +164,9 @@ function formatShortDate(value: string | undefined): string {
 export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
   const [state, dispatch] = useReducer(terminalReducer, undefined, createInitialTerminalState)
   const [input, setInput] = useState(() => createInputState())
+  const [sessionPickerRenaming, setSessionPickerRenaming] = useState<
+    { sessionId: string; value: string } | undefined
+  >(undefined)
   const [isBusy, setIsBusy] = useState(false)
   const [interruptRequested, setInterruptRequested] = useState(false)
   const [staticTranscriptItems, setStaticTranscriptItems] = useState<TranscriptItem[]>([])
@@ -212,6 +235,9 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
   const showFileMentions = fileMentionAtCursor !== null && filteredFileMentions.length > 0
   const showSlashCommands = fileMentionAtCursor === null && filteredSlashCommands.length > 0
   const suggestionNotice = fileMentionAtCursor ? fileMentionIndexNotice(fileMentionIndex) : undefined
+  const suggestionsVisible = (showFileMentions || showSlashCommands || Boolean(suggestionNotice)) && !isBusy
+  const previousSuggestionsVisible = useRef(false)
+  const [shouldClearSuggestions, setShouldClearSuggestions] = useState(false)
 
   useEffect(() => {
     const flushAssistantDelta = () => {
@@ -284,6 +310,21 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
   }, [filteredFileMentions.length, selectedFileMentionIndex, showFileMentions])
 
   useEffect(() => {
+    // 当建议列表从“有”变为“无”时，Ink 在 Windows 终端上偶发无法完整清理上一帧残留文本。
+    // 这里强制渲染一帧空白 suggestions 区，确保残留字符（如 `/`）被覆盖。
+    if (previousSuggestionsVisible.current && !suggestionsVisible) {
+      setShouldClearSuggestions(true)
+    }
+    previousSuggestionsVisible.current = suggestionsVisible
+  }, [suggestionsVisible])
+
+  useEffect(() => {
+    if (!shouldClearSuggestions) return
+    // 只渲染一帧空白用于覆盖残留字符。
+    setShouldClearSuggestions(false)
+  }, [shouldClearSuggestions])
+
+  useEffect(() => {
     const rememberRawInput = (data: Buffer | string) => {
       lastRawInput.current = Buffer.isBuffer(data) ? data.toString() : data
     }
@@ -333,6 +374,41 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
     if (isBusy && !isCtrlC) return
 
     if (state.sessionPicker && !isBusy) {
+      // session picker 的重命名输入模式：接管按键，不写入底部输入框。
+      if (sessionPickerRenaming) {
+        if (key.escape) {
+          setSessionPickerRenaming(undefined)
+          return
+        }
+        if (key.return) {
+          const name = sessionPickerRenaming.value.trim()
+          const targetId = sessionPickerRenaming.sessionId
+          setSessionPickerRenaming(undefined)
+          dispatch({ type: 'session_picker_close' })
+          if (name) {
+            setIsBusy(true)
+            void Promise.resolve(
+              props.onSubmit(`/sessions rename ${targetId} "${escapeDoubleQuotes(name)}"`),
+            )
+              .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+              .finally(() => setIsBusy(false))
+          }
+          return
+        }
+        if (shouldBackspace(value, key, rawInput)) {
+          setSessionPickerRenaming((current) =>
+            current ? { ...current, value: current.value.slice(0, -1) } : current,
+          )
+          return
+        }
+        if (value && !key.ctrl && !key.meta) {
+          setSessionPickerRenaming((current) =>
+            current ? { ...current, value: current.value + value } : current,
+          )
+        }
+        return
+      }
+
       if (key.upArrow) {
         const count = state.sessionPicker.sessions.length
         if (count > 0) {
@@ -367,12 +443,14 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
       }
       if (key.escape) {
         dispatch({ type: 'session_picker_close' })
+        setSessionPickerRenaming(undefined)
         return
       }
       if (key.return) {
         const selected = state.sessionPicker.sessions[state.sessionPicker.selectedIndex]
         dispatch({ type: 'session_picker_close' })
         if (selected) {
+          setSessionPickerRenaming(undefined)
           setIsBusy(true)
           void Promise.resolve(props.onSessionPickerSelect?.(selected.sessionId))
             .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
@@ -380,6 +458,37 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
         }
         return
       }
+
+      if (!key.ctrl && !key.meta && (value === 'r' || value === 'R')) {
+        const selected = state.sessionPicker.sessions[state.sessionPicker.selectedIndex]
+        if (selected) {
+          setSessionPickerRenaming({
+            sessionId: selected.sessionId,
+            value:
+              selected.displayName && selected.displayName !== '(无名)'
+                ? selected.displayName
+                : ''
+          })
+        }
+        return
+      }
+
+      if (!key.ctrl && !key.meta && (value === 'd' || value === 'D')) {
+        const selected = state.sessionPicker.sessions[state.sessionPicker.selectedIndex]
+        dispatch({ type: 'session_picker_close' })
+        if (selected) {
+          setSessionPickerRenaming(undefined)
+          setIsBusy(true)
+          void Promise.resolve(props.onSubmit(`/sessions delete ${selected.sessionId}`))
+            .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+            .finally(() => setIsBusy(false))
+        }
+        return
+      }
+
+      // session picker 打开期间，禁止向输入框写入普通字符。
+      // 仅允许方向键/Enter/Esc 进行选择与关闭。
+      return
     }
 
     if (isCtrlC && isBusy) {
@@ -548,15 +657,20 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
         />
         <ConversationView items={liveItems} />
         <StatusBar state={state} isBusy={isBusy} hasStreamingAssistant={hasStreamingAssistant} />
-        <SessionPickerPanel picker={state.sessionPicker} />
-        <CommandSuggestions
-          suggestions={showFileMentions ? renderedFileMentions : renderedSlashCommands}
-          notice={suggestionNotice}
-        />
+        <SessionPickerPanel picker={state.sessionPicker} renaming={sessionPickerRenaming} />
+        {suggestionsVisible ? (
+          <CommandSuggestions
+            suggestions={showFileMentions ? renderedFileMentions : renderedSlashCommands}
+            notice={suggestionNotice}
+          />
+        ) : shouldClearSuggestions ? (
+          <Box marginTop={1}><Text> </Text></Box>
+        ) : null}
         <InputPrompt
           value={input.value}
           cursor={input.cursor}
-          isBusy={isBusy}
+          isBusy={isBusy || state.sessionPicker !== undefined || sessionPickerRenaming !== undefined}
+          useRealCursor={process.platform !== 'win32'}
           historySearchLabel={historySearchLabel}
           hasUndoClear={!input.value && input.clearedValue !== undefined}
         />
