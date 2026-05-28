@@ -16,6 +16,8 @@ export interface PromptContext {
   todoContext?: string
   skillsContext?: string
   agentsContext?: string
+  /** 当前可见工具集中是否包含 `Agent`，用于避免向无此工具的子 Agent 注入委派建议。 */
+  canDelegateToAgents?: boolean
   teamsContext?: string
   runtimeContext?: string
   agentMdContext?: string
@@ -85,7 +87,9 @@ export function toolGuide(): PipeFn {
       '[JIT Context Discipline]',
       '- 上下文应在需要时进入，不要在一开始批量读取可能无关的大文件、网页或长命令输出。',
       '- 代码/文件探索优先使用低成本到高成本阶梯：list_directory/glob → grep → read_file 的精确行段。',
-      '- 只把能推进当前判断的最小证据放进主上下文；宽搜索、噪音探索或可并行调查优先交给 Agent/Explore。',
+      ctx.canDelegateToAgents
+        ? '- 只把能推进当前判断的最小证据放进主上下文；宽搜索、噪音探索或可并行调查优先交给 Agent/Explore。'
+        : '- 只把能推进当前判断的最小证据放进当前上下文；不要调用当前工具列表中不存在的委派工具。',
       '- Skill、SubAgent、MCP 工具都遵循渐进式披露：先看名称/摘要/Schema，必要时再加载正文或执行高成本工具。',
       ctx.jitToolSummary ? ['', '当前工具成本阶梯：', ctx.jitToolSummary].join('\n') : null
     ]

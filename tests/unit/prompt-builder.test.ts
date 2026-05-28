@@ -17,6 +17,7 @@ import {
   toolGuide,
   type PromptContext
 } from '../../src/context/prompt-builder'
+import { EXPLORE_AGENT } from '../../src/agents/built-in/explore'
 
 function baseCtx(extra: Partial<PromptContext> = {}): PromptContext {
   return {
@@ -131,6 +132,22 @@ describe('PromptBuilder System Prompt 管道', () => {
     it('toolGuide 输出包含工具数量', () => {
       const out = toolGuide()(baseCtx({ toolCount: 42 }))
       expect(String(out)).toMatch(/42/)
+    })
+
+    it('toolGuide 仅在 Agent 工具可用时建议委派给 Agent/Explore', () => {
+      const withAgent = toolGuide()(baseCtx({ canDelegateToAgents: true }))
+      const withoutAgent = toolGuide()(baseCtx({ canDelegateToAgents: false }))
+
+      expect(String(withAgent)).toContain('Agent/Explore')
+      expect(String(withoutAgent)).not.toContain('Agent/Explore')
+      expect(String(withoutAgent)).toContain('不要调用当前工具列表中不存在的委派工具')
+    })
+
+    it('Explore agent system prompt 明确禁止递归委派', () => {
+      const prompt = EXPLORE_AGENT.getSystemPrompt()
+
+      expect(prompt).toContain('不要调用 Agent')
+      expect(prompt).toContain('只读工具')
     })
 
     it('sessionContext 在有历史消息时输出 sessionId', () => {

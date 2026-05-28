@@ -909,6 +909,7 @@ async function main() {
       toolCount: registry.getActiveTools().length,
       deferredToolSummary: registry.getDeferredToolSummary(),
       jitToolSummary: registry.getJitToolSummary(),
+      canDelegateToAgents: registry.getActiveTools().some((tool) => tool.name === 'Agent'),
       sessionMessageCount: options.sessionMessageCount,
       sessionId,
       agentMode,

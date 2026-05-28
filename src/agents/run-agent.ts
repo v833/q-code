@@ -375,6 +375,7 @@ function buildChildSystemPrompt(params: {
     toolCount: params.registry.getActiveTools().length,
     deferredToolSummary: params.registry.getDeferredToolSummary(),
     jitToolSummary: params.registry.getJitToolSummary(),
+    canDelegateToAgents: false,
     sessionMessageCount: 0,
     sessionId: `sub-agent:${params.definition.agentType}`,
     runtimeContext: params.runtimeContext,

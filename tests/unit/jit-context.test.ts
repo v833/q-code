@@ -80,6 +80,7 @@ describe('JIT Context 工具成本阶梯与 prompt discipline', () => {
     expect(out).toContain('[JIT Context Discipline]')
     expect(out).toContain('list_directory/glob → grep → read_file')
     expect(out).toContain('渐进式披露')
+    expect(out).not.toContain('Agent/Explore')
     expect(out).toContain('当前工具成本阶梯')
     expect(out).toContain('高成本: read_file')
   })
