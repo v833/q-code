@@ -1,5 +1,6 @@
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import * as skillLoader from '../../src/skills/load-skills-dir'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setupTempHome, type TempHome } from '../_helpers/temp-home'
 import {
@@ -100,5 +101,34 @@ describe('skill loader', () => {
     expect(loaded.skills.find((skill) => skill.name === 'project-only')?.baseDir).toBe(
       realpathSync(join(getProjectAgentsSkillsDir(home.cwd), 'project-only'))
     )
+  })
+
+  it('prefers higher-priority source when two entries resolve to same realpath', async () => {
+    const home = trackHome('q-code-skills-realpath-')
+
+    // 两个不同来源的 skill，模拟它们通过 symlink 指向同一个 realpath。
+    writeSkill(
+      getUserSkillsDir(),
+      'shared',
+      '---\nname: shared\ndescription: user q-code shared\n---\nuser body\n'
+    )
+    writeSkill(
+      getProjectAgentsSkillsDir(home.cwd),
+      'shared',
+      '---\nname: shared\ndescription: project agents shared\n---\nproject body\n'
+    )
+
+    const realpathSpy = vi.spyOn(skillLoader, 'resolveRealpath')
+    realpathSpy.mockImplementation(async (p) => {
+      if (p.endsWith('SKILL.md')) return 'DUMMY_REAL_SKILL_MD'
+      return p
+    })
+
+    const loaded = await loadAllSkills(home.cwd)
+
+    expect(loaded.warnings).toEqual([])
+    expect(loaded.skills.map((skill) => `${skill.name}:${skill.description}`)).toEqual([
+      'shared:project agents shared'
+    ])
   })
 })

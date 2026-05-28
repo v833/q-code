@@ -3,6 +3,7 @@
  * MCP/Skills/Agents 引导、Ink TUI 或经典 readline 交互循环，以及 Agent Loop 编排。
  */
 import './runtime/color-bootstrap';
+import * as path from 'node:path'
 import { type ModelMessage } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { getRequiredEnv, normalizeBaseURL } from './utils';
@@ -2869,8 +2870,25 @@ async function main() {
 
   function handleSkillsCommand(command: string): void {
     const arg = command.slice('/skills'.length).trim();
-    if (arg) {
-      print('\n  [Skills] 用法: /skills');
+    const args = arg.split(/\s+/).filter(Boolean);
+    const showAll = args[0] === 'all' || args[0] === '--all';
+
+    const query =
+      !showAll && args.length > 0
+        ? args
+            .filter((a, i) => {
+              return a !== 'help';
+            })
+            .join(' ')
+            .trim()
+        : '';
+    if (!showAll && args[0] === 'help') {
+      print(
+        [
+          '\n  [Skills] 用法:',
+          '  - /skills',
+        ].join('\n'),
+      );
       return;
     }
 
@@ -2890,26 +2908,78 @@ async function main() {
     const visibleNames = new Set(
       getModelVisibleSkills().map((skill) => skill.name),
     );
-    const lines = [`Skills (${skills.length} loaded)`, ''];
-    for (const skill of skills) {
-      const state = visibleNames.has(skill.name)
+
+    const filteredSkills = query
+      ? skills.filter((s) => {
+          const haystack = `${s.name}\n${s.description}\n${s.whenToUse ?? ''}`.toLowerCase();
+          return haystack.includes(query.toLowerCase());
+        })
+      : skills;
+
+    // 互斥分组：按来源目录区分（不以 visible 为准）。
+    // - 系统：~/.agents/skills（user-agents）
+    // - 用户：~/.q-code/skills（user-qcode）
+    // - 项目：<cwd>/.q-code/skills + <cwd>/.agents/skills（project-*）
+    const systemSkills = filteredSkills.filter((s) => s.source === 'user-agents');
+    const userSkills = filteredSkills.filter((s) => s.source === 'user-qcode');
+    const projectSkills = filteredSkills.filter((s) => s.source.startsWith('project-'));
+
+    function escapeCell(text: string): string {
+      // Markdown 表格里需要转义竖线，且避免换行破坏布局
+      return text.replaceAll('|', '\\|').replaceAll('\n', ' ').trim();
+    }
+
+    function formatState(skill: (typeof skills)[number]): string {
+      return visibleNames.has(skill.name)
         ? 'visible'
         : skill.frontmatter.disableModelInvocation
           ? 'user-only'
           : 'conditional';
-      const desc = skill.whenToUse
-        ? `${skill.description} - ${skill.whenToUse}`
-        : skill.description;
-      const hint = skill.frontmatter.argumentHint
-        ? ` ${skill.frontmatter.argumentHint}`
-        : '';
-      lines.push(`- /${skill.name}${hint} [${skill.source}, ${state}] ${desc}`);
     }
-    lines.push(
-      '',
-      '模型只会在 system-reminder 里看到 visible skills；正文会在调用 Skill 工具或 /<skill-name> 时才加载。',
-    );
-    print('\n' + lines.join('\n'));
+
+    function renderTable(title: string, rows: (typeof skills)[number][]): string {
+      const header =
+        `### ${title} (${rows.length})\n\n` +
+        `| 命令 | 来源 | 状态 | 描述 |\n` +
+        `| --- | --- | --- | --- |\n`;
+      if (rows.length === 0) return header;
+
+      const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name));
+      const body = sorted
+        .map((skill) => {
+          const cmd = `/${skill.name}`;
+          const source = skill.source.split('-')[0];
+          const state = formatState(skill);
+          const desc = skill.whenToUse
+            ? `${skill.description} - ${skill.whenToUse}`
+            : skill.description;
+          return `| ${escapeCell(cmd)} | ${escapeCell(source)} | ${escapeCell(state)} | ${escapeCell(desc)} |`;
+        })
+        .join('\n');
+      return header + body + '\n';
+    }
+
+    // TUI 会把 Markdown 表格渲染成表格组件；非 TUI 也能正常展示为表格文本。
+    const markdown =
+      `## Skills (${filteredSkills.length} loaded)\n\n` +
+      renderTable('系统 Skills', systemSkills) +
+      `\n` +
+      renderTable('用户 Skills', userSkills) +
+      `\n` +
+      renderTable('项目 Skills', projectSkills) +
+      `\n> 说明：系统/项目/用户按目录来源归类；状态=visible 表示会注入 system-reminder。正文会在调用 Skill 工具或 /<skill-name> 时才加载。\n`;
+
+    const output = '\n' + markdown.trimEnd();
+    if (useTui) {
+      emitTerminal({
+        type: 'message',
+        role: 'system',
+        source: 'slash:/skills',
+        text: stripAnsi(output),
+      });
+      return;
+    }
+    console.log(output);
   }
 
   function handleAgentsCommand(command: string): void {
@@ -3000,8 +3070,8 @@ async function main() {
     }
     lines.push('');
     lines.push('自定义 SubAgent 文件:');
-    lines.push(`  用户级: ${getUserAgentsDir()}/<name>.md`);
-    lines.push(`  项目级: ${getProjectAgentsDir(activeStore.cwd)}/<name>.md`);
+    lines.push(`  用户级: ${JSON.stringify(path.join(getUserAgentsDir(), '<name>.md'))}`);
+    lines.push(`  项目级: ${JSON.stringify(path.join(getProjectAgentsDir(activeStore.cwd), '<name>.md'))}`);
     lines.push(
       '修改 agent 文件后需要重启 q-code；终止后台任务可用 /agents kill <agent_id>。',
     );

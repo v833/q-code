@@ -114,7 +114,8 @@ try {
     'disable-model-invocation 的 Skill 对模型隐藏'
   )
   assert(
-    registry.findSkill('hello-world')?.source === 'project',
+    registry.findSkill('hello-world')?.source === 'project-agents' ||
+      registry.findSkill('hello-world')?.source === 'project-qcode',
     '项目级 Skill 覆盖用户级同名 Skill'
   )
 

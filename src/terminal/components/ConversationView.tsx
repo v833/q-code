@@ -69,7 +69,10 @@ function TranscriptLine({ item }: { item: TranscriptItem }): React.JSX.Element {
     <Box marginTop={1}>
       <Text color={color} bold>{label}</Text>
       <Box marginLeft={1} flexDirection="column" flexShrink={1}>
-        <MarkdownText text={clipTextForDisplay(item.text)} dim />
+        <MarkdownText
+          text={item.source === 'slash:/skills' ? item.text : clipTextForDisplay(item.text)}
+          dim
+        />
       </Box>
     </Box>
   )

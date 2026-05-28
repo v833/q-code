@@ -13,10 +13,17 @@ import type { Skill, SkillSource } from './types';
 
 const SKILL_FILE = 'SKILL.md';
 
+/** 包一层 realpath，便于测试模拟 symlink 行为。 */
+export async function resolveRealpath(p: string): Promise<string> {
+  return fs.realpath(p).catch(() => p);
+}
+
 /** 解析用户主目录；单测可通过 `HOME` 覆盖，否则回退 `os.homedir()`。 */
 function getUserHomeDir(): string {
   const home = process.env.HOME?.trim();
-  return home ? home : os.homedir();
+  const userProfile = process.env.USERPROFILE?.trim();
+  // Windows 下 HOME 可能为空；优先使用 USERPROFILE 以匹配用户预期的 "~"。
+  return home ? home : userProfile ? userProfile : os.homedir();
 }
 
 /** 解析 q-code 主目录。 */
@@ -60,9 +67,9 @@ async function loadFromOneDir(
   let entries: string[];
   try {
     const dirents = await fs.readdir(dir, { withFileTypes: true });
-    entries = dirents
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name);
+    // Windows 下 junction/symlink 目录可能表现为 isSymbolicLink() 而非 isDirectory()。
+    // 这里不依赖 dirent 类型过滤，直接尝试读取 `<entry>/SKILL.md`，失败则跳过。
+    entries = dirents.map((entry) => entry.name);
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     if (err?.code === 'ENOENT') return { skills: [], warnings: [] };
@@ -99,8 +106,8 @@ async function loadFromOneDir(
     }
 
     const frontmatter = normalizeFrontmatter(split.raw, split.body);
-    const realFile = await fs.realpath(filePath).catch(() => filePath);
-    const realDir = await fs.realpath(skillDir).catch(() => skillDir);
+    const realFile = await resolveRealpath(filePath);
+    const realDir = await resolveRealpath(skillDir);
     const name = frontmatter.name ?? dirName;
     const description =
       frontmatter.description ?? extractFallbackDescription(split.body) ?? name;
@@ -120,7 +127,25 @@ async function loadFromOneDir(
   return { skills, warnings };
 }
 
-/** 加载用户与项目 Skill；同名时项目覆盖用户，并去重 realpath。 */
+function sourcePriority(source: SkillSource): number {
+  switch (source) {
+    case 'project-agents':
+      return 3;
+    case 'project-qcode':
+      return 2;
+    case 'user-agents':
+      return 1;
+    case 'user-qcode':
+      return 0;
+  }
+}
+
+/**
+ * 加载用户与项目 Skill。
+ *
+ * - **同名覆盖优先级**：project-agents > project-qcode > user-agents > user-qcode
+ * - **同 realpath 去重**：当同一个 SKILL.md 通过软链接/符号链接被多个目录引用时，保留更高优先级的那份
+ */
 export async function loadAllSkills(cwd: string): Promise<LoadAllSkillsResult> {
   const [
     userQCodeResult,
@@ -128,28 +153,47 @@ export async function loadAllSkills(cwd: string): Promise<LoadAllSkillsResult> {
     projectQCodeResult,
     projectAgentsResult,
   ] = await Promise.all([
-    loadFromOneDir(getUserSkillsDir(), 'user'),
-    loadFromOneDir(getUserAgentsSkillsDir(), 'user'),
-    loadFromOneDir(getProjectSkillsDir(cwd), 'project'),
-    loadFromOneDir(getProjectAgentsSkillsDir(cwd), 'project'),
+    loadFromOneDir(getUserSkillsDir(), 'user-qcode'),
+    loadFromOneDir(getUserAgentsSkillsDir(), 'user-agents'),
+    loadFromOneDir(getProjectSkillsDir(cwd), 'project-qcode'),
+    loadFromOneDir(getProjectAgentsSkillsDir(cwd), 'project-agents'),
   ]);
 
-  const seenRealPaths = new Set<string>();
-  const byName = new Map<string, Skill>();
-
-  for (const skill of [
+  const all = [
     ...userQCodeResult.skills,
     ...userAgentsResult.skills,
     ...projectQCodeResult.skills,
     ...projectAgentsResult.skills,
-  ]) {
-    if (seenRealPaths.has(skill.filePath)) continue;
-    seenRealPaths.add(skill.filePath);
-    byName.set(skill.name, skill);
+  ];
+
+  // 先按 realpath 去重，但要按优先级挑胜者（避免软链接导致低优先级先“占坑”）。
+  const byRealPath = new Map<string, Skill>();
+  for (const skill of all) {
+    const existing = byRealPath.get(skill.filePath);
+    if (!existing) {
+      byRealPath.set(skill.filePath, skill);
+      continue;
+    }
+    if (sourcePriority(skill.source) > sourcePriority(existing.source)) {
+      byRealPath.set(skill.filePath, skill);
+    }
+  }
+
+  // 再按 name 合并覆盖，同样使用优先级规则。
+  const byName = new Map<string, Skill>();
+  for (const skill of byRealPath.values()) {
+    const existing = byName.get(skill.name);
+    if (!existing) {
+      byName.set(skill.name, skill);
+      continue;
+    }
+    if (sourcePriority(skill.source) > sourcePriority(existing.source)) {
+      byName.set(skill.name, skill);
+    }
   }
 
   return {
-    skills: [...byName.values()],
+    skills: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)),
     warnings: [
       ...userQCodeResult.warnings,
       ...userAgentsResult.warnings,
