@@ -41,8 +41,13 @@ const MAX_RETRIES = 3
 const DEFAULT_MAX_OUTPUT_TOKENS = 8000
 const DEFAULT_ESCALATED_MAX_OUTPUT_TOKENS = 64000
 const DEFAULT_TOOL_STEP_IDLE_TIMEOUT_MS = Number(process.env.TOOL_STEP_IDLE_TIMEOUT_MS?.trim() || 5000)
+const DEFAULT_MODEL_WAIT_HEARTBEAT_MS = 10_000
+const DEFAULT_MODEL_SLOW_REQUEST_WARN_MS = 30_000
+const DEFAULT_MODEL_STALLED_REQUEST_WARN_MS = 60_000
 /** 工具步全部返回后、提供商未再发 `finish` 时，空闲超时 race 的哨兵值。 */
 const STREAM_IDLE = Symbol('stream-idle')
+/** 模型请求等待超过提示阈值时，内部 race 的哨兵值。 */
+const MODEL_WAIT_HEARTBEAT = Symbol('model-wait-heartbeat')
 
 /** `agentLoop` 结束时的完整消息列表与本轮新增片段。 */
 export interface AgentLoopResult {
@@ -98,6 +103,36 @@ export interface AgentStepUsage {
   usage: NormalizedUsage
   /** 为 true 表示该步用量来自「length 截断后重试」前的失败尝试 */
   discarded: boolean
+  metrics?: AgentStepMetrics
+}
+
+/** 单步模型耗时事件，即使 provider 未返回 usage 也会触发。 */
+export interface AgentStepMetricEvent {
+  step: number
+  model: string
+  metrics: AgentStepMetrics
+  hasToolCall: boolean
+  finishReason?: string
+}
+
+/** 单步模型请求耗时指标，用于审计和 Langfuse 归因。 */
+export interface AgentStepMetrics {
+  /** 从发起 step 请求到首个可见模型事件的耗时；无可见事件时为 null。 */
+  ttftMs: number | null
+  /** 当前 step 总耗时。 */
+  elapsedMs: number
+  /** 基于输出 token 与总耗时估算的生成速度；usage 缺失时为 null。 */
+  tokensPerSecond: number | null
+  outputTokens: number
+}
+
+/** 模型等待心跳事件：不进入消息历史，仅供 TUI/status/classic 提示。 */
+export interface AgentModelWaitEvent {
+  level: 'waiting' | 'slow' | 'stalled'
+  step: number
+  elapsedMs: number
+  thresholdMs: number
+  message: string
 }
 
 /** `agentLoop` 的可选配置与回调。 */
@@ -117,7 +152,9 @@ export interface AgentLoopOptions {
   modelName?: string
   onUsage?: (turnUsage: TokenUsage, totalUsage: TokenUsage) => void
   onStepUsage?: (stepUsage: AgentStepUsage) => void
+  onStepMetrics?: (event: AgentStepMetricEvent) => void
   onText?: (text: string) => void
+  onModelWait?: (event: AgentModelWaitEvent) => void
   onToolEvent?: (event: AgentToolEvent) => void
   onToolResult?: (event: AgentToolResultEvent) => void
   onToolProgress?: (event: AgentToolProgressEvent) => void
@@ -129,8 +166,27 @@ export interface AgentLoopOptions {
   agent?: HookAgentContext
   quiet?: boolean
   toolStepIdleTimeoutMs?: number
+  /** 模型首个可见事件等待提示阈值，默认 10s。 */
+  modelWaitHeartbeatMs?: number
+  /** 模型慢请求提示阈值，默认 30s。 */
+  modelSlowRequestWarnMs?: number
+  /** 模型长时间无响应提示阈值，默认 60s。 */
+  modelStalledRequestWarnMs?: number
+  /** 单步模型请求总超时；不传或非正数表示不启用。 */
+  modelRequestTimeoutMs?: number
+  /** 超时错误中的脱敏模型/中转标签。 */
+  modelRequestLabel?: string
   /** Agent Teams 队友身份；转发给工具执行以便 SendMessage 解析发送方 */
   teammateIdentity?: TeammateIdentity
+}
+
+interface ModelWaitMonitor {
+  step: number
+  startedAt: number
+  nextIndex: number
+  thresholds: Array<{ ms: number; level: AgentModelWaitEvent['level'] }>
+  canNotify: () => boolean
+  notify: (event: AgentModelWaitEvent) => void
 }
 
 interface ToolCallMessagePart {
@@ -177,6 +233,8 @@ export async function agentLoop(
   const escalatedMaxOutputTokens =
     options.escalatedMaxOutputTokens ?? DEFAULT_ESCALATED_MAX_OUTPUT_TOKENS
   const toolStepIdleTimeoutMs = normalizeIdleTimeout(options.toolStepIdleTimeoutMs)
+  const modelWaitThresholds = normalizeModelWaitThresholds(options)
+  const modelRequestTimeoutMs = normalizeOptionalMs(options.modelRequestTimeoutMs)
   const newMessages: ModelMessage[] = []
   const taskStart = Date.now()
   const quiet = options.quiet === true
@@ -258,174 +316,198 @@ export async function agentLoop(
         requestToolSchemaTokens = registry.countTokenEstimate().active
         const stepAbortController = new AbortController()
         const abortSignal = mergeAbortSignals(options.abortSignal, stepAbortController.signal)
+        const requestTimeout = createModelRequestTimeout({
+          timeoutMs: modelRequestTimeoutMs,
+          step,
+          label: options.modelRequestLabel,
+          abortController: stepAbortController
+        })
         const toolCallParts: ToolCallMessagePart[] = []
         const toolResultParts: ToolResultMessagePart[] = []
         const outstandingToolCallIds = new Set<string>()
-        const result = streamText({
-          model,
-          system,
-          tools: registry.toAISDKFormat(
-            {
-              abortSignal,
-              ...(options.sessionId ? { sessionId: options.sessionId } : {}),
-              ...(options.hooks ? { hooks: options.hooks } : {}),
-              ...(options.agent ? { agent: options.agent } : {}),
-              ...(options.onToolProgress ? { onProgress: toAgentToolProgress(options) } : {}),
-              ...(options.teammateIdentity ? { teammateIdentity: options.teammateIdentity } : {})
-            },
-            { resultEnvelope: true }
-          ),
-          messages,
-          maxOutputTokens: outputTokenLimit,
-          maxRetries: 0,
-          ...(options.telemetry ? { experimental_telemetry: options.telemetry({ step }) } : {}),
-          ...(abortSignal ? { abortSignal } : {}),
-          onError: () => {}
-        })
 
-        const stream = result.fullStream[Symbol.asyncIterator]()
-        while (true) {
-          throwIfAborted(options.abortSignal)
-          const nextPromise = stream.next()
-          nextPromise.catch(() => {})
-          const next = await waitForStreamPart(
-            nextPromise,
-            shouldCloseToolStep(outstandingToolCallIds, hasToolCall),
-            toolStepIdleTimeoutMs
-          )
-          // 工具已全部返回但流未结束：主动 abort，避免无限等待 finish 事件
-          if (next === STREAM_IDLE) {
-            stepAbortController.abort(new Error('tool step completed without provider finish'))
-            await stream.return?.().catch(() => undefined)
-            break
-          }
-          if (next.done) break
-
-          const part = next.value
-          switch (part.type) {
-            case 'text-delta':
-              if (!firstTokenAt) firstTokenAt = Date.now()
-              if (!quiet) process.stdout.write(part.text)
-              fullText += part.text
-              options.onText?.(part.text)
-              break
-
-            case 'tool-call': {
-              if (!firstTokenAt) firstTokenAt = Date.now()
-              hasToolCall = true
-              lastToolCall = {
-                name: part.toolName,
-                input: part.input,
-                toolCallId: part.toolCallId
-              }
-              toolCallParts.push({
-                type: 'tool-call',
-                toolCallId: part.toolCallId,
-                toolName: part.toolName,
-                input: part.input
-              })
-              outstandingToolCallIds.add(part.toolCallId)
-              toolCallsById.set(part.toolCallId, { name: part.toolName, input: part.input })
-              if (!quiet) console.log(`  ${fmtToolCall(part.toolName, part.input)}`)
-              options.onToolEvent?.({
-                phase: 'start',
-                name: part.toolName,
-                input: part.input,
-                toolCallId: part.toolCallId
-              })
-
-              const detection = detect(part.toolName, part.input)
-              if (detection.stuck) {
-                if (!quiet) console.log(fmtLoopWarning(detection.message, detection.level))
-                if (detection.level === 'critical') {
-                  shouldBreak = true
-                } else {
-                  const reminder: ModelMessage = {
-                    role: 'user' as const,
-                    content: `[系统提醒] ${detection.message}。请换一个思路解决问题，不要重复同样的操作。`
-                  }
-                  messages.push(reminder)
-                  newMessages.push(reminder)
-                }
-              }
-              recordCall(part.toolName, part.input)
+        try {
+          const result = streamText({
+            model,
+            system,
+            tools: registry.toAISDKFormat(
+              {
+                abortSignal,
+                ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+                ...(options.hooks ? { hooks: options.hooks } : {}),
+                ...(options.agent ? { agent: options.agent } : {}),
+                ...(options.onToolProgress ? { onProgress: toAgentToolProgress(options) } : {}),
+                ...(options.teammateIdentity ? { teammateIdentity: options.teammateIdentity } : {})
+              },
+              { resultEnvelope: true }
+            ),
+            messages,
+            maxOutputTokens: outputTokenLimit,
+            maxRetries: 0,
+            ...(options.telemetry ? { experimental_telemetry: options.telemetry({ step }) } : {}),
+            ...(abortSignal ? { abortSignal } : {}),
+            onError: () => {}
+          })
+          const waitMonitor = createModelWaitMonitor({
+            step,
+            startedAt: stepStart,
+            thresholds: modelWaitThresholds,
+            canNotify: () => firstTokenAt === 0,
+            notify: (event) => options.onModelWait?.(event)
+          })
+          const stream = result.fullStream[Symbol.asyncIterator]()
+          while (true) {
+            throwIfAborted(options.abortSignal)
+            if (stepAbortController.signal.aborted) throw createAbortError(stepAbortController.signal)
+            const nextPromise = stream.next()
+            nextPromise.catch(() => {})
+            const next = await waitForStreamPart(
+              nextPromise,
+              shouldCloseToolStep(outstandingToolCallIds, hasToolCall),
+              toolStepIdleTimeoutMs,
+              waitMonitor,
+              abortSignal
+            )
+            if (stepAbortController.signal.aborted) throw createAbortError(stepAbortController.signal)
+            // 工具已全部返回但流未结束：主动 abort，避免无限等待 finish 事件
+            if (next === STREAM_IDLE) {
+              stepAbortController.abort(new Error('tool step completed without provider finish'))
+              await stream.return?.().catch(() => undefined)
               break
             }
+            if (next.done) break
 
-            case 'tool-result':
-              if (!quiet) console.log(`  ${fmtToolResult(formatToolOutputForDisplay(part.output))}`)
-              {
-                const matched = toolCallsById.get(part.toolCallId) ?? lastToolCall
-                if (matched) {
-                  outstandingToolCallIds.delete(part.toolCallId)
-                  const normalized = normalizeToolResultOutput(part.output)
-                  toolResultParts.push({
-                    type: 'tool-result',
-                    toolCallId: part.toolCallId,
-                    toolName: matched.name,
-                    output: toToolResultOutput(normalized.text, normalized.isError)
-                  })
-                  recordResult(matched.name, matched.input, normalized.text)
-                  options.onToolEvent?.({
-                    phase: 'done',
-                    name: matched.name,
-                    toolCallId: part.toolCallId,
-                    resultLength: normalized.text.length,
-                    isError: normalized.isError
-                  })
-                  options.onToolResult?.({
-                    name: matched.name,
-                    toolCallId: part.toolCallId,
-                    input: matched.input,
-                    output: normalized.text,
-                    resultLength: normalized.text.length,
-                    isError: normalized.isError
-                  })
-                  if (options.stopAfterToolNames?.includes(matched.name)) {
-                    stopAfterStepReason = `${matched.name} 已完成，等待下一条用户指令`
+            const part = next.value
+            switch (part.type) {
+              case 'text-delta':
+                if (!firstTokenAt) firstTokenAt = Date.now()
+                if (!quiet) process.stdout.write(part.text)
+                fullText += part.text
+                options.onText?.(part.text)
+                break
+
+              case 'tool-call': {
+                if (!firstTokenAt) firstTokenAt = Date.now()
+                hasToolCall = true
+                lastToolCall = {
+                  name: part.toolName,
+                  input: part.input,
+                  toolCallId: part.toolCallId
+                }
+                toolCallParts.push({
+                  type: 'tool-call',
+                  toolCallId: part.toolCallId,
+                  toolName: part.toolName,
+                  input: part.input
+                })
+                outstandingToolCallIds.add(part.toolCallId)
+                toolCallsById.set(part.toolCallId, { name: part.toolName, input: part.input })
+                if (!quiet) console.log(`  ${fmtToolCall(part.toolName, part.input)}`)
+                options.onToolEvent?.({
+                  phase: 'start',
+                  name: part.toolName,
+                  input: part.input,
+                  toolCallId: part.toolCallId
+                })
+
+                const detection = detect(part.toolName, part.input)
+                if (detection.stuck) {
+                  if (!quiet) console.log(fmtLoopWarning(detection.message, detection.level))
+                  if (detection.level === 'critical') {
+                    shouldBreak = true
+                  } else {
+                    const reminder: ModelMessage = {
+                      role: 'user' as const,
+                      content: `[系统提醒] ${detection.message}。请换一个思路解决问题，不要重复同样的操作。`
+                    }
+                    messages.push(reminder)
+                    newMessages.push(reminder)
                   }
                 }
+                recordCall(part.toolName, part.input)
+                break
               }
-              break
 
-            case 'tool-error':
-              if (!quiet) console.log(`  ${fmtToolResult(part.error)}`)
-              outstandingToolCallIds.delete(part.toolCallId)
-              toolResultParts.push({
-                type: 'tool-result',
-                toolCallId: part.toolCallId,
-                toolName: part.toolName,
-                output: { type: 'error-text', value: formatUnknownError(part.error) }
-              })
-              options.onToolEvent?.({
-                phase: 'done',
-                name: part.toolName,
-                toolCallId: part.toolCallId,
-                resultLength: measureResultLength(part.error),
-                isError: true
-              })
-              options.onToolResult?.({
-                name: part.toolName,
-                toolCallId: part.toolCallId,
-                output: formatUnknownError(part.error),
-                resultLength: measureResultLength(part.error),
-                isError: true
-              })
-              break
+              case 'tool-result':
+                if (!quiet) console.log(`  ${fmtToolResult(formatToolOutputForDisplay(part.output))}`)
+                {
+                  const matched = toolCallsById.get(part.toolCallId) ?? lastToolCall
+                  if (matched) {
+                    outstandingToolCallIds.delete(part.toolCallId)
+                    const normalized = normalizeToolResultOutput(part.output)
+                    toolResultParts.push({
+                      type: 'tool-result',
+                      toolCallId: part.toolCallId,
+                      toolName: matched.name,
+                      output: toToolResultOutput(normalized.text, normalized.isError)
+                    })
+                    recordResult(matched.name, matched.input, normalized.text)
+                    options.onToolEvent?.({
+                      phase: 'done',
+                      name: matched.name,
+                      toolCallId: part.toolCallId,
+                      resultLength: normalized.text.length,
+                      isError: normalized.isError
+                    })
+                    options.onToolResult?.({
+                      name: matched.name,
+                      toolCallId: part.toolCallId,
+                      input: matched.input,
+                      output: normalized.text,
+                      resultLength: normalized.text.length,
+                      isError: normalized.isError
+                    })
+                    if (options.stopAfterToolNames?.includes(matched.name)) {
+                      stopAfterStepReason = `${matched.name} 已完成，等待下一条用户指令`
+                    }
+                  }
+                }
+                break
 
-            case 'finish-step':
-              stepUsage = part.usage
-              stepFinishReason = part.finishReason
-              break
+              case 'tool-error':
+                if (!quiet) console.log(`  ${fmtToolResult(part.error)}`)
+                outstandingToolCallIds.delete(part.toolCallId)
+                toolResultParts.push({
+                  type: 'tool-result',
+                  toolCallId: part.toolCallId,
+                  toolName: part.toolName,
+                  output: { type: 'error-text', value: formatUnknownError(part.error) }
+                })
+                options.onToolEvent?.({
+                  phase: 'done',
+                  name: part.toolName,
+                  toolCallId: part.toolCallId,
+                  resultLength: measureResultLength(part.error),
+                  isError: true
+                })
+                options.onToolResult?.({
+                  name: part.toolName,
+                  toolCallId: part.toolCallId,
+                  output: formatUnknownError(part.error),
+                  resultLength: measureResultLength(part.error),
+                  isError: true
+                })
+                break
 
-            case 'finish':
-              stepUsage = stepUsage ?? part.totalUsage ?? readLegacyFinishUsage(part)
-              stepFinishReason = stepFinishReason ?? part.finishReason
-              break
+              case 'finish-step':
+                stepUsage = part.usage
+                stepFinishReason = part.finishReason
+                break
 
-            case 'error':
-              throw part.error
+              case 'finish':
+                stepUsage = stepUsage ?? part.totalUsage ?? readLegacyFinishUsage(part)
+                stepFinishReason = stepFinishReason ?? part.finishReason
+                break
+
+              case 'error':
+                throw part.error
+            }
           }
+        } finally {
+          requestTimeout.dispose()
+        }
+        if (requestTimeout.timedOut()) {
+          throw createAbortError(stepAbortController.signal)
         }
 
         stepMessages = buildStepMessages(fullText, toolCallParts, toolResultParts)
@@ -476,14 +558,25 @@ export async function agentLoop(
       }
     }
 
+    const anchorUsage = usageFromLanguageModelUsage(stepUsage)
+    const stepMetrics = createStepMetrics(stepStart, firstTokenAt, anchorUsage)
+
     if (shouldBreak) {
       if (!quiet) console.log(fmtStop('循环检测触发，Agent 已停止'))
+      options.onStepMetrics?.({
+        step,
+        model: options.modelName ?? 'unknown',
+        metrics: stepMetrics,
+        hasToolCall,
+        ...(stepFinishReason ? { finishReason: stepFinishReason } : {})
+      })
       getAuditLogger().emit(
         'agent.step.end',
         {
           step,
           hasToolCall,
-          stopReason: 'loop_detection'
+          stopReason: 'loop_detection',
+          ...stepMetrics
         },
         stepAuditCtx
       )
@@ -494,13 +587,20 @@ export async function agentLoop(
     newMessages.push(...stepMessages)
 
     // 只把执行 token 作为本轮成本/死循环硬保护；主显示使用当前上下文占用。
-    const anchorUsage = usageFromLanguageModelUsage(stepUsage)
+    options.onStepMetrics?.({
+      step,
+      model: options.modelName ?? 'unknown',
+      metrics: stepMetrics,
+      hasToolCall,
+      ...(stepFinishReason ? { finishReason: stepFinishReason } : {})
+    })
     const normalizedStepUsage = normalizeUsage(stepUsage)
     if (hasAnyUsage(normalizedStepUsage)) {
       options.onStepUsage?.({
         model: options.modelName ?? 'unknown',
         usage: normalizedStepUsage,
-        discarded: false
+        discarded: false,
+        metrics: stepMetrics
       })
     }
     const turnUsage = addUsage(discardedUsage, anchorUsage)
@@ -524,16 +624,14 @@ export async function agentLoop(
         finishReason: stepFinishReason,
         assistantChars: fullText.length,
         newMessages: stepMessages.length,
-        usage: turnUsage
+        usage: turnUsage,
+        ...stepMetrics
       },
       stepAuditCtx
     )
 
-    if (firstTokenAt && stepStart) {
-      const ttft = firstTokenAt - stepStart
-      const elapsed = (Date.now() - stepStart) / 1000
-      const tps = elapsed > 0 ? anchorUsage.outputTokens / elapsed : 0
-      if (!quiet) console.log(fmtStepPerf(ttft, tps))
+    if (stepMetrics.ttftMs !== null && !quiet) {
+      console.log(fmtStepPerf(stepMetrics.ttftMs, stepMetrics.tokensPerSecond ?? 0))
     }
 
     if (options.contextUsage) {
@@ -622,18 +720,52 @@ function shouldCloseToolStep(
 async function waitForStreamPart<T>(
   nextPromise: Promise<IteratorResult<T>>,
   shouldUseIdleTimeout: boolean,
-  idleTimeoutMs: number
+  idleTimeoutMs: number,
+  waitMonitor?: ModelWaitMonitor,
+  abortSignal?: AbortSignal
 ): Promise<IteratorResult<T> | typeof STREAM_IDLE> {
-  if (!shouldUseIdleTimeout) return nextPromise
-  let timer: NodeJS.Timeout | undefined
-  const idlePromise = new Promise<typeof STREAM_IDLE>((resolve) => {
-    timer = setTimeout(() => resolve(STREAM_IDLE), idleTimeoutMs)
-  })
+  while (true) {
+    throwIfAborted(abortSignal)
+    const timers: NodeJS.Timeout[] = []
+    let abortListener: (() => void) | undefined
+    const races: Array<Promise<IteratorResult<T> | typeof STREAM_IDLE | typeof MODEL_WAIT_HEARTBEAT>> = [
+      nextPromise
+    ]
+    if (abortSignal) {
+      races.push(
+        new Promise<never>((_, reject) => {
+          abortListener = () => reject(createAbortError(abortSignal))
+          abortSignal.addEventListener('abort', abortListener, { once: true })
+        })
+      )
+    }
+    if (shouldUseIdleTimeout) {
+      races.push(
+        new Promise<typeof STREAM_IDLE>((resolve) => {
+          timers.push(setTimeout(() => resolve(STREAM_IDLE), idleTimeoutMs))
+        })
+      )
+    }
+    const heartbeatDelay = nextHeartbeatDelay(waitMonitor)
+    if (heartbeatDelay !== undefined) {
+      races.push(
+        new Promise<typeof MODEL_WAIT_HEARTBEAT>((resolve) => {
+          timers.push(setTimeout(() => resolve(MODEL_WAIT_HEARTBEAT), heartbeatDelay))
+        })
+      )
+    }
 
-  try {
-    return await Promise.race([nextPromise, idlePromise])
-  } finally {
-    if (timer) clearTimeout(timer)
+    try {
+      const next = await Promise.race(races)
+      if (next === MODEL_WAIT_HEARTBEAT) {
+        emitNextHeartbeat(waitMonitor)
+        continue
+      }
+      return next
+    } finally {
+      for (const timer of timers) clearTimeout(timer)
+      if (abortSignal && abortListener) abortSignal.removeEventListener('abort', abortListener)
+    }
   }
 }
 
@@ -647,6 +779,142 @@ function normalizeMaxSteps(value: number | undefined): number | undefined {
   if (value === undefined) return undefined
   if (!Number.isFinite(value) || value <= 0) return undefined
   return Math.floor(value)
+}
+
+function normalizeOptionalMs(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined
+  if (!Number.isFinite(value) || value <= 0) return undefined
+  const milliseconds = Math.floor(value)
+  return milliseconds > 0 ? milliseconds : undefined
+}
+
+function normalizeModelWaitThresholds(
+  options: AgentLoopOptions
+): Array<{ ms: number; level: AgentModelWaitEvent['level'] }> {
+  const thresholds = [
+    {
+      ms: normalizeMsWithDefault(options.modelWaitHeartbeatMs, DEFAULT_MODEL_WAIT_HEARTBEAT_MS),
+      level: 'waiting' as const
+    },
+    {
+      ms: normalizeMsWithDefault(options.modelSlowRequestWarnMs, DEFAULT_MODEL_SLOW_REQUEST_WARN_MS),
+      level: 'slow' as const
+    },
+    {
+      ms: normalizeMsWithDefault(
+        options.modelStalledRequestWarnMs,
+        DEFAULT_MODEL_STALLED_REQUEST_WARN_MS
+      ),
+      level: 'stalled' as const
+    }
+  ].filter((item): item is { ms: number; level: AgentModelWaitEvent['level'] } => item.ms !== undefined)
+
+  const seen = new Set<number>()
+  return thresholds
+    .sort((left, right) => left.ms - right.ms)
+    .filter((item) => {
+      if (seen.has(item.ms)) return false
+      seen.add(item.ms)
+      return true
+    })
+}
+
+function normalizeMsWithDefault(value: number | undefined, fallback: number): number | undefined {
+  if (value === undefined) return fallback
+  return normalizeOptionalMs(value)
+}
+
+function createModelRequestTimeout(args: {
+  timeoutMs: number | undefined
+  step: number
+  label?: string
+  abortController: AbortController
+}): { dispose: () => void; timedOut: () => boolean } {
+  if (args.timeoutMs === undefined) {
+    return {
+      dispose: () => {},
+      timedOut: () => false
+    }
+  }
+
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    args.abortController.abort(
+      new Error(formatModelRequestTimeoutMessage(args.timeoutMs!, args.step, args.label))
+    )
+  }, args.timeoutMs)
+
+  return {
+    dispose: () => clearTimeout(timer),
+    timedOut: () => timedOut
+  }
+}
+
+function createModelWaitMonitor(args: {
+  step: number
+  startedAt: number
+  thresholds: Array<{ ms: number; level: AgentModelWaitEvent['level'] }>
+  canNotify: () => boolean
+  notify: (event: AgentModelWaitEvent) => void
+}): ModelWaitMonitor {
+  return {
+    step: args.step,
+    startedAt: args.startedAt,
+    nextIndex: 0,
+    thresholds: args.thresholds,
+    canNotify: args.canNotify,
+    notify: args.notify
+  }
+}
+
+function nextHeartbeatDelay(waitMonitor: ModelWaitMonitor | undefined): number | undefined {
+  if (!waitMonitor?.canNotify()) return undefined
+  const threshold = waitMonitor.thresholds[waitMonitor.nextIndex]
+  if (!threshold) return undefined
+  return Math.max(0, threshold.ms - (Date.now() - waitMonitor.startedAt))
+}
+
+function emitNextHeartbeat(waitMonitor: ModelWaitMonitor | undefined): void {
+  if (!waitMonitor?.canNotify()) return
+  const threshold = waitMonitor.thresholds[waitMonitor.nextIndex]
+  if (!threshold) return
+  waitMonitor.nextIndex += 1
+  const elapsedMs = Math.max(0, Date.now() - waitMonitor.startedAt)
+  waitMonitor.notify({
+    level: threshold.level,
+    step: waitMonitor.step,
+    elapsedMs,
+    thresholdMs: threshold.ms,
+    message: formatModelWaitMessage(threshold.level, elapsedMs)
+  })
+}
+
+function formatModelWaitMessage(level: AgentModelWaitEvent['level'], elapsedMs: number): string {
+  const seconds = Math.max(1, Math.round(elapsedMs / 1000))
+  if (level === 'waiting') return `正在等待模型响应... ${seconds}s`
+  if (level === 'slow') return `模型响应较慢，仍在等待首个输出... ${seconds}s`
+  return `模型长时间未返回首个输出... ${seconds}s，可能是中转排队、上游限速、网络连接或长上下文生成慢`
+}
+
+function formatModelRequestTimeoutMessage(timeoutMs: number, step: number, label?: string): string {
+  const suffix = label ? `（${label}）` : ''
+  return `模型请求 step ${step} 超过 ${timeoutMs}ms 未返回${suffix}。可能原因：中转排队、上游限速、网络连接或长上下文生成慢。`
+}
+
+function createStepMetrics(
+  stepStart: number,
+  firstTokenAt: number,
+  usage: TokenUsage
+): AgentStepMetrics {
+  const elapsedMs = Math.max(0, Date.now() - stepStart)
+  const outputTokens = Math.max(0, usage.outputTokens)
+  return {
+    ttftMs: firstTokenAt > 0 ? Math.max(0, firstTokenAt - stepStart) : null,
+    elapsedMs,
+    outputTokens,
+    tokensPerSecond: outputTokens > 0 && elapsedMs > 0 ? outputTokens / (elapsedMs / 1000) : null
+  }
 }
 
 function buildStepMessages(

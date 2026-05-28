@@ -44,6 +44,14 @@ export interface RunChildAgentParams {
   agentMdContext?: string
   maxOutputTokens?: number
   escalatedMaxOutputTokens?: number
+  /** 模型首个可见事件等待提示阈值，默认由 agentLoop 决定。 */
+  modelWaitHeartbeatMs?: number
+  modelSlowRequestWarnMs?: number
+  modelStalledRequestWarnMs?: number
+  /** 单步模型请求总超时；不传或非正数表示不启用。 */
+  modelRequestTimeoutMs?: number
+  /** 超时错误中的脱敏模型/中转标签。 */
+  modelRequestLabel?: string
   /** 覆盖进程 cwd（worktree 隔离时使用）。 */
   cwdOverride?: string
   abortSignal?: AbortSignal
@@ -151,6 +159,11 @@ export async function runChildAgent(params: RunChildAgentParams): Promise<AgentR
         agentLoop(params.model, registry, messages, system, {
           maxOutputTokens: params.maxOutputTokens,
           escalatedMaxOutputTokens: params.escalatedMaxOutputTokens,
+          modelWaitHeartbeatMs: params.modelWaitHeartbeatMs,
+          modelSlowRequestWarnMs: params.modelSlowRequestWarnMs,
+          modelStalledRequestWarnMs: params.modelStalledRequestWarnMs,
+          modelRequestTimeoutMs: params.modelRequestTimeoutMs,
+          modelRequestLabel: params.modelRequestLabel,
           maxSteps: params.agentDefinition.maxTurns ?? DEFAULT_AGENT_MAX_TURNS,
           abortSignal: params.abortSignal,
           sessionId,
@@ -207,6 +220,12 @@ export async function runChildAgent(params: RunChildAgentParams): Promise<AgentR
           },
           onStepUsage: (stepUsage) => {
             langfuseTurn.onStepUsage(stepUsage)
+          },
+          onStepMetrics: (event) => {
+            langfuseTurn.onStepMetrics(event)
+          },
+          onModelWait: (event) => {
+            langfuseTurn.onModelWait(event)
           }
         })
     )

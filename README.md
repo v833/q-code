@@ -113,6 +113,10 @@ cp .env.example .env
 | `DEFAULT_MAX_OUTPUT_TOKENS`    | ❌   | 普通回答输出上限，默认 8000                                   |
 | `ESCALATED_MAX_OUTPUT_TOKENS`  | ❌   | 输出触顶后的升级重试上限，默认 64000                          |
 | `COMPACT_MAX_OUTPUT_TOKENS`    | ❌   | 压缩摘要输出上限，默认 20000                                  |
+| `Q_CODE_MODEL_WAIT_HEARTBEAT_MS` | ❌ | 首 token 等待心跳阈值，默认 10000ms；设为 0 可关闭该档提示     |
+| `Q_CODE_MODEL_SLOW_REQUEST_WARN_MS` | ❌ | 首 token 慢请求提示阈值，默认 30000ms；设为 0 可关闭该档提示   |
+| `Q_CODE_MODEL_STALLED_REQUEST_WARN_MS` | ❌ | 首 token 长时间无响应提示阈值，默认 60000ms；设为 0 可关闭该档提示 |
+| `Q_CODE_MODEL_REQUEST_TIMEOUT_MS` | ❌ | 单步模型请求总超时，默认不启用；建议 OpenAI-compatible 中转按需设置 |
 | `Q_CODE_SESSION_DIR`           | ❌   | 会话存储目录，默认 .sessions                                  |
 | `Q_CODE_HOME`                  | ❌   | q-code 全局配置目录，默认 `~/.q-code`                         |
 | `Q_CODE_DEBUG`                 | ❌   | 设为 1/true/yes/on 显示启动诊断信息（等价于 `--debug`）       |
@@ -499,7 +503,7 @@ q-code 默认开启本地审计日志，按 UTC 日期写入 `<Q_CODE_HOME>/logs
 | `event` | 事件名 |
 | `payload` | 事件负载 |
 
-首期覆盖事件包括 `session.start` / `session.resume` / `session.end`、`user.prompt`、`agent.step.start` / `agent.step.end`、`tool.call` / `tool.result`、`hook.decision`、`mode.change`、`plan.markReady` / `plan.approve` / `plan.revise`、`subagent.*`、`team.*`、`context.compact` / `context.offload` 和 `error`。
+首期覆盖事件包括 `session.start` / `session.resume` / `session.end`、`user.prompt`、`agent.step.start` / `agent.step.end`、`tool.call` / `tool.result`、`hook.decision`、`mode.change`、`plan.markReady` / `plan.approve` / `plan.revise`、`subagent.*`、`team.*`、`context.compact` / `context.offload` 和 `error`。`agent.step.end` 会附带 `ttftMs`、`elapsedMs`、`outputTokens`、`tokensPerSecond`，用于区分首 token 慢、总生成慢或 token 吞吐低。
 
 默认 PII 模式不会把用户输入、工具输入、工具输出原文写入日志，只记录 `chars`、`inputChars`、`resultLength` 和 `sha256` 摘要。只有显式设置 `Q_CODE_AUDIT_PII=full` 时，才会把原文写入 `payload.text` / `payload.input` / `payload.output`，建议仅在企业内网或短期调试时使用。
 
@@ -529,6 +533,8 @@ sample_rate = 1
 ```
 
 默认 `record_io=false`，不会上传完整 prompt、文件内容、shell 输出或工具结果，只上报字符数、SHA-256 摘要、工具名、耗时、token 和错误状态。只有显式设置 `Q_CODE_LANGFUSE_RECORD_IO=true` / `record_io = true` 时，才会把输入输出原文交给 Langfuse，建议仅用于自托管实例或短期调试。
+
+模型首个可见输出等待超过 10/30/60 秒时，TUI 状态栏或 classic stderr 会显示“正在等待模型响应...”心跳；这些提示不会进入会话 transcript。开启 Langfuse 后，Agent step observation 同步记录 `ttftMs`、`elapsedMs`、`tokensPerSecond`、`outputTokens` 和最近一次模型等待状态，方便对比 OpenAI-compatible 中转排队、上游限速与长上下文生成慢。
 
 #### Agent Eval 与 Langfuse 评测导出
 

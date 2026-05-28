@@ -19,6 +19,8 @@ import {
 } from '@langfuse/tracing'
 import type { TelemetrySettings } from 'ai'
 import type {
+  AgentModelWaitEvent,
+  AgentStepMetricEvent,
   AgentStepUsage,
   AgentToolEvent,
   AgentToolProgressEvent,
@@ -66,6 +68,8 @@ export interface LangfuseTurnObserver {
   onToolResult(event: AgentToolResultEvent): void
   onUsage(turnUsage: TokenUsage, totalUsage: TokenUsage): void
   onStepUsage(stepUsage: AgentStepUsage): void
+  onStepMetrics(event: AgentStepMetricEvent): void
+  onModelWait(event: AgentModelWaitEvent): void
   end(args?: { status?: 'completed' | 'error'; error?: unknown }): void
 }
 
@@ -154,6 +158,8 @@ export function createNoopLangfuseTurnObserver(): LangfuseTurnObserver {
     onToolResult: () => {},
     onUsage: () => {},
     onStepUsage: () => {},
+    onStepMetrics: () => {},
+    onModelWait: () => {},
     end: () => {}
   }
 }
@@ -230,6 +236,7 @@ class ActiveLangfuseTurnObserver implements LangfuseTurnObserver {
   private toolCallCount = 0
   private toolErrorCount = 0
   private stepCount = 0
+  private readonly stepWaitLevels = new Map<number, AgentModelWaitEvent['level']>()
   private ended = false
 
   constructor(
@@ -354,7 +361,40 @@ class ActiveLangfuseTurnObserver implements LangfuseTurnObserver {
         discarded: stepUsage.discarded,
         inputTokens: stepUsage.usage.inputTokens,
         outputTokens: stepUsage.usage.outputTokens,
-        totalTokens: stepUsage.usage.totalTokens
+        totalTokens: stepUsage.usage.totalTokens,
+        ...stepMetricMetadata(stepUsage.metrics)
+      }
+    })
+  }
+
+  onStepMetrics(event: AgentStepMetricEvent): void {
+    this.ensureStep(event.step)
+    this.activeStep?.updateOtelSpanAttributes({
+      level: 'DEFAULT',
+      statusMessage: event.finishReason ? `finished:${event.finishReason}` : 'completed',
+      metadata: {
+        step: event.step,
+        model: event.model,
+        hasToolCall: event.hasToolCall,
+        ...(event.finishReason ? { finishReason: event.finishReason } : {}),
+        ...(this.stepWaitLevels.has(event.step)
+          ? { modelWaitMaxLevel: this.stepWaitLevels.get(event.step) }
+          : {}),
+        ...stepMetricMetadata(event.metrics)
+      }
+    })
+  }
+
+  onModelWait(event: AgentModelWaitEvent): void {
+    this.ensureStep(event.step)
+    this.stepWaitLevels.set(event.step, maxModelWaitLevel(this.stepWaitLevels.get(event.step), event.level))
+    this.activeStep?.updateOtelSpanAttributes({
+      level: event.level === 'stalled' ? 'WARNING' : 'DEFAULT',
+      statusMessage: event.message,
+      metadata: {
+        modelWaitLevel: event.level,
+        modelWaitElapsedMs: event.elapsedMs,
+        modelWaitThresholdMs: event.thresholdMs
       }
     })
   }
@@ -425,6 +465,29 @@ function agentMetadata(agent: HookAgentContext): Record<string, string> | undefi
   if ('agentName' in agent && agent.agentName) metadata.agentName = agent.agentName
   if ('teamName' in agent && agent.teamName) metadata.teamName = agent.teamName
   return metadata
+}
+
+function stepMetricMetadata(metrics: AgentStepMetricEvent['metrics'] | undefined): Record<string, unknown> {
+  if (!metrics) return {}
+  return {
+    ttftMs: metrics.ttftMs,
+    elapsedMs: metrics.elapsedMs,
+    tokensPerSecond: metrics.tokensPerSecond,
+    outputTokens: metrics.outputTokens
+  }
+}
+
+function maxModelWaitLevel(
+  current: AgentModelWaitEvent['level'] | undefined,
+  next: AgentModelWaitEvent['level']
+): AgentModelWaitEvent['level'] {
+  const rank: Record<AgentModelWaitEvent['level'], number> = {
+    waiting: 1,
+    slow: 2,
+    stalled: 3
+  }
+  if (!current) return next
+  return rank[next] > rank[current] ? next : current
 }
 
 function maskLangfuseData(value: unknown): unknown {

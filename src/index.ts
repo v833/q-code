@@ -294,6 +294,18 @@ const escalatedMaxOutputTokens = getNumberEnv(
   64000,
 );
 const compactMaxOutputTokens = getNumberEnv('COMPACT_MAX_OUTPUT_TOKENS', 20000);
+const modelWaitHeartbeatMs = getOptionalMillisecondsEnv(
+  'Q_CODE_MODEL_WAIT_HEARTBEAT_MS',
+);
+const modelSlowRequestWarnMs = getOptionalMillisecondsEnv(
+  'Q_CODE_MODEL_SLOW_REQUEST_WARN_MS',
+);
+const modelStalledRequestWarnMs = getOptionalMillisecondsEnv(
+  'Q_CODE_MODEL_STALLED_REQUEST_WARN_MS',
+);
+const modelRequestTimeoutMs = getOptionalMillisecondsEnv(
+  'Q_CODE_MODEL_REQUEST_TIMEOUT_MS',
+);
 const compactTriggerTokens = Math.floor(
   contextLimitTokens * compactTriggerRatio,
 );
@@ -373,6 +385,47 @@ function createSummaryModel() {
     model: summaryOpenai.chat(name),
     name,
   };
+}
+
+function getOptionalMillisecondsEnv(name: string): number | undefined {
+  const raw = process.env[name]?.trim();
+  if (!raw) return undefined;
+  const value = Number(raw.replace(/_/g, ''));
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} must be a non-negative number`);
+  }
+  return value;
+}
+
+function formatModelRequestLabel(modelName: string): string {
+  const baseUrl = safeEndpointLabel(process.env.OPENAI_BASE_URL);
+  return `${modelName} via ${baseUrl}`;
+}
+
+function safeEndpointLabel(raw: string | undefined): string {
+  if (!raw?.trim()) return 'OpenAI-compatible endpoint';
+  try {
+    const url = new URL(normalizeBaseURL(raw));
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return 'OpenAI-compatible endpoint';
+  }
+}
+
+function appendLongReportStreamingHint(systemPrompt: string, userQuery?: string): string {
+  if (!isLongReportRequest(userQuery)) return systemPrompt;
+  return `${systemPrompt}
+
+## 长报告流式输出策略
+
+如果用户要求报告、调研、评审、总结或长篇分析，先输出 3-6 条核心结论或提纲，让用户尽快看到首段结果；随后按「核心结论 → 证据/依据 → 风险/边界 → 下一步」分段展开。避免长时间沉默后一次性输出大段报告。`;
+}
+
+function isLongReportRequest(userQuery: string | undefined): boolean {
+  if (!userQuery) return false;
+  return /报告|调研|研究|总结|复盘|长文|长篇|看板|PRD|设计文档|全面分析|详细分析|系统分析|完整分析/i.test(
+    userQuery,
+  );
 }
 
 interface ParsedSessionArgs {
@@ -770,6 +823,11 @@ async function main() {
         getAgentMdContext: () => agentMdContext,
         getMaxOutputTokens: () => defaultMaxOutputTokens,
         getEscalatedMaxOutputTokens: () => escalatedMaxOutputTokens,
+        getModelWaitHeartbeatMs: () => modelWaitHeartbeatMs,
+        getModelSlowRequestWarnMs: () => modelSlowRequestWarnMs,
+        getModelStalledRequestWarnMs: () => modelStalledRequestWarnMs,
+        getModelRequestTimeoutMs: () => modelRequestTimeoutMs,
+        getModelRequestLabel: formatModelRequestLabel,
         getSessionId: () => sessionId,
         getCwd: options.getCwd,
         getHooks: () => hooks,
@@ -871,7 +929,7 @@ async function main() {
       taskContext: await getCurrentTaskContext(),
       todoContext: getCurrentTodoContext(),
     });
-    return builder.build(promptCtx);
+    return appendLongReportStreamingHint(builder.build(promptCtx), userQuery);
   }
 
   const initialPromptCtx = await buildPromptContext({
@@ -1386,6 +1444,11 @@ async function main() {
             escalatedMaxOutputTokens,
             quiet: useTui,
             modelName: currentModelName(),
+            modelWaitHeartbeatMs,
+            modelSlowRequestWarnMs,
+            modelStalledRequestWarnMs,
+            modelRequestTimeoutMs,
+            modelRequestLabel: formatModelRequestLabel(currentModelName()),
             abortSignal: turnAbortController.signal,
             sessionId,
             hooks,
@@ -1434,9 +1497,20 @@ async function main() {
               const totals = usageTracker.totals();
               activeStore.appendUsageV2(record, totals);
             },
+            onStepMetrics: (event) => {
+              langfuseTurn.onStepMetrics(event);
+            },
             onText: (text) => {
               langfuseTurn.onText(text);
               emitTerminal({ type: 'assistant_delta', text });
+            },
+            onModelWait: (event) => {
+              langfuseTurn.onModelWait(event);
+              if (useTui) {
+                setStatus(event.message, 'thinking');
+              } else {
+                process.stderr.write(`\n  [Model] ${event.message}\n`);
+              }
             },
             onToolProgress: (event) => {
               langfuseTurn.onToolProgress(event);

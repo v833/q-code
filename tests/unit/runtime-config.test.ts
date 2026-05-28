@@ -18,6 +18,10 @@ const ENV_KEYS = [
   'Q_CODE_LANGFUSE_FLUSH_AT',
   'Q_CODE_LANGFUSE_FLUSH_INTERVAL_SECONDS',
   'Q_CODE_LANGFUSE_TIMEOUT_SECONDS',
+  'Q_CODE_MODEL_WAIT_HEARTBEAT_MS',
+  'Q_CODE_MODEL_SLOW_REQUEST_WARN_MS',
+  'Q_CODE_MODEL_STALLED_REQUEST_WARN_MS',
+  'Q_CODE_MODEL_REQUEST_TIMEOUT_MS',
   'Q_CODE_HISTORY_SCOPE',
   'Q_CODE_HISTORY_DISABLED',
   'Q_CODE_HISTORY_REDACT',
@@ -174,6 +178,8 @@ describe('runtime config', () => {
         'openai_model = "alias-model"',
         '[runtime]',
         'context_limit_tokens = 12345',
+        'model_wait_heartbeat_ms = 11',
+        'model_slow_request_warn_ms = 31',
         'token_budget = 999999',
         'max_steps = 3',
         '[q_code]',
@@ -187,6 +193,8 @@ describe('runtime config', () => {
         'history_max_bytes = 2048',
         'history_runtime_limit = 50',
         'history_max_line_bytes = 4096',
+        'model_stalled_request_warn_ms = 61',
+        'model_request_timeout_ms = 120000',
         'mention_allow_abs = true',
         'shell_timeout_ms = 90000',
         '[langfuse]',
@@ -223,6 +231,10 @@ describe('runtime config', () => {
     expect(process.env.OPENAI_API_KEY).toBe('root-key')
     expect(process.env.OPENAI_MODEL).toBe('alias-model')
     expect(process.env.CONTEXT_LIMIT_TOKENS).toBe('12345')
+    expect(process.env.Q_CODE_MODEL_WAIT_HEARTBEAT_MS).toBe('11')
+    expect(process.env.Q_CODE_MODEL_SLOW_REQUEST_WARN_MS).toBe('31')
+    expect(process.env.Q_CODE_MODEL_STALLED_REQUEST_WARN_MS).toBe('61')
+    expect(process.env.Q_CODE_MODEL_REQUEST_TIMEOUT_MS).toBe('120000')
     expect(process.env.TOKEN_BUDGET).toBeUndefined()
     expect(process.env.MAX_STEPS).toBeUndefined()
     expect(process.env.Q_CODE_DEBUG).toBe('true')

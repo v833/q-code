@@ -245,6 +245,19 @@ describe('terminal state reducer', () => {
     expect(state.transcript).toHaveLength(0)
   })
 
+  it('keeps model wait heartbeat status out of transcript noise', () => {
+    let state = createInitialTerminalState()
+    state = terminalReducer(state, {
+      type: 'status',
+      status: 'thinking',
+      text: '正在等待模型响应... 10s'
+    })
+
+    expect(state.status).toBe('thinking')
+    expect(state.statusText).toBe('正在等待模型响应... 10s')
+    expect(state.transcript).toHaveLength(0)
+  })
+
   it('tracks session info for status bar chips without adding transcript noise', () => {
     let state = createInitialTerminalState()
     state = terminalReducer(state, {

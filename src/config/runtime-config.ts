@@ -43,7 +43,11 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     blocking_trigger_ratio: 'BLOCKING_TRIGGER_RATIO',
     default_max_output_tokens: 'DEFAULT_MAX_OUTPUT_TOKENS',
     escalated_max_output_tokens: 'ESCALATED_MAX_OUTPUT_TOKENS',
-    compact_max_output_tokens: 'COMPACT_MAX_OUTPUT_TOKENS'
+    compact_max_output_tokens: 'COMPACT_MAX_OUTPUT_TOKENS',
+    model_wait_heartbeat_ms: 'Q_CODE_MODEL_WAIT_HEARTBEAT_MS',
+    model_slow_request_warn_ms: 'Q_CODE_MODEL_SLOW_REQUEST_WARN_MS',
+    model_stalled_request_warn_ms: 'Q_CODE_MODEL_STALLED_REQUEST_WARN_MS',
+    model_request_timeout_ms: 'Q_CODE_MODEL_REQUEST_TIMEOUT_MS'
   },
   q_code: {
     session_dir: 'Q_CODE_SESSION_DIR',
@@ -73,7 +77,11 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     history_max_lines: 'Q_CODE_HISTORY_MAX_LINES',
     history_max_bytes: 'Q_CODE_HISTORY_MAX_BYTES',
     history_runtime_limit: 'Q_CODE_HISTORY_RUNTIME_LIMIT',
-    history_max_line_bytes: 'Q_CODE_HISTORY_MAX_LINE_BYTES'
+    history_max_line_bytes: 'Q_CODE_HISTORY_MAX_LINE_BYTES',
+    model_wait_heartbeat_ms: 'Q_CODE_MODEL_WAIT_HEARTBEAT_MS',
+    model_slow_request_warn_ms: 'Q_CODE_MODEL_SLOW_REQUEST_WARN_MS',
+    model_stalled_request_warn_ms: 'Q_CODE_MODEL_STALLED_REQUEST_WARN_MS',
+    model_request_timeout_ms: 'Q_CODE_MODEL_REQUEST_TIMEOUT_MS'
   },
   history: {
     scope: 'Q_CODE_HISTORY_SCOPE',

@@ -32,6 +32,11 @@ export interface RunAsyncAgentLifecycleParams {
   agentMdContext?: string
   maxOutputTokens?: number
   escalatedMaxOutputTokens?: number
+  modelWaitHeartbeatMs?: number
+  modelSlowRequestWarnMs?: number
+  modelStalledRequestWarnMs?: number
+  modelRequestTimeoutMs?: number
+  modelRequestLabel?: string
   sessionId?: string
   hooks?: HookRunner
   worktreeInfo?: WorktreeInfo
@@ -68,6 +73,11 @@ export async function runAsyncAgentLifecycle(params: RunAsyncAgentLifecycleParam
       agentMdContext: params.agentMdContext,
       maxOutputTokens: params.maxOutputTokens,
       escalatedMaxOutputTokens: params.escalatedMaxOutputTokens,
+      modelWaitHeartbeatMs: params.modelWaitHeartbeatMs,
+      modelSlowRequestWarnMs: params.modelSlowRequestWarnMs,
+      modelStalledRequestWarnMs: params.modelStalledRequestWarnMs,
+      modelRequestTimeoutMs: params.modelRequestTimeoutMs,
+      modelRequestLabel: params.modelRequestLabel,
       sessionId: params.sessionId,
       hooks: params.hooks,
       ...(params.worktreeInfo ? { cwdOverride: params.worktreeInfo.worktreePath } : {}),

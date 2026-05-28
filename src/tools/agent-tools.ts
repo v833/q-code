@@ -36,6 +36,11 @@ export interface AgentToolController {
   getAgentMdContext?: () => string | undefined
   getMaxOutputTokens?: () => number
   getEscalatedMaxOutputTokens?: () => number
+  getModelWaitHeartbeatMs?: () => number | undefined
+  getModelSlowRequestWarnMs?: () => number | undefined
+  getModelStalledRequestWarnMs?: () => number | undefined
+  getModelRequestTimeoutMs?: () => number | undefined
+  getModelRequestLabel?: (modelName: string) => string
   getSessionId?: () => string
   getCwd?: () => string
   getHooks?: () => HookRunner | undefined
@@ -222,6 +227,11 @@ export function createAgentTool(
             agentMdContext: controller.getAgentMdContext?.(),
             maxOutputTokens: controller.getMaxOutputTokens?.(),
             escalatedMaxOutputTokens: controller.getEscalatedMaxOutputTokens?.(),
+            modelWaitHeartbeatMs: controller.getModelWaitHeartbeatMs?.(),
+            modelSlowRequestWarnMs: controller.getModelSlowRequestWarnMs?.(),
+            modelStalledRequestWarnMs: controller.getModelStalledRequestWarnMs?.(),
+            modelRequestTimeoutMs: controller.getModelRequestTimeoutMs?.(),
+            modelRequestLabel: controller.getModelRequestLabel?.(modelName),
             sessionId,
             hooks: controller.getHooks?.() ?? context.hooks,
             ...(isolationSetup.worktreeInfo ? { worktreeInfo: isolationSetup.worktreeInfo } : {}),
@@ -287,6 +297,11 @@ export function createAgentTool(
           agentMdContext: controller.getAgentMdContext?.(),
           maxOutputTokens: controller.getMaxOutputTokens?.(),
           escalatedMaxOutputTokens: controller.getEscalatedMaxOutputTokens?.(),
+          modelWaitHeartbeatMs: controller.getModelWaitHeartbeatMs?.(),
+          modelSlowRequestWarnMs: controller.getModelSlowRequestWarnMs?.(),
+          modelStalledRequestWarnMs: controller.getModelStalledRequestWarnMs?.(),
+          modelRequestTimeoutMs: controller.getModelRequestTimeoutMs?.(),
+          modelRequestLabel: controller.getModelRequestLabel?.(modelName),
           sessionId,
           hooks: controller.getHooks?.() ?? context.hooks,
           ...(isolationSetup.worktreeInfo

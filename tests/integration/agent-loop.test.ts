@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ModelMessage } from 'ai'
 import { MockLanguageModelV3, simulateReadableStream } from 'ai/test'
 import { agentLoop } from '../../src/agent/loop'
+import { resetAuditLoggerForTests, type AuditLogger } from '../../src/observability/audit'
 import { ToolRegistry } from '../../src/tools/registry'
 import { createMockModel } from '../_helpers/mock-model'
 import { makeMockTool, makeRecordingTool } from '../_helpers/mock-tool'
@@ -17,6 +18,14 @@ import { makeMockTool, makeRecordingTool } from '../_helpers/mock-tool'
  *   - onText / onToolEvent / onUsage 回调按时序触发
  */
 describe('agentLoop 集成（mock model + mock tools）', () => {
+  beforeEach(() => {
+    resetAuditLoggerForTests(createAuditStub([]))
+  })
+
+  afterEach(() => {
+    resetAuditLoggerForTests()
+  })
+
   function makeRegistry(...tools: ReturnType<typeof makeMockTool>[]): ToolRegistry {
     const registry = new ToolRegistry({ cwd: '/tmp', quiet: true })
     registry.register(...tools)
@@ -334,6 +343,8 @@ describe('agentLoop 集成（mock model + mock tools）', () => {
 
   it('onStepUsage 返回归一化后的 rich usage', async () => {
     const registry = makeRegistry()
+    const auditRecords: Array<{ event: string; payload: Record<string, unknown> }> = []
+    resetAuditLoggerForTests(createAuditStub(auditRecords))
     const { model } = createMockModel([
       {
         text: '完成',
@@ -346,6 +357,7 @@ describe('agentLoop 集成（mock model + mock tools）', () => {
       model: string
       usage: { inputTokens: number; outputTokens: number; totalTokens: number }
       discarded: boolean
+      metrics?: { ttftMs: number | null; elapsedMs: number; outputTokens: number }
     }> = []
     await agentLoop(model, registry, [{ role: 'user', content: 'q' }], 'sys', {
       quiet: true,
@@ -359,6 +371,118 @@ describe('agentLoop 集成（mock model + mock tools）', () => {
       discarded: false,
       usage: { inputTokens: 30, outputTokens: 7, totalTokens: 37 }
     })
+    expect(stepUsages[0]?.metrics).toMatchObject({
+      outputTokens: 7
+    })
+    expect(typeof stepUsages[0]?.metrics?.elapsedMs).toBe('number')
+
+    const stepEnd = auditRecords.find((record) => record.event === 'agent.step.end')
+    expect(stepEnd?.payload).toMatchObject({
+      outputTokens: 7
+    })
+    expect(stepEnd?.payload).toHaveProperty('ttftMs')
+    expect(stepEnd?.payload).toHaveProperty('elapsedMs')
+    expect(stepEnd?.payload).toHaveProperty('tokensPerSecond')
+  })
+
+  it('首个可见输出前按阈值发送模型等待心跳', async () => {
+    const registry = makeRegistry()
+    const model = new MockLanguageModelV3({
+      provider: 'mock',
+      modelId: 'mock-model',
+      doStream: async () => ({
+        stream: new ReadableStream({
+          async start(controller) {
+            await delay(60)
+            controller.enqueue({ type: 'stream-start', warnings: [] })
+            controller.enqueue({ type: 'response-metadata', id: 'mock-1', modelId: 'mock-model' })
+            controller.enqueue({ type: 'text-start', id: 'text-1' })
+            controller.enqueue({ type: 'text-delta', id: 'text-1', delta: '完成' })
+            controller.enqueue({ type: 'text-end', id: 'text-1' })
+            controller.enqueue({
+              type: 'finish',
+              finishReason: 'stop',
+              usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 }
+            } as any)
+            controller.close()
+          }
+        }),
+        request: { body: '' },
+        response: { headers: {} }
+      })
+    })
+
+    const waits: Array<{ level: string; thresholdMs: number; message: string }> = []
+    await agentLoop(model, registry, [{ role: 'user', content: 'q' }], 'sys', {
+      quiet: true,
+      modelWaitHeartbeatMs: 5,
+      modelSlowRequestWarnMs: 15,
+      modelStalledRequestWarnMs: 30,
+      onModelWait: (event) => waits.push(event)
+    })
+
+    expect(waits.map((event) => event.level)).toEqual(['waiting', 'slow', 'stalled'])
+    expect(waits.map((event) => event.thresholdMs)).toEqual([5, 15, 30])
+    expect(waits[0]?.message).toContain('正在等待模型响应')
+  })
+
+  it('模型请求总超时会中止等待且错误信息不包含密钥', async () => {
+    const registry = makeRegistry()
+    const model = new MockLanguageModelV3({
+      provider: 'mock',
+      modelId: 'mock-model',
+      doStream: async () => ({
+        stream: new ReadableStream({
+          start() {
+            // 保持 pending，验证 agentLoop 自己的 timeout race 能打断等待。
+          }
+        }),
+        request: { body: '' },
+        response: { headers: {} }
+      })
+    })
+
+    let thrown: unknown
+    try {
+      await agentLoop(model, registry, [{ role: 'user', content: 'q' }], 'sys', {
+        quiet: true,
+        modelRequestTimeoutMs: 10,
+        modelRequestLabel: 'gpt-test via https://proxy.example.com/v1',
+        modelWaitHeartbeatMs: 0
+      })
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    const message = (thrown as Error).message
+    expect(message).toMatch(/超过 10ms 未返回/)
+    expect(message).not.toContain('sk-')
+  })
+
+  it('循环检测早停的 agent.step.end 也包含模型耗时指标', async () => {
+    const probe = makeMockTool('probe', () => 'same-result')
+    const registry = makeRegistry(probe)
+    const auditRecords: Array<{ event: string; payload: Record<string, unknown> }> = []
+    resetAuditLoggerForTests(createAuditStub(auditRecords))
+    const turns = Array.from({ length: 12 }, () => ({
+      tools: [{ name: 'probe', input: { value: 'same' } }],
+      usage: { inputTokens: 10, outputTokens: 1, totalTokens: 11 }
+    }))
+    const { model } = createMockModel(turns)
+
+    await agentLoop(model, registry, [{ role: 'user', content: '不停调用同一个工具' }], 'sys', {
+      quiet: true
+    })
+
+    const loopEnd = auditRecords.find(
+      (record) =>
+        record.event === 'agent.step.end' && record.payload.stopReason === 'loop_detection'
+    )
+    expect(loopEnd?.payload).toHaveProperty('ttftMs')
+    expect(loopEnd?.payload).toHaveProperty('elapsedMs')
+    expect(loopEnd?.payload).toHaveProperty('tokensPerSecond')
+    expect(loopEnd?.payload).toMatchObject({ outputTokens: 1 })
   })
 
   it('工具 envelope 错误会作为错误结果回调一次', async () => {
@@ -415,3 +539,16 @@ describe('agentLoop 集成（mock model + mock tools）', () => {
     expect(ids.sort()).toEqual(['A', 'B', 'C'])
   })
 })
+
+function createAuditStub(records: Array<{ event: string; payload: Record<string, unknown> }>): AuditLogger {
+  return {
+    emit: (event, payload = {}) => {
+      records.push({ event, payload })
+    },
+    flush: async () => {}
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
