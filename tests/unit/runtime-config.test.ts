@@ -22,6 +22,7 @@ const ENV_KEYS = [
   'Q_CODE_MODEL_SLOW_REQUEST_WARN_MS',
   'Q_CODE_MODEL_STALLED_REQUEST_WARN_MS',
   'Q_CODE_MODEL_REQUEST_TIMEOUT_MS',
+  'Q_CODE_TUI_CURSOR',
   'Q_CODE_MODEL_PROVIDER',
   'Q_CODE_THINKING_TYPE',
   'Q_CODE_REASONING_EFFORT',
@@ -183,6 +184,7 @@ describe('runtime config', () => {
         'context_limit_tokens = 12345',
         'model_wait_heartbeat_ms = 11',
         'model_slow_request_warn_ms = 31',
+        'tui_cursor = "inline"',
         'thinking_type = "enabled"',
         'reasoning_effort = "high"',
         'token_budget = 999999',
@@ -246,6 +248,7 @@ describe('runtime config', () => {
     expect(process.env.Q_CODE_MODEL_SLOW_REQUEST_WARN_MS).toBe('31')
     expect(process.env.Q_CODE_MODEL_STALLED_REQUEST_WARN_MS).toBe('61')
     expect(process.env.Q_CODE_MODEL_REQUEST_TIMEOUT_MS).toBe('120000')
+    expect(process.env.Q_CODE_TUI_CURSOR).toBe('inline')
     expect(process.env.Q_CODE_MODEL_PROVIDER).toBe('deepseek-compatible')
     expect(process.env.Q_CODE_THINKING_TYPE).toBe('adaptive')
     expect(process.env.Q_CODE_REASONING_EFFORT).toBe('xhigh')

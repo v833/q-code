@@ -129,6 +129,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
 - 文件工具的读类入口（`read_file` / `list_directory` / `glob` / `grep`）可只读访问用户级 q-code 信任目录：`~/.q-code`、`~/.agents/skills`、`~/.agents/agents`；写入和编辑仍必须限制在当前 `cwd` 内。Windows 下路径比较必须兼容盘符大小写与分隔符差异。不要恢复全局 `Q_CODE_ALLOW_OUTSIDE_CWD` 式开关。
 - Shell 工具默认只能在当前 `cwd` 内执行；跳出目录必须显式设置 `Q_CODE_SHELL_ALLOW_ABS_CWD=true`。长命令优先使用 `timeoutMs` 或 `background=true`，超大输出通过 `<Q_CODE_HOME>/shell-spills` 恢复全文，后台 job 元数据写 `<Q_CODE_HOME>/shell-jobs`。
 - TUI 输入历史默认写入 `<cwd>/.q-code/history.jsonl` 与 `<Q_CODE_HOME>/history/global.jsonl`（由 `Q_CODE_HISTORY_SCOPE=project|global|both` 控制），必须过滤空格开头、连续重复和默认敏感 pattern（除非 `history.excludeDefaults=false`）；`Q_CODE_HISTORY_REDACT=true` 时不得保存完整输入原文。
+- TUI 输入光标由 `Q_CODE_TUI_CURSOR=auto|ansi|inline|off` 控制；auto 下 VSCode、Cursor、Windsurf、Trae、JetBrains/IntelliJ IDEA 等 IDE 集成终端默认使用 inline 块光标，避免 ANSI 光标同步错位、闪烁或抖动。修改相关逻辑需覆盖 `src/terminal/cursor-mode.ts` 单测。
 - 自定义工具目录固定为 `~/.q-code/tools/<name>/` 与 `<cwd>/.q-code/tools/<name>/`；项目级覆盖用户级，用户级覆盖内置工具。每个工具目录必须提供 `schema.json`，其结构为 `Omit<ToolDefinition, 'isEnabled' | 'execute'> & { execute: string }`，其中 `execute` 会在该工具目录下作为 shell 命令运行。
 - Skills 目录支持 `~/.q-code/skills/<name>/SKILL.md`、`~/.agents/skills/<name>/SKILL.md`、`<cwd>/.q-code/skills/<name>/SKILL.md` 与 `<cwd>/.agents/skills/<name>/SKILL.md`；同名优先级为项目级 `.agents/skills` > 项目级 `.q-code/skills` > 用户级 `.agents/skills` > 用户级 `.q-code/skills`。
 - 新增 Slash 命令通过 `createSlashCommandRegistry` + `command(...)` 注册（见 `src/index.ts::createBuiltinSlashCommands`），并填好 `category`、`aliases`、`usage`，以便 `/help` 输出友好。

@@ -5,8 +5,10 @@ import React, { useLayoutEffect, useRef } from 'react'
 import { Box, Text, useStdout, type DOMElement } from 'ink'
 import {
   getInputCursorPosition,
+  renderInputWithCursor,
   renderPromptInputRows
 } from '../input'
+import { detectPromptCursorMode, type PromptCursorMode } from '../cursor-mode'
 import { animeTheme, formatPromptGlyph } from '../theme/index'
 
 /** 底部输入区；忙碌时隐藏。 */
@@ -24,8 +26,10 @@ export function InputPrompt({
   hasUndoClear?: boolean
 }): React.JSX.Element {
   const inputRef = useRef<DOMElement>(null)
-  const rows = renderPromptInputRows(value)
-  usePromptCursor({ ref: inputRef, value, cursor, isEnabled: !isBusy })
+  const cursorMode = detectPromptCursorMode()
+  const renderedValue = cursorMode === 'inline' ? renderInputWithCursor(value, cursor) : value
+  const rows = renderPromptInputRows(renderedValue)
+  usePromptCursor({ ref: inputRef, value, cursor, mode: cursorMode, isEnabled: !isBusy })
 
   if (isBusy) return <Box />
 
@@ -53,11 +57,13 @@ function usePromptCursor({
   ref,
   value,
   cursor,
+  mode,
   isEnabled
 }: {
   ref: React.RefObject<DOMElement>
   value: string
   cursor: number
+  mode: PromptCursorMode
   isEnabled: boolean
 }): void {
   const { stdout } = useStdout()
@@ -65,7 +71,19 @@ function usePromptCursor({
   useLayoutEffect(() => {
     if (!stdout.isTTY) return
 
-    if (!isEnabled || !ref.current?.yogaNode) {
+    if (!isEnabled || mode === 'off') {
+      stdout.write(Cursor.hide)
+      return
+    }
+
+    if (mode === 'inline') {
+      stdout.write(Cursor.hide)
+      return () => {
+        stdout.write(Cursor.show)
+      }
+    }
+
+    if (!ref.current?.yogaNode) {
       stdout.write(Cursor.hide)
       return
     }
