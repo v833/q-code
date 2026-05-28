@@ -1,7 +1,7 @@
 /**
  * 多行输入提示符：Ink 渲染文本行，并通过 ANSI 将真实终端光标同步到编辑位置。
  */
-import React, { useLayoutEffect, useRef } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Box, Text, useStdout, type DOMElement } from 'ink'
 import {
   getInputCursorPosition,
@@ -9,6 +9,15 @@ import {
   renderPromptInputRows
 } from '../input'
 import { animeTheme, formatPromptGlyph } from '../theme/index'
+
+function getInlineCursorBlinkMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.Q_CODE_TUI_CURSOR_BLINK_MS?.trim()
+  if (!raw) return 500
+  const value = Number(raw)
+  if (!Number.isFinite(value)) return 500
+  // 防止过小导致高频重渲染；也避免过大导致“像卡住”。
+  return Math.max(100, Math.min(10_000, Math.floor(value)))
+}
 
 /** 底部输入区；忙碌时隐藏。 */
 export function InputPrompt({
@@ -28,9 +37,27 @@ export function InputPrompt({
 }): React.JSX.Element {
   const inputRef = useRef<DOMElement>(null)
   const realCursorEnabled = useRealCursor ?? true
-  const rows = renderPromptInputRows(
-    realCursorEnabled ? value : renderInputWithCursor(value, cursor),
-  )
+  const [inlineCursorVisible, setInlineCursorVisible] = useState(true)
+
+  useEffect(() => {
+    // 仅在“假光标模式 + 非 busy”时闪烁；其它情况保持可见但不计时。
+    if (realCursorEnabled || isBusy) {
+      setInlineCursorVisible(true)
+      return
+    }
+    const timer = setInterval(() => {
+      setInlineCursorVisible((current) => !current)
+    }, getInlineCursorBlinkMs())
+    return () => clearInterval(timer)
+  }, [isBusy, realCursorEnabled])
+
+  const renderedValue = realCursorEnabled
+    ? value
+    : inlineCursorVisible
+      ? renderInputWithCursor(value, cursor)
+      : value
+
+  const rows = renderPromptInputRows(renderedValue)
   usePromptCursor({
     ref: inputRef,
     value,

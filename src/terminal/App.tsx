@@ -670,7 +670,7 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
           value={input.value}
           cursor={input.cursor}
           isBusy={isBusy || state.sessionPicker !== undefined || sessionPickerRenaming !== undefined}
-          useRealCursor={process.platform !== 'win32'}
+          useRealCursor={process.env.Q_CODE_TUI_CURSOR?.trim().toLowerCase() === 'ansi'}
           historySearchLabel={historySearchLabel}
           hasUndoClear={!input.value && input.clearedValue !== undefined}
         />

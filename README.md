@@ -139,7 +139,8 @@ cp .env.example .env
 | `Q_CODE_HISTORY_MAX_BYTES`     | ❌   | 单个历史文件最大字节数，默认 5MB                             |
 | `Q_CODE_HISTORY_RUNTIME_LIMIT` | ❌   | 启动时载入内存的最近历史数量，默认 2000                      |
 | `Q_CODE_HISTORY_MAX_LINE_BYTES` | ❌   | 单条 JSONL 历史记录最大字节数，默认 32KB                     |
-| `Q_CODE_TUI_CURSOR`            | ❌   | TUI 输入光标模式：`auto` / `ansi` / `inline` / `off`；默认 auto，IDE 集成终端自动使用 inline |
+| `Q_CODE_TUI_CURSOR`            | ❌   | TUI 输入光标模式：`ansi` / `inline` / `off`；默认 `inline`（假光标） |
+| `Q_CODE_TUI_CURSOR_BLINK_MS`   | ❌   | 假光标闪烁间隔毫秒，默认 500；仅在 `Q_CODE_TUI_CURSOR=inline` 时生效 |
 | `Q_CODE_LANGFUSE_ENABLED`      | ❌   | Langfuse/OpenTelemetry 导出开关，默认 false                  |
 | `LANGFUSE_PUBLIC_KEY`          | ❌   | Langfuse project public key，仅开启 Langfuse 时需要          |
 | `LANGFUSE_SECRET_KEY`          | ❌   | Langfuse project secret key，仅开启 Langfuse 时需要          |

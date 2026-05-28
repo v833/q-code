@@ -53,6 +53,7 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     model_stalled_request_warn_ms: 'Q_CODE_MODEL_STALLED_REQUEST_WARN_MS',
     model_request_timeout_ms: 'Q_CODE_MODEL_REQUEST_TIMEOUT_MS',
     tui_cursor: 'Q_CODE_TUI_CURSOR',
+    tui_cursor_blink_ms: 'Q_CODE_TUI_CURSOR_BLINK_MS',
     model_provider: 'Q_CODE_MODEL_PROVIDER',
     thinking_type: 'Q_CODE_THINKING_TYPE',
     reasoning_effort: 'Q_CODE_REASONING_EFFORT'
@@ -91,6 +92,7 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     model_stalled_request_warn_ms: 'Q_CODE_MODEL_STALLED_REQUEST_WARN_MS',
     model_request_timeout_ms: 'Q_CODE_MODEL_REQUEST_TIMEOUT_MS',
     tui_cursor: 'Q_CODE_TUI_CURSOR',
+    tui_cursor_blink_ms: 'Q_CODE_TUI_CURSOR_BLINK_MS',
     model_provider: 'Q_CODE_MODEL_PROVIDER',
     thinking_type: 'Q_CODE_THINKING_TYPE',
     reasoning_effort: 'Q_CODE_REASONING_EFFORT'
