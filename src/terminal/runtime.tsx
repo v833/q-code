@@ -25,6 +25,9 @@ export interface TerminalRuntimeOptions {
   onSessionPickerSelect?: (sessionId: string) => Promise<void> | void
   onInterrupt?: () => Promise<void> | void
   onModeToggle?: () => Promise<void> | void
+  onPlanEntryAccept?: (input: string) => Promise<void> | void
+  onPlanEntryDecline?: (input: string) => Promise<void> | void
+  onPlanEntryCancel?: (input: string) => Promise<void> | void
   onExit: () => Promise<void> | void
 }
 
@@ -59,6 +62,9 @@ export function startTerminalRuntime(options: TerminalRuntimeOptions): TerminalR
       onSessionPickerSelect={options.onSessionPickerSelect}
       onInterrupt={options.onInterrupt}
       onModeToggle={options.onModeToggle}
+      onPlanEntryAccept={options.onPlanEntryAccept}
+      onPlanEntryDecline={options.onPlanEntryDecline}
+      onPlanEntryCancel={options.onPlanEntryCancel}
       onExit={options.onExit}
     />,
     {

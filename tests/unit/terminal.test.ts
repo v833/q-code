@@ -281,6 +281,36 @@ describe('terminal state reducer', () => {
     expect(state.transcript).toHaveLength(0)
   })
 
+  it('tracks plan entry suggestions without adding transcript noise', () => {
+    let state = createInitialTerminalState()
+    state = terminalReducer(state, {
+      type: 'plan_entry_suggestion',
+      request: '完整重构 TUI 输入状态机',
+      reason: '任务可能涉及多文件或多阶段修改'
+    })
+
+    expect(state.planEntrySuggestion).toEqual({
+      request: '完整重构 TUI 输入状态机',
+      reason: '任务可能涉及多文件或多阶段修改'
+    })
+    expect(state.transcript).toHaveLength(0)
+
+    state = terminalReducer(state, { type: 'plan_entry_suggestion_clear' })
+    expect(state.planEntrySuggestion).toBeUndefined()
+  })
+
+  it('clears plan entry suggestions when the transcript is cleared', () => {
+    let state = createInitialTerminalState()
+    state = terminalReducer(state, {
+      type: 'plan_entry_suggestion',
+      request: '迁移配置体系',
+      reason: '任务可能涉及多文件或多阶段修改'
+    })
+    state = terminalReducer(state, { type: 'clear' })
+
+    expect(state.planEntrySuggestion).toBeUndefined()
+  })
+
   it('tracks session picker state without adding transcript noise', () => {
     let state = createInitialTerminalState()
     state = terminalReducer(state, {

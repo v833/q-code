@@ -729,7 +729,7 @@ Plan Mode 是"只看不动"的规划模式，适合复杂、多文件、需要�
 
 计划待确认时，可以直接回复自然语言：`可以`、`开始吧`、`ok`、`go` 等会批准并执行；`补充测试策略`、`调整风险说明` 等会作为反馈继续规划；`退出计划模式` 或 `取消` 会回到 normal 且不执行。否定语义优先，例如 `不要执行`、`先别开始` 不会误判为批准。本地规则无法判断时，会用当前会话模型做一次短超时 JSON intent judge 兜底；模型失败、超时或低置信度时仍回退到提示，不会猜测执行。
 
-普通输入也会做保守的本地语义判断：明确说 `先给方案`、`只分析不要修改`、`评估风险` 时会自动进入 Plan Mode；复杂执行型请求只提示建议先规划，不会静默强制切换。可用 `Q_CODE_PLAN_INTENT=auto|suggest|off` 控制智能入口；`Q_CODE_PLAN_INTENT_MODEL_TIMEOUT_MS=0` 可关闭 pending plan 模型兜底。TUI 中按 `Shift+Tab` 可切换 normal / plan，无法捕获该快捷键的终端可继续使用 `/mode toggle`。
+普通输入也会做保守的本地语义判断：明确说 `先给方案`、`只分析不要修改`、`评估风险` 时会自动进入 Plan Mode；复杂执行型请求会建议先规划，不会静默强制切换。TUI 会保留原请求并显示确认条：按 `Enter` 进入 Plan Mode 后继续原请求，按 `Esc` 按普通模式执行，按 `Ctrl+C` 取消且不执行。classic readline 只打印建议并继续执行当前请求。可用 `Q_CODE_PLAN_INTENT=auto|suggest|off` 控制智能入口；`Q_CODE_PLAN_INTENT_MODEL_TIMEOUT_MS=0` 可关闭 pending plan 模型兜底。TUI 中按 `Shift+Tab` 可切换 normal / plan，无法捕获该快捷键的终端可继续使用 `/mode toggle`。
 
 | 命令                  | 说明                           |
 | --------------------- | ------------------------------ |
@@ -1391,7 +1391,7 @@ System Prompt 由 `PromptBuilder` 按管道顺序拼接，每个 Pipe 可根据�
 
 ## CLI 命令总览
 
-交互式启动默认进入 TUI。快捷键：`Enter` 发送，`Ctrl+J` 换行，`↑/↓` 切换历史，`Ctrl+R` 搜索历史，`Esc` 清空/恢复输入，忙时 `Ctrl+C` 中断当前任务，空闲时 `Ctrl+C` 退出。需要旧版纯文本交互时使用 `pnpm start -- --classic` 或设置 `Q_CODE_TUI=0`。
+交互式启动默认进入 TUI。快捷键：`Enter` 发送，`Ctrl+J` 换行，`↑/↓` 切换历史，`Ctrl+R` 搜索历史，`Esc` 清空/恢复输入，忙时 `Ctrl+C` 中断当前任务，空闲时 `Ctrl+C` 退出。出现 Plan Mode 建议确认条时，`Enter` 进入 Plan 并继续原请求，`Esc` 按普通模式执行，`Ctrl+C` 取消建议。需要旧版纯文本交互时使用 `pnpm start -- --classic` 或设置 `Q_CODE_TUI=0`。
 
 TUI 状态栏默认只展示当前状态；需要查看模式、模型、cache 策略、任务系统、context 进度和 token 摘要时使用 `/status on` 打开详情，`/status off` 关闭。已完成历史会静态输出，流式输出期间只刷新当前轮，并限制 streaming 预览高度以减少 VSCode 等终端闪烁。执行中会同时保留中间进度旁白和工具调用摘要；等最终回答出现后，已完成工具调用会折叠，只留下对话内容。输入 `/` 时命令建议按类别分组展示，工具调用默认以一行紧凑摘要呈现，失败时显示恢复建议。
 

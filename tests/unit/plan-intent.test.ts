@@ -49,6 +49,25 @@ describe('plan intent', () => {
     expect(classifyPendingPlanIntent('显示计划')).toEqual({ type: 'show_plan' })
   })
 
+  it('treats negated exit and cancel phrases as revision feedback', () => {
+    expect(classifyPendingPlanIntent('不要退出，继续修计划')).toEqual({
+      type: 'revise',
+      feedback: '不要退出，继续修计划'
+    })
+    expect(classifyPendingPlanIntent('不要取消，补充测试')).toEqual({
+      type: 'revise',
+      feedback: '不要取消，补充测试'
+    })
+    expect(classifyPendingPlanIntent("don't exit, revise the rollout")).toEqual({
+      type: 'revise',
+      feedback: "don't exit, revise the rollout"
+    })
+    expect(classifyPendingPlanIntent("don't cancel")).toEqual({
+      type: 'revise',
+      feedback: "don't cancel"
+    })
+  })
+
   it('keeps short unclear pending plan replies unknown', () => {
     expect(classifyPendingPlanIntent('嗯')).toEqual({ type: 'unknown' })
     expect(classifyPendingPlanIntent('')).toEqual({ type: 'unknown' })

@@ -117,6 +117,14 @@ export type TerminalEvent =
       visible: boolean
     })
   | (TerminalBaseEvent & {
+      type: 'plan_entry_suggestion'
+      request: string
+      reason: string
+    })
+  | (TerminalBaseEvent & {
+      type: 'plan_entry_suggestion_clear'
+    })
+  | (TerminalBaseEvent & {
       type: 'progress'
       items: TerminalProgressItem[]
     })

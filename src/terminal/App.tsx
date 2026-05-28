@@ -27,6 +27,7 @@ import {
   ConversationView,
   Header,
   InputPrompt,
+  PlanEntrySuggestion,
   StatusBar
 } from './components'
 import { formatErrorMessage } from './utils/format'
@@ -65,6 +66,12 @@ export interface TerminalAppProps {
   onInterrupt?: () => Promise<void> | void
   /** 用户按 Shift+Tab 请求切换 Plan/Normal 模式。 */
   onModeToggle?: () => Promise<void> | void
+  /** 用户接受 TUI 内的 Plan Mode 入口建议。 */
+  onPlanEntryAccept?: (input: string) => Promise<void> | void
+  /** 用户拒绝 TUI 内的 Plan Mode 入口建议，按普通模式继续原请求。 */
+  onPlanEntryDecline?: (input: string) => Promise<void> | void
+  /** 用户取消 TUI 内的 Plan Mode 入口建议，不执行原请求。 */
+  onPlanEntryCancel?: (input: string) => Promise<void> | void
   /** 空闲时 Ctrl+C 或忙碌时连按 Ctrl+C 时调用，随后退出 Ink。 */
   onExit: () => Promise<void> | void
   /** 顶栏标题，默认 `q-code`。 */
@@ -433,6 +440,33 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
       return
     }
 
+    if (state.planEntrySuggestion && !isBusy) {
+      const request = state.planEntrySuggestion.request
+      if (key.return) {
+        dispatch({ type: 'plan_entry_suggestion_clear' })
+        setIsBusy(true)
+        void Promise.resolve(props.onPlanEntryAccept?.(request))
+          .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+          .finally(() => setIsBusy(false))
+        return
+      }
+      if (key.escape) {
+        dispatch({ type: 'plan_entry_suggestion_clear' })
+        setIsBusy(true)
+        void Promise.resolve(props.onPlanEntryDecline?.(request))
+          .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+          .finally(() => setIsBusy(false))
+        return
+      }
+      if (isCtrlC) {
+        dispatch({ type: 'plan_entry_suggestion_clear' })
+        void Promise.resolve(props.onPlanEntryCancel?.(request))
+          .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+        return
+      }
+      return
+    }
+
     if (isBusy && !isCtrlC) return
 
     if (state.modelsPicker && !isBusy) {
@@ -772,6 +806,7 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
         <StatusBar state={state} isBusy={isBusy} hasStreamingAssistant={hasStreamingAssistant} />
         <SessionPickerPanel picker={state.sessionPicker} renaming={sessionPickerRenaming} />
         <ModelsPickerPanel picker={state.modelsPicker} />
+        <PlanEntrySuggestion suggestion={state.planEntrySuggestion} />
         {suggestionsVisible ? (
           <CommandSuggestions
             suggestions={showFileMentions ? renderedFileMentions : renderedSlashCommands}

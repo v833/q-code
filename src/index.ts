@@ -622,6 +622,9 @@ async function main() {
   let needsPlanModeExitAttachment = false;
   let pendingPlanApproval = false;
   let pendingPlanSummary = '';
+  let pendingPlanEntrySuggestion:
+    | { input: string; reason: string }
+    | undefined;
   let pendingSessionSelection: PendingSessionSelection | undefined;
   let pendingSessionPurge: PendingSessionPurge | undefined;
   let canEmitSessionInfo = false;
@@ -1271,6 +1274,9 @@ async function main() {
         switchSession(targetSessionId, { clearTranscript: true }),
       onInterrupt: interruptActiveTurn,
       onModeToggle: () => togglePlanMode('shortcut'),
+      onPlanEntryAccept: (input) => acceptPlanEntrySuggestion(input),
+      onPlanEntryDecline: (input) => declinePlanEntrySuggestion(input),
+      onPlanEntryCancel: (input) => cancelPlanEntrySuggestion(input),
       onExit: closeCli,
     });
   }
@@ -1404,7 +1410,6 @@ async function main() {
         if (!closed) ask();
         return;
       }
-
       const routedInput = await routePlanEntryIntent(trimmed);
       if (!routedInput) {
         if (!closed) ask();
@@ -1596,13 +1601,13 @@ async function main() {
 
     if (intent.type === 'enter_plan') {
       if (planIntentMode === 'suggest') {
-        print(`\n  [Plan] ${intent.reason}。建议输入 /mode plan 后继续，或直接重发本请求。`);
+        print(`\n  [Plan] ${intent.reason}。建议输入 /mode plan 后继续；当前请求会按普通模式直接执行。`);
         getAuditLogger().emit(
           'plan.entry.suggested',
           { reason: intent.reason, mode: planIntentMode },
           { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
         );
-        return undefined;
+        return input;
       }
       setAgentMode('plan');
       print(`\n  [Plan] ${intent.reason}，已进入 Plan Mode。`);
@@ -1614,6 +1619,21 @@ async function main() {
       return input;
     }
 
+    if (useTui) {
+      pendingPlanEntrySuggestion = { input, reason: intent.reason };
+      emitTerminal({
+        type: 'plan_entry_suggestion',
+        request: input,
+        reason: intent.reason,
+      });
+      getAuditLogger().emit(
+        'plan.entry.suggested',
+        { reason: intent.reason, mode: planIntentMode, interactive: true },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+      return undefined;
+    }
+
     print(`\n  [Plan] ${intent.reason}。建议先规划：输入 /mode plan 后重发，或直接继续执行当前请求。`);
     getAuditLogger().emit(
       'plan.entry.suggested',
@@ -1621,6 +1641,54 @@ async function main() {
       { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
     );
     return input;
+  }
+
+  async function acceptPlanEntrySuggestion(input: string): Promise<void> {
+    const pending = pendingPlanEntrySuggestion;
+    pendingPlanEntrySuggestion = undefined;
+    emitTerminal({ type: 'plan_entry_suggestion_clear' });
+    setAgentMode('plan');
+    print(`\n  [Plan] 已进入 Plan Mode，继续原请求。`);
+    getAuditLogger().emit(
+      'plan.entry.accepted',
+      {
+        reason: pending?.reason,
+        input: createMessageSummaryPayload(input),
+      },
+      { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+    );
+    await runAgentTurn(input);
+  }
+
+  async function declinePlanEntrySuggestion(input: string): Promise<void> {
+    const pending = pendingPlanEntrySuggestion;
+    pendingPlanEntrySuggestion = undefined;
+    emitTerminal({ type: 'plan_entry_suggestion_clear' });
+    print(`\n  [Plan] 已按普通模式继续执行当前请求。`);
+    getAuditLogger().emit(
+      'plan.entry.declined',
+      {
+        reason: pending?.reason,
+        input: createMessageSummaryPayload(input),
+      },
+      { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+    );
+    await runAgentTurn(input);
+  }
+
+  function cancelPlanEntrySuggestion(input: string): void {
+    const pending = pendingPlanEntrySuggestion;
+    pendingPlanEntrySuggestion = undefined;
+    emitTerminal({ type: 'plan_entry_suggestion_clear' });
+    print(`\n  [Plan] 已取消 Plan 建议，未执行原请求。`);
+    getAuditLogger().emit(
+      'plan.entry.cancelled',
+      {
+        reason: pending?.reason,
+        input: createMessageSummaryPayload(input),
+      },
+      { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+    );
   }
 
   async function runAgentTurnWithMessages(

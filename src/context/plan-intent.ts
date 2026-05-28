@@ -12,13 +12,6 @@ export type PendingPlanIntent =
   | { type: 'show_plan' }
   | { type: 'unknown' }
 
-/** LLM judge 返回的原始 pending plan 意图。 */
-export interface PendingPlanIntentJudgeVerdict {
-  intent: PendingPlanIntent['type']
-  confidence: number
-  feedback?: string
-}
-
 /** 普通输入进入 Agent turn 前的 Plan Mode 路由建议。 */
 export type PlanEntryIntent =
   | { type: 'enter_plan'; reason: string }
@@ -121,8 +114,21 @@ const NEGATION_PATTERNS = [
   'do not',
   "don't",
   'dont',
+  'don t',
   'not yet',
-  'hold on'
+  'hold on',
+  '不要退出',
+  '别退出',
+  '不要取消',
+  '别取消',
+  'do not exit',
+  "don't exit",
+  'dont exit',
+  'don t exit',
+  'do not cancel',
+  "don't cancel",
+  'dont cancel',
+  'don t cancel'
 ]
 
 const REVISE_HINTS = [
@@ -229,13 +235,13 @@ export function classifyPendingPlanIntent(input: string): PendingPlanIntent {
   const normalized = normalizeUserInput(input)
   if (!normalized) return { type: 'unknown' }
 
-  if (containsAny(normalized, EXIT_EXACT)) return { type: 'exit' }
-  if (containsAny(normalized, CANCEL_EXACT)) return { type: 'cancel' }
-  if (SHOW_PLAN_EXACT.includes(normalized)) return { type: 'show_plan' }
-
   const hasNegation = containsAny(normalized, NEGATION_PATTERNS)
   const hasReviseHint = containsAny(normalized, REVISE_HINTS)
   if (hasNegation || hasReviseHint) return { type: 'revise', feedback: input.trim() }
+
+  if (containsAny(normalized, EXIT_EXACT)) return { type: 'exit' }
+  if (containsAny(normalized, CANCEL_EXACT)) return { type: 'cancel' }
+  if (SHOW_PLAN_EXACT.includes(normalized)) return { type: 'show_plan' }
 
   if (APPROVE_EXACT.has(normalized)) return { type: 'approve' }
   if (containsAny(normalized, APPROVE_PATTERNS)) return { type: 'approve' }

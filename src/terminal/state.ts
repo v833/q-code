@@ -74,6 +74,10 @@ export interface TerminalState {
   usage?: TerminalUsage
   sessionInfo?: TerminalSessionInfo
   statusDetailsVisible: boolean
+  planEntrySuggestion?: {
+    request: string
+    reason: string
+  }
   slashCommands: SlashCommandSuggestion[]
   sessionPicker?: {
     sessions: SessionSummary[]
@@ -104,6 +108,7 @@ export function createInitialTerminalState(): TerminalState {
     status: 'idle',
     statusText: 'Ready',
     statusDetailsVisible: false,
+    planEntrySuggestion: undefined,
     slashCommands: [],
     sessionPicker: undefined,
     modelsPicker: undefined,
@@ -389,6 +394,21 @@ export function terminalReducer(state: TerminalState, event: TerminalEvent): Ter
         statusDetailsVisible: event.visible
       }
 
+    case 'plan_entry_suggestion':
+      return {
+        ...state,
+        planEntrySuggestion: {
+          request: event.request,
+          reason: event.reason
+        }
+      }
+
+    case 'plan_entry_suggestion_clear':
+      return {
+        ...state,
+        planEntrySuggestion: undefined
+      }
+
     case 'error':
       return appendItem(
         {
@@ -411,6 +431,7 @@ export function terminalReducer(state: TerminalState, event: TerminalEvent): Ter
         transcript: [],
         activeAssistantId: undefined,
         activeToolIds: {},
+        planEntrySuggestion: undefined,
         progressItems: [],
         backgroundAgents: [],
         status: 'idle',
