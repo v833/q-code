@@ -78,6 +78,26 @@ describe('file mention index cache store', () => {
     expect(searchFileMentionIndex(refreshed, 'cached')[0]?.path).toBe('cached.ts')
   })
 
+  it('filters q-code internal paths from older cache files', () => {
+    const cwd = tmp()
+    const cachePath = getFileMentionIndexCachePath(cwd)
+    writeCachedIndex(cachePath, cwd, [
+      '.q-code/file-mention-index.json',
+      '.sessions/session.jsonl',
+      'src/visible.ts'
+    ])
+
+    const store = trackStore(
+      createFileMentionIndexStore(cwd, {
+        maxFiles: 10,
+        autoRefresh: false,
+        watchFiles: false
+      })
+    )
+
+    expect(store.getSnapshot().files).toEqual(['src/visible.ts'])
+  })
+
   it('refreshes candidates after files are added during a session', async () => {
     const cwd = tmp()
     mkdirSync(join(cwd, 'src'), { recursive: true })
@@ -128,6 +148,32 @@ describe('file mention index cache store', () => {
       { timeout: 3_000, interval: 25 }
     )
     expect(watcher.close).not.toHaveBeenCalled()
+  })
+
+  it('falls back to polling and shows a notice when file watching is unavailable', async () => {
+    const cwd = tmp()
+    const files: string[] = []
+    const store = trackStore(
+      createFileMentionIndexStore(cwd, {
+        autoRefresh: false,
+        watchFallbackPollMs: 20,
+        buildIndex: async () => createIndex(cwd, [...files]),
+        watchFactory: () => {
+          throw new Error('watch not supported')
+        }
+      })
+    )
+
+    expect(fileMentionIndexNotice(store.getSnapshot())).toContain('文件监听不可用')
+    files.push('polled.ts')
+
+    await vi.waitFor(
+      () => {
+        expect(store.getSnapshot().files).toContain('polled.ts')
+      },
+      { timeout: 3_000, interval: 25 }
+    )
+    expect(fileMentionIndexNotice(store.getSnapshot())).toContain('文件监听不可用')
   })
 
   it('passes configurable fallback ignore directories to recursive walk', async () => {
@@ -182,7 +228,6 @@ function writeCachedIndex(cachePath: string, cwd: string, files: string[]): void
         cwd: resolve(cwd),
         maxFiles: 10,
         savedAt: '2026-05-28T00:00:00.000Z',
-        gitHead: 'test-head',
         index: {
           source: 'git',
           files,

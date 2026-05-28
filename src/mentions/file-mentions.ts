@@ -29,6 +29,7 @@ const READ_CHUNK_BYTES = 64 * 1024
 const MAX_SELECTOR_SCAN_BYTES = 2 * 1024 * 1024
 const MAX_REGEX_PATTERN_CHARS = 120
 const MAX_REGEX_LINE_CHARS = 200
+const INTERNAL_INDEX_SKIP_DIRS = new Set(['.q-code', '.sessions', '.playground', '.playwright-mcp'])
 const FALLBACK_SKIP_DIRS = new Set([
   '.git',
   '.hg',
@@ -36,8 +37,7 @@ const FALLBACK_SKIP_DIRS = new Set([
   'node_modules',
   'dist',
   'coverage',
-  '.q-code',
-  '.sessions'
+  ...INTERNAL_INDEX_SKIP_DIRS
 ])
 const GIT_LOCAL_ENV_KEYS = [
   'GIT_ALTERNATE_OBJECT_DIRECTORIES',
@@ -69,6 +69,8 @@ export interface FileMentionIndex {
   updatedAt?: string
   /** 索引构建失败时的说明。 */
   error?: string
+  /** 索引仍可用但需要展示给用户的非阻塞提示。 */
+  notice?: string
 }
 
 /** fuzzy 搜索单条候选及其得分。 */
@@ -416,6 +418,7 @@ export function createUserMentionPayload(expansion: FileMentionExpansion): Recor
 /** 索引被裁剪时返回 TUI 提示文案；未裁剪时返回 `undefined`。 */
 export function fileMentionIndexNotice(index: FileMentionIndex): string | undefined {
   if (index.error) return `@file 索引刷新失败，继续使用现有候选: ${compactNotice(index.error)}`
+  if (index.notice) return compactNotice(index.notice)
   if (!index.truncated) return undefined
   return `@file 候选已裁剪到 ${FILE_MENTION_MAX_INDEX_FILES} 个文件，继续输入可缩小范围`
 }
@@ -618,7 +621,7 @@ function readGitFileIndex(cwd: string, maxFiles: number): Promise<FileMentionInd
       while (nullIndex >= 0) {
         const file = normalizeDisplayPath(buffered.subarray(0, nullIndex).toString('utf-8'))
         buffered = buffered.subarray(nullIndex + 1)
-        if (file) {
+        if (file && !shouldSkipInternalIndexPath(file)) {
           totalFiles++
           if (files.length < maxFiles) files.push(file)
           if (totalFiles > maxFiles) {
@@ -736,6 +739,11 @@ function normalizeQuery(value: string): string {
 
 function normalizeDisplayPath(value: string): string {
   return value.replaceAll(sep, '/').replace(/\\/g, '/').replace(/^\.\//, '')
+}
+
+function shouldSkipInternalIndexPath(path: string): boolean {
+  const firstSegment = path.split('/')[0]
+  return firstSegment ? INTERNAL_INDEX_SKIP_DIRS.has(firstSegment) : false
 }
 
 function compactNotice(value: string): string {

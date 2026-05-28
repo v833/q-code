@@ -100,6 +100,21 @@ describe('file mention fuzzy index', () => {
     expect(index.files).toHaveLength(3)
     expect(index.truncated).toBe(true)
   })
+
+  it('does not include q-code internal storage from git indexes', async () => {
+    const cwd = tmp()
+    execFileSync('git', ['init'], { cwd, env: createIsolatedGitEnv(), stdio: 'ignore' })
+    mkdirSync(join(cwd, '.q-code'), { recursive: true })
+    mkdirSync(join(cwd, '.sessions'), { recursive: true })
+    writeFileSync(join(cwd, '.q-code', 'file-mention-index.json'), '{}', 'utf-8')
+    writeFileSync(join(cwd, '.sessions', 'session.jsonl'), '{}', 'utf-8')
+    writeFileSync(join(cwd, 'visible.ts'), 'visible', 'utf-8')
+
+    const index = await createFileMentionIndex(cwd, 10)
+
+    expect(index.source).toBe('git')
+    expect(index.files).toEqual(['visible.ts'])
+  })
 })
 
 describe('file mention expansion', () => {

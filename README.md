@@ -221,7 +221,7 @@ pnpm run continue       # 恢复上次会话
 路径含空格 @"My Project/notes.md"
 ```
 
-默认只允许引用当前工作目录内的文件，并会校验 symlink 指向的真实路径；绝对路径如 `@/etc/passwd` 会被阻止，确需引用绝对路径时设置 `Q_CODE_MENTION_ALLOW_ABS=true`。单个引用最多注入 50KB，单轮全部引用合计最多 200KB，超出时会截断或明确提示丢弃。文件候选优先使用 git 索引，非 git 目录会回退递归扫描；索引会缓存到 `<cwd>/.q-code/file-mention-index.json`，下次启动先用缓存并在后台刷新。TUI 会监听文件变更并 debounce 刷新候选，刷新失败时继续使用旧索引并显示简短提示；超过 20000 个文件时候选会裁剪并在 TUI 中提示。fallback walk 默认跳过 `.q-code`、`.sessions` 等本地目录，可用 `Q_CODE_FILE_INDEX_IGNORE=build,out` 追加忽略目录。
+默认只允许引用当前工作目录内的文件，并会校验 symlink 指向的真实路径；绝对路径如 `@/etc/passwd` 会被阻止，确需引用绝对路径时设置 `Q_CODE_MENTION_ALLOW_ABS=true`。单个引用最多注入 50KB，单轮全部引用合计最多 200KB，超出时会截断或明确提示丢弃。文件候选优先使用 git 索引，非 git 目录会回退递归扫描；索引会缓存到 `<cwd>/.q-code/file-mention-index.json`，下次启动先用缓存并在后台刷新。TUI 会监听文件变更并 debounce 刷新候选；如果 watcher 不可用，会显示简短提示并降级为定时刷新。刷新失败时继续使用旧索引；超过 20000 个文件时候选会裁剪并在 TUI 中提示。fallback walk 默认跳过 `.q-code`、`.sessions` 等本地目录，可用 `Q_CODE_FILE_INDEX_IGNORE=build,out` 追加忽略目录。
 
 ### npm 发布
 

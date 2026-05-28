@@ -1,19 +1,18 @@
 /**
  * `@file` 候选索引缓存与后台刷新：启动先用项目缓存，再异步重建并监听文件变化。
  */
-import { execFile } from 'node:child_process'
 import { existsSync, readFileSync, statSync, watch, type FSWatcher } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { promisify } from 'node:util'
 import { writeJsonAtomic } from '../utils/atomic-write'
 import { createEmptyFileMentionIndex, createFileMentionIndex, FILE_MENTION_MAX_INDEX_FILES, type FileMentionIndex } from './file-mentions'
 
-const execFileAsync = promisify(execFile)
 const CACHE_VERSION = 1
 const MAX_CACHE_BYTES = 25 * 1024 * 1024
 const DEFAULT_REFRESH_DEBOUNCE_MS = 1_000
+const DEFAULT_WATCH_FALLBACK_POLL_MS = 10_000
 const DEFAULT_FILE_INDEX_IGNORE = ['.q-code', '.sessions', '.playground', '.playwright-mcp']
+const INTERNAL_CACHE_SKIP_PREFIXES = ['.q-code/', '.sessions/', '.playground/', '.playwright-mcp/']
 
 type FileMentionIndexWatchFactory = (
   cwd: string,
@@ -40,6 +39,7 @@ export interface CreateFileMentionIndexStoreOptions {
   autoRefresh?: boolean
   watchFiles?: boolean
   refreshDebounceMs?: number
+  watchFallbackPollMs?: number
   cachePath?: string
   ignoreDirs?: string[]
   env?: NodeJS.ProcessEnv
@@ -52,7 +52,6 @@ interface FileMentionIndexCacheFile {
   cwd: string
   maxFiles: number
   savedAt: string
-  gitHead?: string
   index: {
     source: 'git' | 'walk'
     files: string[]
@@ -80,14 +79,17 @@ class DefaultFileMentionIndexStore implements FileMentionIndexStore {
   private readonly cachePath: string
   private readonly ignoreDirs: string[]
   private readonly refreshDebounceMs: number
+  private readonly watchFallbackPollMs: number
   private readonly buildIndex: (cwd: string, maxFiles: number, ignoreDirs: string[]) => Promise<FileMentionIndex>
   private readonly watchFactory: FileMentionIndexWatchFactory
   private readonly listeners = new Set<(index: FileMentionIndex) => void>()
   private watcher?: FileMentionIndexWatchHandle
   private refreshTimer?: ReturnType<typeof setTimeout>
+  private fallbackPollTimer?: ReturnType<typeof setInterval>
   private refreshInFlight?: Promise<FileMentionIndex>
   private refreshAgain = false
   private closed = false
+  private watchNotice?: string
   private snapshot: FileMentionIndex
 
   constructor(cwd: string, options: CreateFileMentionIndexStoreOptions) {
@@ -96,6 +98,7 @@ class DefaultFileMentionIndexStore implements FileMentionIndexStore {
     this.cachePath = options.cachePath ?? getFileMentionIndexCachePath(this.cwd)
     this.ignoreDirs = resolveIgnoreDirs(options)
     this.refreshDebounceMs = options.refreshDebounceMs ?? DEFAULT_REFRESH_DEBOUNCE_MS
+    this.watchFallbackPollMs = options.watchFallbackPollMs ?? DEFAULT_WATCH_FALLBACK_POLL_MS
     this.buildIndex =
       options.buildIndex ??
       ((root, maxFiles, ignoreDirs) => createFileMentionIndex(root, maxFiles, { ignoreDirs }))
@@ -144,6 +147,8 @@ class DefaultFileMentionIndexStore implements FileMentionIndexStore {
     this.closed = true
     if (this.refreshTimer) clearTimeout(this.refreshTimer)
     this.refreshTimer = undefined
+    if (this.fallbackPollTimer) clearInterval(this.fallbackPollTimer)
+    this.fallbackPollTimer = undefined
     this.watcher?.close()
     this.watcher = undefined
     this.listeners.clear()
@@ -154,7 +159,8 @@ class DefaultFileMentionIndexStore implements FileMentionIndexStore {
       const index = {
         ...(await this.buildIndex(this.cwd, this.maxFiles, this.ignoreDirs)),
         updatedAt: new Date().toISOString(),
-        error: undefined
+        error: undefined,
+        notice: this.watchNotice
       }
       this.setSnapshot(index)
       await writeCachedFileMentionIndex(this.cachePath, this.cwd, this.maxFiles, index)
@@ -177,9 +183,8 @@ class DefaultFileMentionIndexStore implements FileMentionIndexStore {
 
     try {
       this.watcher = this.watchFactory(this.cwd, { recursive: true }, onChange)
-      this.watcher.on('error', () => {
-        this.watcher?.close()
-        this.watcher = undefined
+      this.watcher.on('error', (error) => {
+        this.handleWatcherFailure(error)
       })
       return
     } catch {
@@ -188,12 +193,12 @@ class DefaultFileMentionIndexStore implements FileMentionIndexStore {
 
     try {
       this.watcher = this.watchFactory(this.cwd, { recursive: false }, onChange)
-      this.watcher.on('error', () => {
-        this.watcher?.close()
-        this.watcher = undefined
+      this.startFallbackPolling()
+      this.watcher.on('error', (error) => {
+        this.handleWatcherFailure(error)
       })
     } catch {
-      this.watcher = undefined
+      this.handleWatcherFailure(new Error('file watcher unavailable'))
     }
   }
 
@@ -210,6 +215,22 @@ class DefaultFileMentionIndexStore implements FileMentionIndexStore {
     this.snapshot = index
     for (const listener of this.listeners) listener(index)
   }
+
+  private handleWatcherFailure(error: unknown): void {
+    if (this.closed) return
+    this.watcher?.close()
+    this.watcher = undefined
+    this.startFallbackPolling()
+    this.watchNotice = `@file 文件监听不可用，已改为定时刷新: ${formatIndexRefreshError(error)}`
+    this.setSnapshot({ ...this.snapshot, notice: this.watchNotice })
+  }
+
+  private startFallbackPolling(): void {
+    if (this.closed || this.fallbackPollTimer) return
+    this.fallbackPollTimer = setInterval(() => {
+      this.refresh().catch(() => undefined)
+    }, this.watchFallbackPollMs)
+  }
 }
 
 function readCachedFileMentionIndex(
@@ -223,10 +244,12 @@ function readCachedFileMentionIndex(
     const parsed = JSON.parse(readFileSync(cachePath, 'utf-8')) as unknown
     const cache = validateCacheFile(parsed, cwd, maxFiles)
     if (!cache) return undefined
+    const files = cache.index.files.filter((file) => !shouldSkipCachedIndexPath(file))
+    const removed = cache.index.files.length - files.length
     return {
       cwd,
-      files: cache.index.files,
-      totalFiles: cache.index.totalFiles,
+      files,
+      totalFiles: Math.max(files.length, cache.index.totalFiles - removed),
       truncated: cache.index.truncated,
       source: 'cache',
       cachedSource: cache.index.source,
@@ -244,13 +267,11 @@ async function writeCachedFileMentionIndex(
   index: FileMentionIndex
 ): Promise<void> {
   if (index.source === 'empty' || index.source === 'cache') return
-  const gitHead = await readGitHead(cwd)
   const cache: FileMentionIndexCacheFile = {
     version: CACHE_VERSION,
     cwd,
     maxFiles,
     savedAt: index.updatedAt ?? new Date().toISOString(),
-    ...(gitHead ? { gitHead } : {}),
     index: {
       source: index.source,
       files: index.files,
@@ -280,27 +301,12 @@ function validateCacheFile(
     cwd,
     maxFiles,
     savedAt: typeof record.savedAt === 'string' ? record.savedAt : new Date(0).toISOString(),
-    ...(typeof record.gitHead === 'string' ? { gitHead: record.gitHead } : {}),
     index: {
       source: index.source,
       files: index.files,
       totalFiles: index.totalFiles,
       truncated: index.truncated
     }
-  }
-}
-
-async function readGitHead(cwd: string): Promise<string | undefined> {
-  try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
-      cwd,
-      timeout: 2_000,
-      env: createGitEnv()
-    })
-    const head = stdout.trim()
-    return head || undefined
-  } catch {
-    return undefined
   }
 }
 
@@ -332,27 +338,15 @@ function shouldIgnoreWatchEvent(filename: string | Buffer | null): boolean {
   return normalized.startsWith('.q-code/') || normalized === '.q-code' || normalized.startsWith('.git/')
 }
 
+function shouldSkipCachedIndexPath(path: string): boolean {
+  const normalized = path.replace(/\\/g, '/').replace(/^\.\//, '')
+  return INTERNAL_CACHE_SKIP_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+}
+
 function formatIndexRefreshError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   const compact = message.replace(/\s+/g, ' ').trim()
   return compact.length > 120 ? `${compact.slice(0, 119)}…` : compact || 'unknown error'
-}
-
-function createGitEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env }
-  for (const key of [
-    'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-    'GIT_DIR',
-    'GIT_INDEX_FILE',
-    'GIT_INTERNAL_SUPER_PREFIX',
-    'GIT_OBJECT_DIRECTORY',
-    'GIT_PREFIX',
-    'GIT_QUARANTINE_PATH',
-    'GIT_WORK_TREE'
-  ]) {
-    delete env[key]
-  }
-  return env
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
