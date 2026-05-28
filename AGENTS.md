@@ -4,7 +4,7 @@
 
 `q-code` 是一个基于 Vercel AI SDK 的 TypeScript 命令行 Agent 框架。核心能力包括：
 
-- **Agent / 任务**：Agent Loop、Plan Mode、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、项目记忆、Skills、SubAgent、Agent Teams、Worktree 隔离。
+- **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、项目记忆、Skills、SubAgent、Agent Teams、Worktree 隔离。
 - **工具执行**：文件/搜索工具、可配置超时与 spill 的 Shell 工具（Windows 优先 PowerShell7，缺失时回退 Windows PowerShell 5.1）、后台 Shell job（`f_status` / `f_tail` / `f_kill` / `f_list`）。
 - **集成扩展**：MCP server、Hooks（pre/post tool-use 决策）、Slash 命令注册表、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
 - **可观测性**：NDJSON 审计日志（默认开启）、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警。
@@ -81,7 +81,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
 - `src/index.ts`：CLI 启动、交互循环、模式切换、上下文压缩调度和整体编排。
 - `src/agent/`：核心 Agent Loop、重试、循环检测、模型等待心跳与单步模型请求超时。
 - `src/agents/`：SubAgent、后台 Agent、Agent Teams、worktree、mailbox、notification-store。
-- `src/context/`：System Prompt 管道、上下文压缩与 offload、任务、Todo、记忆、运行环境和项目指令加载。
+- `src/context/`：System Prompt 管道、上下文压缩与 offload、Plan Mode 附件/计划文件/意图识别、任务、Todo、记忆、运行环境和项目指令加载。
 - `src/tools/`：内置工具定义、注册表（含审计/Hooks 包装层）、自定义工具目录加载器、文件/搜索/计划/任务/团队/Memory/Skill/GitLab KB/Agent 等工具；`shell-tools.ts` 负责 `f`、后台 shell job、输出 spill、cwd 策略和危险命令/交互保护。
 - `src/mcp/`：MCP 配置、连接、工具适配和注册表。
 - `src/skills/`：Skills 加载、预算、条件激活和斜杠命令展开。
@@ -123,6 +123,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
 - Prompt、工具描述、项目说明多为中文；新增用户可见文案时优先保持中文一致性。
 - 新增环境变量需同时更新：(a) `.env.example`；(b) `src/config/runtime-config.ts` 的 `SECTION_ALIASES`（让 toml 配置可用）；(c) README 配置表。
 - 模型等待诊断通过 `Q_CODE_MODEL_WAIT_HEARTBEAT_MS` / `Q_CODE_MODEL_SLOW_REQUEST_WARN_MS` / `Q_CODE_MODEL_STALLED_REQUEST_WARN_MS` 控制 10/30/60s 首 token 心跳；`Q_CODE_MODEL_REQUEST_TIMEOUT_MS` 控制单步模型请求总超时（默认 0/未设置为不启用），错误提示必须只包含脱敏 endpoint，不得包含 API key。
+- Plan Mode 语义入口由 `Q_CODE_PLAN_INTENT=auto|suggest|off` 控制，默认 `auto`。pending plan 的自然语言审批必须先走本地 deterministic fast-path、否定词优先、保守批准；本地 unknown 时可用当前会话模型做短超时 JSON intent judge 兜底（`Q_CODE_PLAN_INTENT_MODEL_TIMEOUT_MS`，默认 3000ms，0 关闭），模型失败、超时或低置信度必须回退 unknown。复杂执行型任务只建议进入 Plan Mode，不得静默强制切换。修改相关逻辑需覆盖 `tests/unit/plan-intent.test.ts` 并同步 README、`.env.example`、`AGENTS.md`、`src/config/runtime-config.ts`。
 - Agent Loop 必须保留 AI SDK reasoning part（如 DeepSeek thinking/reasoner 的 `reasoning_content`）并随 assistant 消息回传给后续模型请求；`Q_CODE_MODEL_PROVIDER` / `Q_CODE_THINKING_TYPE` / `Q_CODE_REASONING_EFFORT` 是通用 reasoning 配置，主 Agent、SubAgent、摘要压缩、real-agent eval 与 LLM judge 都应统一接入。OpenAI 官方 provider 通过 `providerOptions.openai.reasoningEffort` 接收；DeepSeek 命中或显式设置 `Q_CODE_MODEL_PROVIDER=deepseek-compatible` 时走官方 `@ai-sdk/openai-compatible` provider 和 `src/runtime/deepseek-compat.ts` 请求体兼容层；`Q_CODE_REASONING_EFFORT=none` 对 DeepSeek 应关闭 thinking，不能回退为高强度推理。DeepSeek V4 Pro thinking + tools 只可静默移除默认 `tool_choice=auto`，显式 `required` 或指定函数必须报清晰错误，避免吞掉调用意图。reasoning 不作为普通 `onText` 文本输出到 TUI。
 - 工具默认通过 `ToolRegistry.toAISDKFormat` 包装，会自动写 `tool.call` / `tool.result` 审计事件；新增工具入口或绕过 registry 时需自行接审计与 Hooks 管线（参考 `src/observability/audit.ts::getAuditLogger`）。
 - `@file` mention 默认只能引用当前工作目录内文件，并必须校验 symlink 解析后的真实路径；绝对路径必须显式设置 `Q_CODE_MENTION_ALLOW_ABS=true`，并写 `user.mention` 审计事件。单文件/总附件预算变更需同步 README 和 `src/mentions/file-mentions.ts` 常量。TUI 候选索引缓存写入 `<cwd>/.q-code/file-mention-index.json`，启动可先使用旧缓存并后台刷新；watcher/刷新失败不得阻塞输入，需保留旧索引并显示简短提示。非 git fallback walk 的额外忽略目录通过 `Q_CODE_FILE_INDEX_IGNORE` 配置。
@@ -146,10 +147,12 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
   - Hooks 改动：`vitest run tests/unit/hooks.test.ts`
   - Slash 改动：`vitest run tests/unit/slash.test.ts`
   - Tool registry 改动：`vitest run tests/unit/tool-registry.test.ts`
+  - 文件/读写工具改动：`vitest run tests/unit/file-tools.test.ts tests/unit/tool-registry.test.ts`
   - Shell 工具改动：`vitest run tests/unit/shell-tools.test.ts tests/integration/shell-streaming.test.ts`
   - 自定义工具目录改动：`vitest run tests/unit/custom-tools.test.ts tests/unit/tool-registry.test.ts`
   - `@file` 文件引用：`vitest run tests/unit/file-mentions.test.ts tests/unit/file-index-cache.test.ts tests/unit/terminal.test.ts tests/unit/runtime-config.test.ts`
   - 会话管理：`vitest run tests/unit/session-management.test.ts tests/integration/session-recovery.test.ts tests/integration/session-switch.test.ts tests/unit/terminal.test.ts`
+  - Plan Mode 意图识别：`vitest run tests/unit/plan-intent.test.ts tests/unit/runtime-config.test.ts tests/unit/terminal.test.ts`
   - 终端/输入状态机改动：`vitest run tests/unit/terminal.test.ts`
   - TUI 输入历史：`vitest run tests/unit/history-store.test.ts tests/unit/terminal.test.ts tests/integration/history-flow.test.ts`
   - 运行时配置/CLI 子命令：`vitest run tests/unit/runtime-config.test.ts tests/unit/cli-info.test.ts tests/unit/update.test.ts tests/unit/init-cli.test.ts`

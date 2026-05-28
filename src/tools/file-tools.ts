@@ -364,7 +364,11 @@ export const writeFileTool: ToolDefinition = {
   jitHint: '写入前确认目标路径和完整内容',
   execute: async ({ path, content }: { path: string; content: string }, context: ToolExecutionContext) => {
     try {
-      await writeTextAtomic(resolveToolPath(context.cwd, path), content)
+      const resolved = resolveToolPath(context.cwd, path)
+      if (existsSync(resolved) && statSync(resolved).isDirectory()) {
+        return { ok: false, error: `写入失败: 目标路径是目录，不是文件: ${path}` }
+      }
+      await writeTextAtomic(resolved, content)
       return `已写入 ${content.length} 字符到 ${path}`
     } catch (err) {
       return { ok: false, error: `写入失败: ${err instanceof Error ? err.message : err}` }

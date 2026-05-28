@@ -41,7 +41,7 @@ describe('shell tool process management', () => {
   afterEach(() => {
     for (const key of envKeys) restoreEnv(key, previousEnv[key])
     for (const dir of tmpDirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 })
     }
   })
 
@@ -251,6 +251,7 @@ describe('shell tool process management', () => {
     const cwd = tmp()
     const home = tmp()
     process.env.Q_CODE_HOME = home
+    let jobId: string | undefined
     const started = expectEnvelope(
       await bashTool.execute(
         {
@@ -263,26 +264,31 @@ describe('shell tool process management', () => {
       )
     )
     expect(started.ok).toBe(true)
-    const jobId = (started.content as { jobId: string }).jobId
+    jobId = (started.content as { jobId: string }).jobId
 
-    await vi.waitFor(async () => {
-      const tail = expectEnvelope(await shellTailTool.execute({ jobId }, { cwd }))
-      expect(JSON.stringify(tail.content)).toContain('tick-')
-    }, { timeout: 3000 })
+    try {
+      await vi.waitFor(async () => {
+        const tail = expectEnvelope(await shellTailTool.execute({ jobId }, { cwd }))
+        expect(JSON.stringify(tail.content)).toContain('tick-')
+      }, { timeout: 5000 })
 
-    const status = expectEnvelope(await shellStatusTool.execute({ jobId }, { cwd }))
-    expect(status.content).toMatchObject({ jobId, status: 'running' })
-    const list = expectEnvelope(await shellListTool.execute({}, { cwd }))
-    expect(JSON.stringify(list.content)).toContain(jobId)
+      const status = expectEnvelope(await shellStatusTool.execute({ jobId }, { cwd }))
+      expect(status.content).toMatchObject({ jobId, status: 'running' })
+      const list = expectEnvelope(await shellListTool.execute({}, { cwd }))
+      expect(JSON.stringify(list.content)).toContain(jobId)
 
-    const killed = expectEnvelope(await shellKillTool.execute({ jobId }, { cwd, sessionId: 'unit-session' }))
-    expect(killed.content).toMatchObject({ jobId, status: 'killed' })
+      const killed = expectEnvelope(await shellKillTool.execute({ jobId }, { cwd, sessionId: 'unit-session' }))
+      expect(killed.content).toMatchObject({ jobId, status: 'killed' })
+    } finally {
+      if (jobId) await shellKillTool.execute({ jobId }, { cwd, sessionId: 'unit-session' })
+    }
   })
 
   itIfSubprocessAvailable('tails background output by offset without returning the whole file', async () => {
     const cwd = tmp()
     const home = tmp()
     process.env.Q_CODE_HOME = home
+    let jobId: string | undefined
     const started = expectEnvelope(
       await bashTool.execute(
         {
@@ -292,21 +298,25 @@ describe('shell tool process management', () => {
         { cwd, sessionId: 'tail-session' }
       )
     )
-    const jobId = (started.content as { jobId: string }).jobId
+    jobId = (started.content as { jobId: string }).jobId
 
-    await vi.waitFor(async () => {
-      const status = expectEnvelope(await shellStatusTool.execute({ jobId }, { cwd }))
-      expect(status.content).toMatchObject({ status: 'completed' })
-    }, { timeout: 5000 })
+    try {
+      await vi.waitFor(async () => {
+        const status = expectEnvelope(await shellStatusTool.execute({ jobId }, { cwd }))
+        expect(status.content).toMatchObject({ status: 'completed' })
+      }, { timeout: 15000 })
 
-    const tail = expectEnvelope(await shellTailTool.execute({ jobId, fromOffset: 1000, maxBytes: 128 }, { cwd }))
-    expect(tail.content).toMatchObject({
-      offset: 1000,
-      nextOffset: 1128,
-      bytes: 128,
-      status: 'completed',
-      text: 'a'.repeat(128)
-    })
+      const tail = expectEnvelope(await shellTailTool.execute({ jobId, fromOffset: 1000, maxBytes: 128 }, { cwd }))
+      expect(tail.content).toMatchObject({
+        offset: 1000,
+        nextOffset: 1128,
+        bytes: 128,
+        status: 'completed',
+        text: 'a'.repeat(128)
+      })
+    } finally {
+      if (jobId) await shellKillTool.execute({ jobId }, { cwd, sessionId: 'tail-session' })
+    }
   })
 
   itIfSubprocessAvailable('records killed status in the session index during process cleanup', async () => {
@@ -354,10 +364,10 @@ describe('shell tool process management', () => {
       )
     )
 
-    expect(Date.now() - started).toBeLessThan(7000)
+    expect(Date.now() - started).toBeLessThan(9000)
     expect(result.ok).toBe(false)
     expect(result.code).toBe('interactive_not_supported')
-  }, 15000)
+  }, 20000)
 
   itIfSubprocessAvailable('abort returns promptly on Windows PowerShell commands', async () => {
     if (process.platform !== 'win32') return

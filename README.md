@@ -120,6 +120,8 @@ cp .env.example .env
 | `Q_CODE_MODEL_SLOW_REQUEST_WARN_MS` | ❌ | 首 token 慢请求提示阈值，默认 30000ms；设为 0 可关闭该档提示   |
 | `Q_CODE_MODEL_STALLED_REQUEST_WARN_MS` | ❌ | 首 token 长时间无响应提示阈值，默认 60000ms；设为 0 可关闭该档提示 |
 | `Q_CODE_MODEL_REQUEST_TIMEOUT_MS` | ❌ | 单步模型请求总超时，默认不启用；建议 OpenAI-compatible 中转按需设置 |
+| `Q_CODE_PLAN_INTENT`          | ❌   | Plan Mode 语义入口：`auto` / `suggest` / `off`，默认 `auto`；pending plan 自然语言审批始终启用 |
+| `Q_CODE_PLAN_INTENT_MODEL_TIMEOUT_MS` | ❌ | pending plan 本地规则无法判断时的模型兜底超时，默认 3000ms；设为 0 关闭模型兜底 |
 | `Q_CODE_SESSION_DIR`           | ❌   | 会话存储目录，默认 .sessions                                  |
 | `Q_CODE_HOME`                  | ❌   | q-code 全局配置目录，默认 `~/.q-code`                         |
 | `Q_CODE_DEBUG`                 | ❌   | 设为 1/true/yes/on 显示启动诊断信息（等价于 `--debug`）       |
@@ -273,6 +275,7 @@ src/
 │   ├── auto-compact.ts   # 压缩熔断器
 │   ├── agent-md.ts       # AGENT.md 项目指令加载
 │   ├── plan-attachments.ts# Plan Mode 内部提醒
+│   ├── plan-intent.ts    # Plan Mode 自然语言审批与智能进入规则
 │   ├── plans.ts          # 计划文件读写
 │   ├── project-paths.ts  # 项目存储路径计算
 │   ├── runtime-context.ts# 运行环境信息采集
@@ -724,11 +727,16 @@ Plan Mode 是"只看不动"的规划模式，适合复杂、多文件、需要�
 
 计划文件存储在 `.sessions/projects/<projectKey>/plans/<sessionId>.md`。模型完成探索后会写入计划并调用 `exit_plan_mode`，当前 loop 会停住等待用户确认，避免"退出计划后立刻实现一遍、审批后又实现一遍"的问题。
 
+计划待确认时，可以直接回复自然语言：`可以`、`开始吧`、`ok`、`go` 等会批准并执行；`补充测试策略`、`调整风险说明` 等会作为反馈继续规划；`退出计划模式` 或 `取消` 会回到 normal 且不执行。否定语义优先，例如 `不要执行`、`先别开始` 不会误判为批准。本地规则无法判断时，会用当前会话模型做一次短超时 JSON intent judge 兜底；模型失败、超时或低置信度时仍回退到提示，不会猜测执行。
+
+普通输入也会做保守的本地语义判断：明确说 `先给方案`、`只分析不要修改`、`评估风险` 时会自动进入 Plan Mode；复杂执行型请求只提示建议先规划，不会静默强制切换。可用 `Q_CODE_PLAN_INTENT=auto|suggest|off` 控制智能入口；`Q_CODE_PLAN_INTENT_MODEL_TIMEOUT_MS=0` 可关闭 pending plan 模型兜底。TUI 中按 `Shift+Tab` 可切换 normal / plan，无法捕获该快捷键的终端可继续使用 `/mode toggle`。
+
 | 命令                  | 说明                           |
 | --------------------- | ------------------------------ |
 | `/mode`               | 查看当前模式和计划文件路径     |
 | `/mode plan`          | 手动进入 Plan Mode             |
 | `/mode normal`        | 手动回到 normal 模式           |
+| `/mode toggle`        | 切换 Plan / normal 模式        |
 | `/plan`               | 查看当前计划文件内容           |
 | `/approve-plan`       | 批准计划并切回 normal 模式执行 |
 | `/revise-plan <反馈>` | 不批准当前计划，带反馈继续规划 |
@@ -1404,6 +1412,7 @@ TUI 输入历史会跨进程持久化：项目历史写入 `<cwd>/.q-code/histor
 | `/mode`                 | 查看当前模式           |
 | `/mode plan`            | 进入 Plan Mode         |
 | `/mode normal`          | 回到 Normal 模式       |
+| `/mode toggle`          | 切换 Plan / Normal     |
 | `/plan`                 | 查看当前计划文件       |
 | `/approve-plan`         | 批准计划并切回 normal  |
 | `/revise-plan <反馈>`   | 不批准，带反馈继续规划 |

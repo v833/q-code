@@ -22,6 +22,8 @@ const ENV_KEYS = [
   'Q_CODE_MODEL_SLOW_REQUEST_WARN_MS',
   'Q_CODE_MODEL_STALLED_REQUEST_WARN_MS',
   'Q_CODE_MODEL_REQUEST_TIMEOUT_MS',
+  'Q_CODE_PLAN_INTENT',
+  'Q_CODE_PLAN_INTENT_MODEL_TIMEOUT_MS',
   'Q_CODE_TUI_CURSOR',
   'Q_CODE_MODEL_PROVIDER',
   'Q_CODE_THINKING_TYPE',
@@ -184,6 +186,8 @@ describe('runtime config', () => {
         'context_limit_tokens = 12345',
         'model_wait_heartbeat_ms = 11',
         'model_slow_request_warn_ms = 31',
+        'plan_intent = "suggest"',
+        'plan_intent_model_timeout_ms = 2500',
         'tui_cursor = "inline"',
         'thinking_type = "enabled"',
         'reasoning_effort = "high"',
@@ -248,6 +252,8 @@ describe('runtime config', () => {
     expect(process.env.Q_CODE_MODEL_SLOW_REQUEST_WARN_MS).toBe('31')
     expect(process.env.Q_CODE_MODEL_STALLED_REQUEST_WARN_MS).toBe('61')
     expect(process.env.Q_CODE_MODEL_REQUEST_TIMEOUT_MS).toBe('120000')
+    expect(process.env.Q_CODE_PLAN_INTENT).toBe('suggest')
+    expect(process.env.Q_CODE_PLAN_INTENT_MODEL_TIMEOUT_MS).toBe('2500')
     expect(process.env.Q_CODE_TUI_CURSOR).toBe('inline')
     expect(process.env.Q_CODE_MODEL_PROVIDER).toBe('deepseek-compatible')
     expect(process.env.Q_CODE_THINKING_TYPE).toBe('adaptive')

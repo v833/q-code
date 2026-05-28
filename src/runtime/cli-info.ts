@@ -100,6 +100,7 @@ export function formatCliHelp(version: string): string {
     '      --continue            Resume the latest session for this project',
     '      --session <id>        Use a specific session id',
     '      --plan                Start directly in Plan Mode',
+    '      Shift+Tab             Toggle Plan/Normal mode in the TUI',
     '      --agent-teams         Enable Agent Teams',
     '      --classic             Use the classic readline UI',
     '      --no-color            Disable ANSI highlighting and color output',

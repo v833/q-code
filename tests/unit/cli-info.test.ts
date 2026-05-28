@@ -66,6 +66,7 @@ describe('cli info', () => {
     expect(help).toContain('--allow-real-model')
     expect(help).toContain('q-code eval trend')
     expect(help).toContain('--continue')
+    expect(help).toContain('Shift+Tab')
     expect(help).toContain('--no-color')
     expect(help).toContain('--debug')
     expect(help).toContain('~/.q-code/config.toml')

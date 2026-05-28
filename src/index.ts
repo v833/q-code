@@ -4,7 +4,7 @@
  */
 import './runtime/color-bootstrap';
 import * as path from 'node:path'
-import { type ModelMessage } from 'ai';
+import { generateText, type ModelMessage } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { getRequiredEnv, normalizeBaseURL } from './utils';
 import { applyRuntimeConfig } from './config/runtime-config';
@@ -112,6 +112,14 @@ import {
   getPlanModeAttachment,
   getPlanModeExitAttachment,
 } from './context/plan-attachments';
+import {
+  classifyPendingPlanIntent,
+  classifyPlanEntryIntent,
+  parsePendingPlanIntentJudgeResponse,
+  readPlanIntentModelTimeoutMs,
+  readPlanIntentMode,
+  type PendingPlanIntent,
+} from './context/plan-intent';
 import type { ToolDefinition, ToolVisibilityMode } from './tools/registry';
 import {
   clearTodos,
@@ -317,9 +325,21 @@ const modelStalledRequestWarnMs = getOptionalMillisecondsEnv(
 const modelRequestTimeoutMs = getOptionalMillisecondsEnv(
   'Q_CODE_MODEL_REQUEST_TIMEOUT_MS',
 );
+const planIntentMode = readPlanIntentMode();
+const planIntentModelTimeoutMs = readPlanIntentModelTimeoutMs();
 const compactTriggerTokens = Math.floor(
   contextLimitTokens * compactTriggerRatio,
 );
+
+const PLAN_INTENT_JUDGE_SYSTEM_PROMPT = [
+  '你是 q-code Plan Mode 待确认计划的意图分类器。',
+  '只判断用户对当前待确认计划的下一步动作，不要执行任务，不要解释。',
+  '只返回 JSON，schema: {"intent":"approve|revise|exit|cancel|show_plan|unknown","confidence":0到1,"feedback":"可选"}。',
+  'approve 代表批准并立刻执行计划，风险最高；只有用户明确同意执行当前计划时才可返回 approve。',
+  '如果有否定、犹豫、不确定、只是想看看、或语义不清，返回 unknown 或 revise，不要返回 approve。',
+  'revise 代表用户希望修改/补充计划，feedback 使用用户原文或简短整理。',
+  'exit 代表退出计划模式但保留草稿；cancel 代表取消当前待确认计划；show_plan 代表查看计划。',
+].join('\n');
 const langfuseStatus = initializeLangfuse();
 
 const registry = new ToolRegistry();
@@ -1250,6 +1270,7 @@ async function main() {
       onSessionPickerSelect: (targetSessionId) =>
         switchSession(targetSessionId, { clearTranscript: true }),
       onInterrupt: interruptActiveTurn,
+      onModeToggle: () => togglePlanMode('shortcut'),
       onExit: closeCli,
     });
   }
@@ -1376,14 +1397,21 @@ async function main() {
         return;
       }
       if (pendingPlanApproval && !trimmed.startsWith('/')) {
-        print(
-          '\n  [Plan] 当前有待确认的计划。输入 /approve-plan 执行，或 /revise-plan <反馈> 继续规划。',
-        );
+        const handled = await handlePendingPlanInput(trimmed);
+        if (handled && !closed) ask();
+        if (handled) return;
+        printPendingPlanActions();
         if (!closed) ask();
         return;
       }
 
-      await runAgentTurn(trimmed);
+      const routedInput = await routePlanEntryIntent(trimmed);
+      if (!routedInput) {
+        if (!closed) ask();
+        return;
+      }
+
+      await runAgentTurn(routedInput);
     } catch (error) {
       getAuditLogger().emit(
         'error',
@@ -1441,6 +1469,158 @@ async function main() {
       content: mentionExpansion.prompt,
     };
     await runAgentTurnWithMessages([userMsg], userContent);
+  }
+
+  async function handlePendingPlanInput(input: string): Promise<boolean> {
+    const localIntent = classifyPendingPlanIntent(input);
+    const intent =
+      localIntent.type === 'unknown'
+        ? await classifyPendingPlanIntentWithModel(input)
+        : localIntent;
+    switch (intent.type) {
+      case 'approve':
+        print('\n  [Plan] 已按自然语言确认计划，开始执行。');
+        getAuditLogger().emit(
+          'plan.intent.approve',
+          createMessageSummaryPayload(input),
+          { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+        );
+        await handleApprovePlanCommand();
+        return true;
+
+      case 'revise':
+        print('\n  [Plan] 已把你的反馈作为修订意见，继续规划。');
+        getAuditLogger().emit(
+          'plan.intent.revise',
+          createMessageSummaryPayload(intent.feedback),
+          { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+        );
+        await revisePlanWithFeedback(intent.feedback);
+        return true;
+
+      case 'exit':
+        pendingPlanApproval = false;
+        pendingPlanSummary = '';
+        setAgentMode('normal');
+        getAuditLogger().emit(
+          'plan.intent.exit',
+          createMessageSummaryPayload(input),
+          { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+        );
+        print('\n  [Plan] 已退出 Plan Mode，计划文件保留为草稿，不会执行。');
+        return true;
+
+      case 'cancel':
+        pendingPlanApproval = false;
+        pendingPlanSummary = '';
+        setAgentMode('normal');
+        getAuditLogger().emit(
+          'plan.intent.cancel',
+          createMessageSummaryPayload(input),
+          { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+        );
+        print('\n  [Plan] 已取消待确认计划，计划文件保留为草稿，不会执行。');
+        return true;
+
+      case 'show_plan':
+        await printPlanApprovalHint();
+        return true;
+
+      case 'unknown':
+        return false;
+    }
+  }
+
+  async function classifyPendingPlanIntentWithModel(input: string): Promise<PendingPlanIntent> {
+    if (planIntentMode === 'off' || planIntentModelTimeoutMs <= 0) return { type: 'unknown' };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new Error('plan intent model timeout')), planIntentModelTimeoutMs);
+    timeout.unref();
+    try {
+      const providerOptions = createReasoningProviderOptions(
+        modelProviderKind,
+        readReasoningConfig(),
+        { modelName: currentModelName() },
+      );
+      const response = await generateText({
+        model,
+        system: PLAN_INTENT_JUDGE_SYSTEM_PROMPT,
+        prompt: createPlanIntentJudgePrompt(input),
+        maxOutputTokens: 120,
+        maxRetries: 0,
+        abortSignal: controller.signal,
+        ...(providerOptions ? { providerOptions } : {}),
+      });
+      const intent = parsePendingPlanIntentJudgeResponse(response.text, input);
+      getAuditLogger().emit(
+        'plan.intent.model',
+        {
+          input: createMessageSummaryPayload(input),
+          result: intent.type,
+        },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+      return intent;
+    } catch (error) {
+      getAuditLogger().emit(
+        'plan.intent.model',
+        {
+          input: createMessageSummaryPayload(input),
+          result: 'unknown',
+          error: formatErrorMessage(error),
+        },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+      return { type: 'unknown' };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  function createPlanIntentJudgePrompt(input: string): string {
+    return [
+      '当前状态：Agent 已提交计划，正在等待用户确认。',
+      '可用动作：approve=批准并执行；revise=带反馈继续规划；exit=退出计划模式保留草稿；cancel=取消待确认计划；show_plan=查看计划；unknown=无法确定。',
+      '',
+      `用户输入：${JSON.stringify(input)}`,
+      '',
+      '请只返回 JSON。',
+    ].join('\n');
+  }
+
+  async function routePlanEntryIntent(input: string): Promise<string | undefined> {
+    if (agentMode === 'plan' || planIntentMode === 'off') return input;
+
+    const intent = classifyPlanEntryIntent(input);
+    if (intent.type === 'stay_normal') return input;
+
+    if (intent.type === 'enter_plan') {
+      if (planIntentMode === 'suggest') {
+        print(`\n  [Plan] ${intent.reason}。建议输入 /mode plan 后继续，或直接重发本请求。`);
+        getAuditLogger().emit(
+          'plan.entry.suggested',
+          { reason: intent.reason, mode: planIntentMode },
+          { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+        );
+        return undefined;
+      }
+      setAgentMode('plan');
+      print(`\n  [Plan] ${intent.reason}，已进入 Plan Mode。`);
+      getAuditLogger().emit(
+        'plan.entry.auto',
+        { reason: intent.reason, mode: planIntentMode },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+      return input;
+    }
+
+    print(`\n  [Plan] ${intent.reason}。建议先规划：输入 /mode plan 后重发，或直接继续执行当前请求。`);
+    getAuditLogger().emit(
+      'plan.entry.suggested',
+      { reason: intent.reason, mode: planIntentMode },
+      { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+    );
+    return input;
   }
 
   async function runAgentTurnWithMessages(
@@ -1743,8 +1923,13 @@ async function main() {
       return;
     }
 
+    if (requestedMode === 'toggle') {
+      togglePlanMode('slash');
+      return;
+    }
+
     if (requestedMode !== 'plan' && requestedMode !== 'normal') {
-      print('\n  [Mode] 用法: /mode、/mode plan、/mode normal');
+      print('\n  [Mode] 用法: /mode、/mode plan、/mode normal、/mode toggle');
       return;
     }
 
@@ -1752,6 +1937,19 @@ async function main() {
     if (requestedMode === 'plan') pendingPlanApproval = false;
     print(`\n  [Mode] 已切换到 ${agentMode}`);
     if (agentMode === 'plan') print(`  [Plan] 计划文件: ${planFilePath}`);
+  }
+
+  function togglePlanMode(source: 'slash' | 'shortcut'): void {
+    const nextMode: ToolVisibilityMode = agentMode === 'plan' ? 'normal' : 'plan';
+    setAgentMode(nextMode);
+    getAuditLogger().emit(
+      'plan.mode.toggle',
+      { source, mode: nextMode },
+      { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+    );
+    print(`\n  [Mode] 已切换到 ${agentMode}${source === 'shortcut' ? ' (Shift+Tab)' : ''}`);
+    if (agentMode === 'plan') print(`  [Plan] 计划文件: ${planFilePath}`);
+    if (pendingPlanApproval) printPendingPlanActions();
   }
 
   function createBuiltinSlashCommands(): SlashCommand<SlashRuntimeContext>[] {
@@ -1856,7 +2054,7 @@ async function main() {
       command(
         '/mode',
         '查看或切换模式',
-        '/mode [plan|normal]',
+        '/mode [plan|normal|toggle]',
         'Workflow',
         (input) => handleModeCommand(input.raw),
       ),
@@ -3231,6 +3429,10 @@ async function main() {
       return;
     }
 
+    await revisePlanWithFeedback(feedback);
+  }
+
+  async function revisePlanWithFeedback(feedback: string): Promise<void> {
     pendingPlanApproval = false;
     getAuditLogger().emit(
       'plan.revise',
@@ -3254,7 +3456,12 @@ async function main() {
     if (pendingPlanSummary) print(`  [Plan] 摘要: ${pendingPlanSummary}`);
     print(`  [Plan] 文件: ${planFilePath}`);
     if (content?.trim()) print('\n' + content);
-    print('\n  输入 /approve-plan 执行，或 /revise-plan <反馈> 继续规划。');
+    printPendingPlanActions();
+  }
+
+  function printPendingPlanActions(): void {
+    print('\n  [Plan] 待确认：回复“可以/开始”执行，回复修改意见继续规划，或回复“退出计划模式”。');
+    print('  [Plan] 命令：/approve-plan · /revise-plan <反馈> · /mode normal');
   }
 
   function getCurrentTodoContext(): string | undefined {
