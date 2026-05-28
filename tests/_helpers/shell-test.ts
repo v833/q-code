@@ -1,9 +1,11 @@
 import { spawnSync } from 'node:child_process'
-import { getShellInvocation } from '../../src/tools/shell-tools'
+import { resolveShellInvocation } from '../../src/runtime/shell-invocation'
 
 export function canRunShellCommand(): boolean {
   try {
-    const shell = getShellInvocation(process.platform === 'win32' ? 'Write-Output ok' : 'echo ok')
+    const resolution = resolveShellInvocation(process.platform === 'win32' ? 'Write-Output ok' : 'echo ok')
+    if (!resolution.ok) return false
+    const shell = resolution.shell
     const result = spawnSync(shell.command, shell.args, {
       stdio: 'ignore'
     })

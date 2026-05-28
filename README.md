@@ -631,7 +631,7 @@ q-code 默认启用崩溃保护。遇到未捕获异常、未处理 Promise reje
 
 #### Shell 工具
 
-`f` 默认执行同步命令，Windows 使用 PowerShell7，其他平台使用 Bash。参数支持 `cwd`、`timeoutMs`、`maxBufferBytes`、`stdin`、`env`、`label` 和 `background`：
+`f` 默认执行同步命令，Windows 优先使用 PowerShell7（`pwsh`），缺失时回退到 Windows PowerShell 5.1（`powershell.exe`），其他平台使用 Bash。参数支持 `cwd`、`timeoutMs`、`maxBufferBytes`、`stdin`、`env`、`label` 和 `background`：
 
 - 同步模式默认超时 60s，受 `Q_CODE_SHELL_TIMEOUT_MS` 控制；用户传入的 `timeoutMs` 会被 `Q_CODE_SHELL_TIMEOUT_MAX_MS` 限制。
 - 输出超过 `maxBufferBytes`（默认 4MB）不会杀进程，会把完整输出写入 `<Q_CODE_HOME>/shell-spills/<jobId>.log`，工具结果返回 head/tail 摘要和文件路径。

@@ -7,7 +7,12 @@ import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import type { ToolDefinition, ToolExecutionContext, ToolExecutionOutput } from './registry'
-import { getShellInvocation } from './shell-tools'
+import {
+  formatShellInvocation,
+  isShellNotFoundError,
+  resolveShellInvocation,
+  type ShellInvocation
+} from '../runtime/shell-invocation'
 
 const TOOL_SCHEMA_FILE = 'schema.json'
 const CUSTOM_TOOL_TIMEOUT_MS = 10_000
@@ -206,6 +211,20 @@ export async function executeCustomToolCommand(
       Q_CODE_TOOL_CWD: context.cwd
     }
     const direct = parseDirectCommand(command)
+    const shellResolution = direct ? undefined : resolveShellInvocation(command)
+    if (shellResolution && !shellResolution.ok) {
+      resolve({
+        ok: false,
+        error: shellResolution.unavailableMessage,
+        code: 'tool_spawn_failed',
+        metadata: {
+          toolDir,
+          candidates: shellResolution.candidates.map((candidate) => candidate.command)
+        }
+      })
+      return
+    }
+    const shell = shellResolution?.shell
     const child = direct
       ? spawn(direct.command, direct.args, {
           cwd: toolDir,
@@ -214,14 +233,8 @@ export async function executeCustomToolCommand(
           windowsHide: true
         })
       : (() => {
-          const shell = getShellInvocation(command)
-          return spawn(shell.command, shell.args, {
-            cwd: toolDir,
-            env,
-            detached: shell.detached,
-            stdio: ['pipe', 'pipe', 'pipe'],
-            windowsHide: true
-          })
+          if (!shellResolution?.ok) throw new Error('Custom tool shell was not resolved.')
+          return spawnCustomToolShell(shellResolution.fallbacks, toolDir, env)
         })()
 
     const envelope: CustomToolInputEnvelope = {
@@ -280,16 +293,18 @@ export async function executeCustomToolCommand(
     })
 
     child.on('error', (error) => {
-      const shell = getShellInvocation(command)
       const message =
         error.message.includes('ENOENT') && !direct
-          ? shell.unavailableMessage
+          ? shell?.unavailableMessage
           : `Custom tool spawn failed: ${error.message}`
       finish({
         ok: false,
         error: message,
         code: 'tool_spawn_failed',
-        metadata: { toolDir }
+        metadata: {
+          toolDir,
+          ...(!direct && shell ? { shell: formatShellInvocation(shell) } : {})
+        }
       })
     })
 
@@ -345,6 +360,30 @@ export async function executeCustomToolCommand(
 
     child.stdin.end(JSON.stringify(envelope))
   })
+}
+
+function spawnCustomToolShell(
+  shells: ShellInvocation[],
+  toolDir: string,
+  env: NodeJS.ProcessEnv
+) {
+  let lastShell = shells[0]
+  for (const shell of shells) {
+    lastShell = shell
+    try {
+      return spawn(shell.command, shell.args, {
+        cwd: toolDir,
+        env,
+        detached: shell.detached,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true
+      })
+    } catch (error) {
+      if (!isShellNotFoundError(error)) throw error
+    }
+  }
+  const error = Object.assign(new Error(`spawn ${lastShell.command} ENOENT`), { code: 'ENOENT' })
+  throw error
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

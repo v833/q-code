@@ -18,6 +18,13 @@ import { join, resolve } from 'node:path'
 import { errorToolResult, okToolResult, type ToolDefinition, type ToolExecutionContext } from './registry'
 import { isInsideDirectory } from './path-policy'
 import { isFalseEnv } from '../utils/env'
+import {
+  formatShellInvocation,
+  getShellInvocation,
+  isShellNotFoundError,
+  resolveShellInvocation,
+  type ShellInvocation
+} from '../runtime/shell-invocation'
 
 const DEFAULT_SHELL_TIMEOUT_MS = 60_000
 const DEFAULT_SHELL_TIMEOUT_MAX_MS = 1_800_000
@@ -29,13 +36,7 @@ const INTERACTIVE_GRACE_MS = 5000
 const DEFAULT_TAIL_MAX_BYTES = 64 * 1024
 const SHELL_COMPLETED_JOB_RETENTION = 100
 
-/** 按平台解析出的 shell 启动参数（bash -lc 或 pwsh -Command）。 */
-export interface ShellInvocation {
-  command: string
-  args: string[]
-  detached: boolean
-  unavailableMessage: string
-}
+export { getShellInvocation, type ShellInvocation }
 
 interface ShellToolInput {
   command: string
@@ -243,18 +244,9 @@ async function runShellCommand(input: ShellToolInput, context: ToolExecutionCont
     let settled = false
     let bytes = 0
     let interactiveTimer: ReturnType<typeof setTimeout> | undefined
+    let currentChild: ChildProcess | undefined
+    let currentShell = prepared.shell
     const progress = createShellProgressEmitter(context, input.label ?? input.command)
-
-    const child = spawn(prepared.shell.command, prepared.shell.args, {
-      cwd: prepared.cwd,
-      env: buildChildEnv(input.env),
-      detached: prepared.shell.detached,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true
-    })
-
-    child.stdout.setEncoding('utf-8')
-    child.stderr.setEncoding('utf-8')
 
     const finish = (result: unknown): void => {
       if (settled) return
@@ -265,13 +257,13 @@ async function runShellCommand(input: ShellToolInput, context: ToolExecutionCont
 
     const timeout = setTimeout(() => {
       killedBy = 'timeout'
-      terminateProcessTree(child.pid)
+      terminateProcessTree(currentChild?.pid)
     }, prepared.timeoutMs)
     timeout.unref()
 
     const onAbort = (): void => {
       killedBy = 'abort'
-      terminateProcessTree(child.pid)
+      terminateProcessTree(currentChild?.pid)
     }
 
     const cleanup = (): void => {
@@ -309,81 +301,111 @@ async function runShellCommand(input: ShellToolInput, context: ToolExecutionCont
       if (!killedBy && looksInteractive(chunk)) {
         interactiveTimer ??= setTimeout(() => {
           killedBy = 'interactive'
-          terminateProcessTree(child.pid)
+          terminateProcessTree(currentChild?.pid)
         }, INTERACTIVE_GRACE_MS)
         interactiveTimer.unref()
       }
     }
 
     context.abortSignal?.addEventListener('abort', onAbort, { once: true })
-    child.stdout.on('data', (chunk) => appendOutput('stdout', String(chunk)))
-    child.stderr.on('data', (chunk) => appendOutput('stderr', String(chunk)))
-    child.on('error', (error) => {
-      const message = error.message.includes('ENOENT')
-        ? prepared.shell.unavailableMessage
-        : `命令执行失败 (spawn error): ${error.message}`
-      finish(
-        shellError(message, error.message.includes('ENOENT') ? 'shell_unavailable' : 'spawn_error', {
-          cwd: prepared.cwd,
-          shell: formatShellInvocation(prepared.shell),
-          durationMs: Date.now() - started,
-          stdoutTail,
-          stderrTail
-        })
-      )
-    })
-    child.on('close', (code, signal) => {
-      const durationMs = Date.now() - started
-      const metadata = {
-        exitCode: code,
-        signal,
-        killedBy,
-        durationMs,
-        shell: formatShellInvocation(prepared.shell),
-        cwd: prepared.cwd,
-        stderrTail: stderrTail.slice(-2000),
-        stdoutTail: stdoutTail.slice(-500),
-        ...(spillFile ? { spillFile } : {}),
-        bytes
-      }
-      if (killedBy === 'abort') {
-        finish(shellError('命令执行失败 (aborted)', 'aborted', metadata))
-        return
-      }
-      if (killedBy === 'timeout') {
-        finish(shellError(`命令执行失败 (timeout ${prepared.timeoutMs}ms)`, 'timeout', metadata))
-        return
-      }
-      if (killedBy === 'interactive') {
-        finish(
-          shellError(
-            '此命令需要交互，请在外部终端执行后再继续。',
-            'interactive_not_supported',
-            metadata
-          )
-        )
-        return
-      }
-      if (code === 0) {
-        const output = renderShellSuccess({
-          output: spillFile ? undefined : memoryOutput,
-          head: summaryHead,
-          tail: summaryTail,
-          bytes,
-          spillFile,
-          warnings: prepared.lint.warnings,
-          durationMs
-        })
-        finish(output)
-        return
-      }
-      finish(shellError(`命令执行失败 (exit ${code ?? signal ?? 1})`, 'exit_nonzero', metadata))
-    })
 
-    if (input.stdin !== undefined) {
-      child.stdin.write(input.stdin.slice(0, STDIN_MAX_CHARS))
+    const runAt = (index: number): void => {
+      if (settled) return
+      currentShell = prepared.shellFallbacks[index] ?? prepared.shell
+      const child = spawn(currentShell.command, currentShell.args, {
+        cwd: prepared.cwd,
+        env: buildChildEnv(input.env),
+        detached: currentShell.detached,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true
+      })
+      currentChild = child
+      let attemptClosed = false
+      const closeAttempt = (): boolean => {
+        if (attemptClosed || settled) return false
+        attemptClosed = true
+        return true
+      }
+
+      child.stdout.setEncoding('utf-8')
+      child.stderr.setEncoding('utf-8')
+      child.stdout.on('data', (chunk) => appendOutput('stdout', String(chunk)))
+      child.stderr.on('data', (chunk) => appendOutput('stderr', String(chunk)))
+      child.on('error', (error) => {
+        if (!closeAttempt()) return
+        if (isShellNotFoundError(error) && index + 1 < prepared.shellFallbacks.length) {
+          runAt(index + 1)
+          return
+        }
+        const message = isShellNotFoundError(error)
+          ? currentShell.unavailableMessage
+          : `命令执行失败 (spawn error): ${error.message}`
+        finish(
+          shellError(message, isShellNotFoundError(error) ? 'shell_unavailable' : 'spawn_error', {
+            cwd: prepared.cwd,
+            shell: formatShellInvocation(currentShell),
+            durationMs: Date.now() - started,
+            stdoutTail,
+            stderrTail
+          })
+        )
+      })
+      child.on('close', (code, signal) => {
+        if (!closeAttempt()) return
+        const durationMs = Date.now() - started
+        const metadata = {
+          exitCode: code,
+          signal,
+          killedBy,
+          durationMs,
+          shell: formatShellInvocation(currentShell),
+          cwd: prepared.cwd,
+          stderrTail: stderrTail.slice(-2000),
+          stdoutTail: stdoutTail.slice(-500),
+          ...(spillFile ? { spillFile } : {}),
+          bytes
+        }
+        if (killedBy === 'abort') {
+          finish(shellError('命令执行失败 (aborted)', 'aborted', metadata))
+          return
+        }
+        if (killedBy === 'timeout') {
+          finish(shellError(`命令执行失败 (timeout ${prepared.timeoutMs}ms)`, 'timeout', metadata))
+          return
+        }
+        if (killedBy === 'interactive') {
+          finish(
+            shellError(
+              '此命令需要交互，请在外部终端执行后再继续。',
+              'interactive_not_supported',
+              metadata
+            )
+          )
+          return
+        }
+        if (code === 0) {
+          const output = renderShellSuccess({
+            output: spillFile ? undefined : memoryOutput,
+            head: summaryHead,
+            tail: summaryTail,
+            bytes,
+            spillFile,
+            warnings: prepared.lint.warnings,
+            durationMs
+          })
+          finish(output)
+          return
+        }
+        finish(shellError(`命令执行失败 (exit ${code ?? signal ?? 1})`, 'exit_nonzero', metadata))
+      })
+
+      if (input.stdin !== undefined) {
+        child.stdin.write(input.stdin.slice(0, STDIN_MAX_CHARS))
+      }
+      child.stdin.end()
     }
-    child.stdin.end()
+
+    runAt(0)
   })
 }
 
@@ -398,19 +420,19 @@ function startBackgroundShellCommand(input: ShellToolInput, context: ToolExecuti
   const startedAt = new Date().toISOString()
   const outputFd = openSync(outputFile, 'a')
   let child: ChildProcess
+  let shell = prepared.shell
   try {
-    child = spawn(prepared.shell.command, prepared.shell.args, {
-      cwd: prepared.cwd,
-      env: buildChildEnv(input.env),
-      detached: prepared.shell.detached,
-      stdio: ['pipe', outputFd, outputFd],
-      windowsHide: true
-    })
+    child = spawnBackgroundShell(prepared.shellFallbacks, prepared.cwd, input, outputFd)
+    shell = prepared.shellFallbacks.find((candidate) => candidate.command === child.spawnfile) ?? shell
   } catch (error) {
     closeSync(outputFd)
-    return shellError(`命令执行失败 (spawn error): ${formatUnknownError(error)}`, 'spawn_error', {
+    const code = isShellNotFoundError(error) ? 'shell_unavailable' : 'spawn_error'
+    const message = isShellNotFoundError(error)
+      ? shell.unavailableMessage
+      : `命令执行失败 (spawn error): ${formatUnknownError(error)}`
+    return shellError(message, code, {
       cwd: prepared.cwd,
-      shell: formatShellInvocation(prepared.shell),
+      shell: formatShellInvocation(shell),
       durationMs: Date.now() - Date.parse(startedAt)
     })
   }
@@ -483,6 +505,7 @@ function prepareShellRun(
       timeoutMs: number
       maxBufferBytes: number
       shell: ShellInvocation
+      shellFallbacks: ShellInvocation[]
       lint: ShellCommandLintResult
     }
   | { ok: false; error: ReturnType<typeof errorToolResult> } {
@@ -503,6 +526,18 @@ function prepareShellRun(
   if (!cwd.ok) return { ok: false, error: cwd.error }
   const cwdValidation = validateShellCwd(cwd.cwd)
   if (!cwdValidation.ok) return { ok: false, error: cwdValidation.error }
+  const shellResolution = resolveShellInvocation(input.command)
+  if (!shellResolution.ok) {
+    return {
+      ok: false,
+      error: errorToolResult(shellResolution.unavailableMessage, {
+        code: 'shell_unavailable',
+        metadata: {
+          candidates: shellResolution.candidates.map((candidate) => candidate.command)
+        }
+      })
+    }
+  }
   const timeoutMs = normalizeTimeoutMs(input.timeoutMs)
   const maxBufferBytes = normalizePositiveInt(input.maxBufferBytes, getDefaultMaxBufferBytes())
   return {
@@ -510,9 +545,35 @@ function prepareShellRun(
     cwd: cwd.cwd,
     timeoutMs,
     maxBufferBytes,
-    shell: getShellInvocation(input.command),
+    shell: shellResolution.shell,
+    shellFallbacks: shellResolution.fallbacks,
     lint
   }
+}
+
+function spawnBackgroundShell(
+  shells: ShellInvocation[],
+  cwd: string,
+  input: ShellToolInput,
+  outputFd: number
+): ChildProcess {
+  let lastShell = shells[0]
+  for (const shell of shells) {
+    lastShell = shell
+    try {
+      return spawn(shell.command, shell.args, {
+        cwd,
+        env: buildChildEnv(input.env),
+        detached: shell.detached,
+        stdio: ['pipe', outputFd, outputFd],
+        windowsHide: true
+      })
+    } catch (error) {
+      if (!isShellNotFoundError(error)) throw error
+    }
+  }
+  const error = Object.assign(new Error(`spawn ${lastShell.command} ENOENT`), { code: 'ENOENT' })
+  throw error
 }
 
 function resolveShellCwd(rootCwd: string, requested: string | undefined) {
@@ -612,38 +673,6 @@ export function lintShellCommand(command: string): ShellCommandLintResult {
   return { blocked: false, warnings }
 }
 
-/** 按平台返回 shell 子进程的 command/args（供 `f` 与自定义工具复用）。 */
-export function getShellInvocation(
-  command: string,
-  platform: NodeJS.Platform = process.platform
-): ShellInvocation {
-  if (platform === 'win32') {
-    return {
-      command: 'pwsh',
-      args: [
-        '-NoLogo',
-        '-NoProfile',
-        '-NonInteractive',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-Command',
-        command
-      ],
-      detached: false,
-      unavailableMessage:
-        '[PowerShell7 不可用] 当前环境不支持 shell 命令。请安装 PowerShell7 或确认 pwsh 在 PATH 中。'
-    }
-  }
-
-  return {
-    command: 'bash',
-    args: ['-lc', command],
-    detached: true,
-    unavailableMessage:
-      '[bash 不可用] 当前环境不支持 shell 命令。本地终端运行 pnpm start 可使用 bash 工具。'
-  }
-}
-
 /** Windows 下 taskkill 参数：结束进程树。 */
 export function getWindowsProcessTreeKillArgs(pid: number): string[] {
   return ['/F', '/T', '/PID', String(pid)]
@@ -678,10 +707,6 @@ function renderShellSuccess(args: {
 
 function shellError(message: string, code: string, metadata: Record<string, unknown>) {
   return errorToolResult(message, { code, metadata })
-}
-
-function formatShellInvocation(shell: ShellInvocation): string {
-  return [shell.command, ...shell.args].join(' ')
 }
 
 function buildChildEnv(extra: Record<string, string> | undefined): NodeJS.ProcessEnv {

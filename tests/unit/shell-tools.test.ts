@@ -12,6 +12,7 @@ import {
   getShellInvocation,
   getWindowsProcessTreeKillArgs
 } from '../../src/tools/shell-tools'
+import { resolveShellInvocation } from '../../src/runtime/shell-invocation'
 import type { ToolResultEnvelope } from '../../src/tools/registry'
 import { canRunShellCommand } from '../_helpers/shell-test'
 
@@ -65,6 +66,71 @@ describe('shell tool process management', () => {
       detached: true,
       unavailableMessage:
         '[bash 不可用] 当前环境不支持 shell 命令。本地终端运行 pnpm start 可使用 bash 工具。'
+    })
+  })
+
+  it('falls back to Windows PowerShell when PowerShell7 is unavailable', () => {
+    const result = resolveShellInvocation('Write-Output ok', {
+      platform: 'win32',
+      commandExists: (command) => command === 'powershell.exe'
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      shell: {
+        command: 'powershell.exe',
+        detached: false
+      }
+    })
+    if (result.ok) {
+      expect(result.candidates.map((candidate) => candidate.command)).toEqual([
+        'pwsh',
+        'powershell.exe'
+      ])
+      expect(result.shell.args).toEqual([
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        'Write-Output ok'
+      ])
+    }
+  })
+
+  it('reports a clear error when no Windows PowerShell shell is available', () => {
+    const result = resolveShellInvocation('Write-Output ok', {
+      platform: 'win32',
+      commandExists: () => false
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      unavailableMessage:
+        '[PowerShell 不可用] 当前环境不支持 shell 命令。请安装 PowerShell7，或确认 pwsh / powershell.exe 在 PATH 中。'
+    })
+    if (!result.ok) {
+      expect(result.candidates.map((candidate) => candidate.command)).toEqual([
+        'pwsh',
+        'powershell.exe'
+      ])
+    }
+  })
+
+  it('keeps bash as the non-Windows shell', () => {
+    const result = resolveShellInvocation('echo ok', {
+      platform: 'linux',
+      commandExists: (command) => command === 'bash'
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      shell: {
+        command: 'bash',
+        args: ['-lc', 'echo ok'],
+        detached: true
+      }
     })
   })
 

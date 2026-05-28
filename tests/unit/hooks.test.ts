@@ -1,7 +1,8 @@
+import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   DefaultHookRunner,
   createPreToolUseEvent,
@@ -10,6 +11,8 @@ import {
   type HookDefinition,
   type HookEvent
 } from '../../src/hooks'
+import { runCommandHookWithDependencies } from '../../src/hooks/command-runner'
+import type { ShellInvocation } from '../../src/runtime/shell-invocation'
 
 const tempDirs: string[] = []
 const originalQCodeHome = process.env.Q_CODE_HOME
@@ -160,3 +163,141 @@ describe('hook config loader', () => {
     expect(hook.scope).toBe('project')
   })
 })
+
+describe('command hook shell fallback', () => {
+  const shells: ShellInvocation[] = [
+    {
+      command: 'pwsh',
+      args: ['-Command', 'hook-command --secret token'],
+      detached: false,
+      unavailableMessage: '[PowerShell 不可用]'
+    },
+    {
+      command: 'powershell.exe',
+      args: ['-Command', 'hook-command --secret token'],
+      detached: false,
+      unavailableMessage: '[PowerShell 不可用]'
+    }
+  ]
+
+  it('falls back to powershell.exe when pwsh spawn reports ENOENT', async () => {
+    const spawnMock = vi.fn()
+    spawnMock
+      .mockImplementationOnce(() =>
+        createHookSpawnStub({
+          error: Object.assign(new Error('spawn pwsh ENOENT'), { code: 'ENOENT' })
+        })
+      )
+      .mockImplementationOnce(() =>
+        createHookSpawnStub({
+          stdout: '{"action":"continue"}'
+        })
+      )
+
+    const result = await runCommandHookWithDependencies(
+      commandHook('hook-command --secret token'),
+      preTool('f'),
+      {},
+      {
+        spawn: spawnMock,
+        resolveShell: () => shells
+      }
+    )
+
+    expect(result).toEqual({ action: 'continue' })
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+    expect(firstSpawnCommand(spawnMock)).toBe('pwsh')
+    expect(spawnMock.mock.calls[1]?.[0]).toBe('powershell.exe')
+  })
+
+  it('does not retry a fallback shell when the hook command exits non-zero', async () => {
+    const spawnMock = vi.fn(() =>
+      createHookSpawnStub({
+        stderr: 'hook failed',
+        closeCode: 1
+      })
+    )
+
+    await expect(
+      runCommandHookWithDependencies(commandHook('hook-command'), preTool('f'), {}, {
+        spawn: spawnMock,
+        resolveShell: () => shells
+      })
+    ).rejects.toThrow("hook 'command-hook' exited with 1: hook failed")
+
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+    expect(firstSpawnCommand(spawnMock)).toBe('pwsh')
+  })
+
+  it('does not include the hook command text when shell spawning fails', async () => {
+    const spawnMock = vi.fn(() =>
+      createHookSpawnStub({
+        error: Object.assign(new Error('spawn powershell.exe ENOENT'), { code: 'ENOENT' })
+      })
+    )
+
+    await expect(
+      runCommandHookWithDependencies(commandHook('hook-command --secret token'), preTool('f'), {}, {
+        spawn: spawnMock,
+        resolveShell: () => [shells[1]]
+      })
+    ).rejects.toThrow('[PowerShell 不可用] shell=powershell.exe')
+
+    await expect(
+      runCommandHookWithDependencies(commandHook('hook-command --secret token'), preTool('f'), {}, {
+        spawn: spawnMock,
+        resolveShell: () => [shells[1]]
+      })
+    ).rejects.not.toThrow('hook-command --secret token')
+  })
+})
+
+function commandHook(command: string): Extract<HookDefinition, { type: 'command' }> {
+  return {
+    name: 'command-hook',
+    type: 'command',
+    event: 'pre_tool_use',
+    scope: 'runtime',
+    command,
+    timeoutMs: 1000
+  }
+}
+
+function createHookSpawnStub(options: {
+  stdout?: string
+  stderr?: string
+  closeCode?: number | null
+  error?: Error
+}) {
+  const stdout = new EventEmitter() as EventEmitter & { setEncoding: (encoding: string) => void }
+  const stderr = new EventEmitter() as EventEmitter & { setEncoding: (encoding: string) => void }
+  stdout.setEncoding = () => undefined
+  stderr.setEncoding = () => undefined
+
+  const child = new EventEmitter() as EventEmitter & {
+    stdout: typeof stdout
+    stderr: typeof stderr
+    stdin: { end: (chunk?: string, encoding?: BufferEncoding) => void }
+  }
+  child.stdout = stdout
+  child.stderr = stderr
+  child.stdin = {
+    end: () => {
+      queueMicrotask(() => {
+        if (options.error) {
+          child.emit('error', options.error)
+          return
+        }
+        if (options.stdout) stdout.emit('data', options.stdout)
+        if (options.stderr) stderr.emit('data', options.stderr)
+        child.emit('close', options.closeCode ?? 0)
+      })
+    }
+  }
+
+  return child
+}
+
+function firstSpawnCommand(spawnMock: ReturnType<typeof vi.fn>): unknown {
+  return spawnMock.mock.calls[0]?.[0]
+}
