@@ -1392,6 +1392,8 @@ TUI 输入历史会跨进程持久化：项目历史写入 `<cwd>/.q-code/histor
 | 命令                    | 说明                   |
 | ----------------------- | ---------------------- |
 | `/context`              | 查看上下文占用矩阵     |
+| `/model [name|default]` | 查看或覆盖本会话模型   |
+| `/models [list]`        | 根据当前配置列出可用模型（TUI 可选中切换） |
 | `/sessions`             | 列出/切换/管理会话     |
 | `/history [clear|on|off]` | 查看或管理输入历史     |
 | `/usage`                | 查看 token/cache/成本  |

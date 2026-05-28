@@ -319,6 +319,29 @@ describe('terminal state reducer', () => {
     expect(state.sessionPicker).toBeUndefined()
   })
 
+  it('tracks models picker state without adding transcript noise', () => {
+    let state = createInitialTerminalState()
+    state = terminalReducer(state, {
+      type: 'models_picker',
+      models: [
+        { id: 'gpt-5.5', displayName: 'GPT-5.5' },
+        { id: 'gpt-5.5-mini', displayName: 'GPT-5.5 mini' },
+        { id: 'gpt-4.1', displayName: 'GPT-4.1' }
+      ],
+      selectedIndex: 2,
+      activeModelName: 'gpt-5.5',
+      endpointLabel: 'https://api.example.com'
+    })
+
+    expect(state.modelsPicker?.selectedIndex).toBe(2)
+    expect(state.modelsPicker?.models[2]?.id).toBe('gpt-4.1')
+    expect(state.modelsPicker?.activeModelName).toBe('gpt-5.5')
+    expect(state.transcript).toHaveLength(0)
+
+    state = terminalReducer(state, { type: 'models_picker_close' })
+    expect(state.modelsPicker).toBeUndefined()
+  })
+
   it('keeps status details hidden by default and toggles them without transcript noise', () => {
     let state = createInitialTerminalState()
     expect(state.statusDetailsVisible).toBe(false)

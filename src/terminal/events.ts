@@ -144,6 +144,16 @@ export type TerminalEvent =
   | (TerminalBaseEvent & {
       type: 'session_picker_close'
     })
+  | (TerminalBaseEvent & {
+      type: 'models_picker'
+      models: Array<{ id: string; displayName: string }>
+      selectedIndex: number
+      activeModelName: string
+      endpointLabel: string
+    })
+  | (TerminalBaseEvent & {
+      type: 'models_picker_close'
+    })
 
 export type TerminalEventListener = (event: TerminalEvent) => void
 

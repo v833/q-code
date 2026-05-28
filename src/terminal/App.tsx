@@ -78,6 +78,56 @@ export interface TerminalAppProps {
   inputHistoryStore?: HistoryStore
 }
 
+function ModelsPickerPanel({
+  picker
+}: {
+  picker?: {
+    models: Array<{ id: string; displayName: string }>
+    selectedIndex: number
+    activeModelName: string
+    endpointLabel: string
+  }
+}): React.JSX.Element | null {
+  if (!picker || picker.models.length === 0) return null
+  const selectedModel = picker.models[picker.selectedIndex]
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text color="cyan">
+        Models <Text color="gray">({picker.endpointLabel})</Text>
+      </Text>
+      <Text color="gray">  active: {picker.activeModelName}</Text>
+      <Box marginTop={1}>
+        <Box width={3}><Text color="yellow"> </Text></Box>
+        <Box width={40}><Text color="cyan">Display</Text></Box>
+        <Box width={22}><Text color="cyan">ID</Text></Box>
+        <Text color="cyan">Status</Text>
+      </Box>
+      {picker.models.map((model, index) => {
+        const selected = index === picker.selectedIndex
+        const active = model.id === picker.activeModelName
+        return (
+          <Box key={model.id}>
+            <Box width={3}>
+              <Text color={selected ? 'yellow' : 'gray'}>{selected ? '›' : ' '}</Text>
+            </Box>
+            <Box width={40}>
+              <Text color={selected ? 'white' : 'gray'}>{truncate(model.displayName, 38)}</Text>
+            </Box>
+            <Box width={22}>
+              <Text color="gray">{truncate(model.id, 20)}</Text>
+            </Box>
+            <Text color={active ? 'yellow' : 'gray'}>{active ? 'active' : ''}</Text>
+          </Box>
+        )
+      })}
+      <Text color="gray">
+        {'  '}↑/↓ 选择 · Enter 切换 (/model) · Esc 关闭
+        {selectedModel ? ` · 当前选择: ${selectedModel.id}` : ''}
+      </Text>
+    </Box>
+  )
+}
+
 function SessionPickerPanel({
   picker,
   renaming
@@ -373,6 +423,57 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
 
     if (isBusy && !isCtrlC) return
 
+    if (state.modelsPicker && !isBusy) {
+      if (key.upArrow) {
+        const count = state.modelsPicker.models.length
+        if (count > 0) {
+          const selectedIndex =
+            state.modelsPicker.selectedIndex <= 0 ? count - 1 : state.modelsPicker.selectedIndex - 1
+          dispatch({
+            type: 'models_picker',
+            models: state.modelsPicker.models,
+            selectedIndex,
+            activeModelName: state.modelsPicker.activeModelName,
+            endpointLabel: state.modelsPicker.endpointLabel
+          })
+        }
+        return
+      }
+      if (key.downArrow) {
+        const count = state.modelsPicker.models.length
+        if (count > 0) {
+          const selectedIndex =
+            state.modelsPicker.selectedIndex >= count - 1 ? 0 : state.modelsPicker.selectedIndex + 1
+          dispatch({
+            type: 'models_picker',
+            models: state.modelsPicker.models,
+            selectedIndex,
+            activeModelName: state.modelsPicker.activeModelName,
+            endpointLabel: state.modelsPicker.endpointLabel
+          })
+        }
+        return
+      }
+      if (key.escape) {
+        dispatch({ type: 'models_picker_close' })
+        return
+      }
+      if (key.return) {
+        const selected = state.modelsPicker.models[state.modelsPicker.selectedIndex]
+        dispatch({ type: 'models_picker_close' })
+        if (selected) {
+          setIsBusy(true)
+          void Promise.resolve(props.onSubmit(`/model ${selected.id}`))
+            .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+            .finally(() => setIsBusy(false))
+        }
+        return
+      }
+
+      // models picker 打开期间，禁止向输入框写入普通字符。
+      return
+    }
+
     if (state.sessionPicker && !isBusy) {
       // session picker 的重命名输入模式：接管按键，不写入底部输入框。
       if (sessionPickerRenaming) {
@@ -658,6 +759,7 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
         <ConversationView items={liveItems} />
         <StatusBar state={state} isBusy={isBusy} hasStreamingAssistant={hasStreamingAssistant} />
         <SessionPickerPanel picker={state.sessionPicker} renaming={sessionPickerRenaming} />
+        <ModelsPickerPanel picker={state.modelsPicker} />
         {suggestionsVisible ? (
           <CommandSuggestions
             suggestions={showFileMentions ? renderedFileMentions : renderedSlashCommands}
@@ -669,7 +771,12 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
         <InputPrompt
           value={input.value}
           cursor={input.cursor}
-          isBusy={isBusy || state.sessionPicker !== undefined || sessionPickerRenaming !== undefined}
+          isBusy={
+            isBusy ||
+            state.sessionPicker !== undefined ||
+            sessionPickerRenaming !== undefined ||
+            state.modelsPicker !== undefined
+          }
           useRealCursor={process.env.Q_CODE_TUI_CURSOR?.trim().toLowerCase() === 'ansi'}
           historySearchLabel={historySearchLabel}
           hasUndoClear={!input.value && input.clearedValue !== undefined}

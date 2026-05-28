@@ -10,6 +10,7 @@ import { applyRuntimeConfig } from './config/runtime-config';
 import { fmtBanner, fmtContextUsage, fmtStop } from './utils/logger';
 import { createInterface } from 'node:readline';
 import { startTerminalRuntime, type TerminalRuntime } from './terminal/runtime';
+import { fetchOpenAiModels } from './runtime/init-cli';
 import {
   createHistoryStore,
   formatHistoryEntries,
@@ -1822,6 +1823,13 @@ async function main() {
         handleModelCommand,
       ),
       command(
+        '/models',
+        '根据当前配置列出可用模型（可在 TUI 中选择切换）',
+        '/models [list]',
+        'Core',
+        (input) => handleModelsCommand(input),
+      ),
+      command(
         '/history',
         '查看或管理输入历史',
         '/history [clear|on|off]',
@@ -1967,6 +1975,77 @@ async function main() {
     modelProviderKind = modelState.providerKind;
     emitSessionInfo();
     print(`\n  [Model] 本会话模型已切换为: ${requested}`);
+  }
+
+  async function handleModelsCommand(input: SlashCommandInput): Promise<void> {
+    const subcommand = input.args.trim().split(/\s+/).filter(Boolean)[0]?.toLowerCase() ?? 'list';
+    if (subcommand !== 'list') {
+      print('\n  [Models] 用法: /models list');
+      return;
+    }
+
+    const baseURL = normalizeBaseURL(getRequiredEnv('OPENAI_BASE_URL'));
+    const apiKey = getRequiredEnv('OPENAI_API_KEY');
+    const activeModelName = sessionModelOverride ?? defaultModelName ?? getRequiredEnv('OPENAI_MODEL');
+    const endpointLabel = safeEndpointLabel(process.env.OPENAI_BASE_URL);
+
+    const result = await fetchOpenAiModels(baseURL, apiKey);
+    if (!result.ok) {
+      print(`\n  [Models] 获取失败: ${result.message}`);
+      return;
+    }
+
+    const models = result.models;
+    const modelOptions = models.map((id) => ({ id, displayName: formatModelDisplayName(id) }));
+    if (useTui) {
+      const preferredIndex = modelOptions.findIndex((model) => model.id === activeModelName);
+      const selectedIndex = preferredIndex >= 0 ? preferredIndex : 0;
+      emitTerminal({
+        type: 'models_picker',
+        models: modelOptions.slice(0, 200),
+        selectedIndex: Math.min(selectedIndex, Math.max(0, Math.min(modelOptions.length - 1, 199))),
+        activeModelName,
+        endpointLabel
+      });
+      return;
+    }
+
+    print(
+      [
+        '\nModels',
+        '',
+        `  endpoint: ${endpointLabel}`,
+        `  active:   ${activeModelName}`,
+        '',
+        ...modelOptions.map((model) =>
+          model.displayName === model.id
+            ? `  - ${model.id}`
+            : `  - ${model.displayName} (${model.id})`
+        )
+      ].join('\n')
+    );
+  }
+
+  function formatModelDisplayName(modelId: string): string {
+    const id = modelId.trim();
+    if (!id) return modelId;
+
+    // Common OpenAI-style ids: gpt-4.1-mini -> GPT-4.1 mini
+    if (id.toLowerCase().startsWith('gpt-')) {
+      const rest = id.slice(4);
+      return `GPT-${rest.replaceAll('-', ' ')}`;
+    }
+
+    // o1 / o3 / o4-mini -> O1 / O3 mini
+    const oMatch = id.match(/^o(\d)(-.+)?$/i);
+    if (oMatch) {
+      const series = oMatch[1];
+      const suffix = oMatch[2] ? oMatch[2].slice(1).replaceAll('-', ' ') : '';
+      return suffix ? `O${series} ${suffix}` : `O${series}`;
+    }
+
+    // Fallback: preserve original id.
+    return id;
   }
 
   async function handleHistoryCommand(input: SlashCommandInput): Promise<void> {

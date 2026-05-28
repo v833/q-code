@@ -80,6 +80,12 @@ export interface TerminalState {
     selectedIndex: number
     currentSessionId: string
   }
+  modelsPicker?: {
+    models: Array<{ id: string; displayName: string }>
+    selectedIndex: number
+    activeModelName: string
+    endpointLabel: string
+  }
   progressItems: TerminalProgressItem[]
   backgroundAgents: TerminalBackgroundAgentItem[]
   jitMessages: string[]
@@ -100,6 +106,7 @@ export function createInitialTerminalState(): TerminalState {
     statusDetailsVisible: false,
     slashCommands: [],
     sessionPicker: undefined,
+    modelsPicker: undefined,
     progressItems: [],
     backgroundAgents: [],
     jitMessages: [],
@@ -430,6 +437,23 @@ export function terminalReducer(state: TerminalState, event: TerminalEvent): Ter
       return {
         ...state,
         sessionPicker: undefined
+      }
+
+    case 'models_picker':
+      return {
+        ...state,
+        modelsPicker: {
+          models: event.models,
+          selectedIndex: event.selectedIndex,
+          activeModelName: event.activeModelName,
+          endpointLabel: event.endpointLabel
+        }
+      }
+
+    case 'models_picker_close':
+      return {
+        ...state,
+        modelsPicker: undefined
       }
 
     case 'progress':
