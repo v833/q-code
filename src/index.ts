@@ -58,8 +58,8 @@ import {
   deleteSession,
   exportSession,
   getSessionSummary,
-  listAllSessions,
-  listProjectSessions,
+  listAllSessionsFast,
+  listProjectSessionsFast,
   purgeSessions,
   renameSession,
   restoreSession,
@@ -2102,8 +2102,8 @@ async function main() {
     if (subcommand === 'list') {
       const includeAllProjects = parsed.flags.has('all');
       const sessions = includeAllProjects
-        ? listAllSessions({ cwd: activeStore.cwd })
-        : listProjectSessions({ cwd: activeStore.cwd });
+        ? listAllSessionsFast({ cwd: activeStore.cwd })
+        : listProjectSessionsFast({ cwd: activeStore.cwd });
       const visible = sessions.slice(0, includeAllProjects ? sessions.length : 20);
       pendingSessionSelection =
         !includeAllProjects && visible.length > 0 ? { sessions: visible, selectedIndex: 0 } : undefined;

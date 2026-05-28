@@ -453,6 +453,19 @@ export function listProjectSessions(options: Pick<SessionStoreOptions, 'cwd' | '
   return listSessionsInProject(storage)
 }
 
+/**
+ * 快速列出当前项目会话（避免读取/解析 transcript）。
+ *
+ * 用于 TUI 列表首屏渲染：优先使用 `.meta.json`，否则退化为文件系统时间戳与最小字段，
+ * 以避免大量 `readFileSync + JSON.parse` 阻塞事件循环导致界面卡死。
+ */
+export function listProjectSessionsFast(
+  options: Pick<SessionStoreOptions, 'cwd' | 'sessionDir'> = {}
+): SessionSummary[] {
+  const storage = getProjectStorageInfo(options.cwd ?? process.cwd(), options.sessionDir)
+  return listSessionsInProject(storage, { eagerReadTranscript: false })
+}
+
 /** 列出存储根下所有项目的会话。 */
 export function listAllSessions(options: Pick<SessionStoreOptions, 'cwd' | 'sessionDir'> = {}): SessionSummary[] {
   const storage = getProjectStorageInfo(options.cwd ?? process.cwd(), options.sessionDir)
@@ -466,6 +479,26 @@ export function listAllSessions(options: Pick<SessionStoreOptions, 'cwd' | 'sess
         projectKey: entry.name,
         projectDir: join(projectsDir, entry.name)
       })
+    )
+    .sort(sortSessionsByUpdatedAt)
+}
+
+/** 快速列出跨项目会话（避免读取/解析 transcript）。 */
+export function listAllSessionsFast(options: Pick<SessionStoreOptions, 'cwd' | 'sessionDir'> = {}): SessionSummary[] {
+  const storage = getProjectStorageInfo(options.cwd ?? process.cwd(), options.sessionDir)
+  const projectsDir = join(storage.rootDir, PROJECTS_DIR)
+  if (!existsSync(projectsDir)) return []
+  return readdirSync(projectsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) =>
+      listSessionsInProject(
+        {
+          ...storage,
+          projectKey: entry.name,
+          projectDir: join(projectsDir, entry.name)
+        },
+        { eagerReadTranscript: false }
+      )
     )
     .sort(sortSessionsByUpdatedAt)
 }
@@ -652,9 +685,10 @@ function normalizeOptions(options: SessionStoreOptions | string): SessionStoreOp
 
 function listSessionsInProject(
   storage: ProjectStorageInfo,
-  options: { includeTrash?: boolean } = {}
+  options: { includeTrash?: boolean; eagerReadTranscript?: boolean } = {}
 ): SessionSummary[] {
   if (!existsSync(storage.projectDir)) return []
+  const eagerReadTranscript = options.eagerReadTranscript ?? true
   const active = readdirSync(storage.projectDir, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(JSONL_EXTENSION))
     .map((entry) =>
@@ -662,7 +696,8 @@ function listSessionsInProject(
         storage,
         sessionId: entry.name.slice(0, -JSONL_EXTENSION.length),
         transcriptPath: join(storage.projectDir, entry.name),
-        metaPath: join(storage.projectDir, `${entry.name.slice(0, -JSONL_EXTENSION.length)}${META_EXTENSION}`)
+        metaPath: join(storage.projectDir, `${entry.name.slice(0, -JSONL_EXTENSION.length)}${META_EXTENSION}`),
+        eagerReadTranscript
       })
     )
   const trashed = options.includeTrash ? listTrashedSessionsInProject(storage) : []
@@ -682,7 +717,8 @@ function listTrashedSessionsInProject(storage: ProjectStorageInfo): SessionSumma
         sessionId,
         transcriptPath: join(sessionTrashDir, `${sessionId}${JSONL_EXTENSION}`),
         metaPath: join(sessionTrashDir, `${sessionId}${META_EXTENSION}`),
-        trashed: true
+        trashed: true,
+        eagerReadTranscript: true
       })
     })
     .sort(sortSessionsByUpdatedAt)
@@ -698,10 +734,16 @@ function buildSessionSummaryFromPaths(params: {
   transcriptPath: string
   metaPath: string
   trashed?: boolean
+  eagerReadTranscript?: boolean
 }): SessionSummary {
   const metadata = readMetadata(params.metaPath)
   if (metadata && shouldUseMetadataFastPath(params, metadata)) {
     return summarizeSessionFromMetadata(params, metadata)
+  }
+
+  const eagerReadTranscript = params.eagerReadTranscript ?? true
+  if (!eagerReadTranscript) {
+    return summarizeSessionFromFilesystem(params, metadata)
   }
 
   const entries = readEntriesFromPath(params.transcriptPath)
@@ -726,6 +768,37 @@ function buildSessionSummaryFromPaths(params: {
     return { ...summary, ...metadataToSummaryFields(metadata) }
   }
   return summary
+}
+
+function summarizeSessionFromFilesystem(
+  params: {
+    storage: ProjectStorageInfo
+    sessionId: string
+    transcriptPath: string
+    metaPath: string
+    trashed?: boolean
+  },
+  metadata: SessionMetadata | undefined
+): SessionSummary {
+  const updatedAt = metadata?.updatedAt ?? fileMtimeIso(params.transcriptPath)
+  const startedAt = metadata?.createdAt ?? fileBirthIso(params.transcriptPath) ?? updatedAt
+
+  return {
+    sessionId: params.sessionId,
+    cwd: metadata?.cwd ?? params.storage.cwd,
+    projectKey: metadata?.projectKey ?? params.storage.projectKey,
+    transcriptPath: params.transcriptPath,
+    metaPath: params.metaPath,
+    startedAt,
+    updatedAt,
+    messageCount: metadata?.messageCount ?? 0,
+    totalTokens: metadata?.totalTokens ?? 0,
+    ...(metadata?.displayName ? { displayName: metadata.displayName } : {}),
+    ...(metadata?.lastUserPromptDigest ? { lastUserPromptDigest: metadata.lastUserPromptDigest } : {}),
+    ...(metadata?.model ? { model: metadata.model } : {}),
+    tags: metadata?.tags ?? [],
+    ...(params.trashed ? { trashed: true } : {})
+  }
 }
 
 function shouldUseMetadataFastPath(
