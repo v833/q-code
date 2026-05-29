@@ -19,7 +19,7 @@ describe('duck-persona', () => {
     expect(isThemedDuckPersona('shanghai')).toBe(true)
   })
 
-  it('主题鸭 prompt 含方言纪律，小黄鸭无独立 system 段落', () => {
+  it('主题鸭 prompt 含方言纪律，小黄鸭无独立主题提示', () => {
     const shanghai = buildThemedDuckPersonaPrompt('shanghai')
     const heilongjiang = buildThemedDuckPersonaPrompt('heilongjiang')
 

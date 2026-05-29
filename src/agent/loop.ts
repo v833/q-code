@@ -152,6 +152,8 @@ export interface AgentLoopOptions {
     messages: ModelMessage[],
     context: { step: number; usageAnchor?: UsageAnchor }
   ) => Promise<ModelMessage[] | AgentLoopPreflightResult>
+  /** 每个模型请求末尾临时追加的消息；不进入会话历史或压缩结果。 */
+  transientMessages?: ModelMessage[]
   contextUsage?: (
     messages: ModelMessage[],
     context: { usageAnchor?: UsageAnchor }
@@ -325,7 +327,11 @@ export async function agentLoop(
         stepMessages = []
         stepUsage = undefined
         stepFinishReason = undefined
-        requestMessageCount = messages.length
+        const requestMessages =
+          options.transientMessages && options.transientMessages.length > 0
+            ? [...messages, ...options.transientMessages]
+            : messages
+        requestMessageCount = requestMessages.length
         requestToolSchemaTokens = registry.countTokenEstimate().active
         const stepAbortController = new AbortController()
         const abortSignal = mergeAbortSignals(options.abortSignal, stepAbortController.signal)
@@ -356,7 +362,7 @@ export async function agentLoop(
               },
               { resultEnvelope: true }
             ),
-            messages,
+            messages: requestMessages,
             maxOutputTokens: outputTokenLimit,
             maxRetries: 0,
             ...(options.providerOptions ? { providerOptions: options.providerOptions } : {}),

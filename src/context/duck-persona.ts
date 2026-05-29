@@ -116,7 +116,7 @@ export const DUCK_PERSONAS: Record<DuckPersonaId, DuckPersona> = {
   heilongjiang: HEILONGJIANG_PERSONA,
 }
 
-/** 默认人格：小黄鸭（不追加主题 system prompt）。 */
+/** 默认人格：小黄鸭（不追加主题临时消息）。 */
 export const DEFAULT_DUCK_PERSONA_ID: DuckPersonaId = 'yellow'
 
 /** TUI `/ya` 选择器展示项。 */
@@ -137,7 +137,7 @@ export function getDuckPersona(id: DuckPersonaId = DEFAULT_DUCK_PERSONA_ID): Duc
   return DUCK_PERSONAS[id] ?? DUCK_PERSONAS[DEFAULT_DUCK_PERSONA_ID]
 }
 
-/** 生成主题鸭可选 system prompt 段落（仅 shanghai / heilongjiang）。 */
+/** 生成主题鸭临时提示文本（仅 shanghai / heilongjiang）。 */
 export function buildThemedDuckPersonaPrompt(personaId: ThemedDuckPersonaId): string {
   return THEMED_PERSONA_PROMPTS[personaId]
 }
@@ -200,7 +200,7 @@ export function formatDuckPersonaHelp(current: DuckPersonaId): string {
     '',
     `  active:  ${active.name}（${active.subtitle}）`,
     '',
-    '  默认是小黄鸭（不追加主题 system prompt）；主题鸭需主动切换：',
+    '  默认是小黄鸭（不追加主题提示）；主题鸭需主动切换：',
     `    ${DUCK_PERSONAS.yellow.name}  /ya yellow | 默认 | 小黄鸭`,
     `    ${DUCK_PERSONAS.shanghai.name}  /ya shanghai | 上海 | 降压`,
     `    ${DUCK_PERSONAS.heilongjiang.name}  /ya heilongjiang | 黑龙江 | 屁老`,

@@ -1713,7 +1713,6 @@ async function main() {
   ): Promise<void> {
     injectPendingTaskNotifications();
     await injectPlanModeMessages();
-    injectDuckPersonaMessage();
 
     const promptHook = await hooks.run(
       createHookEvent(
@@ -1772,6 +1771,7 @@ async function main() {
           const result = await agentLoop(model, registry, messages, turnSystem, {
             maxOutputTokens: defaultMaxOutputTokens,
             escalatedMaxOutputTokens,
+            transientMessages: getDuckPersonaTransientMessages(),
             quiet: useTui,
             modelName: currentModelName(),
             modelWaitHeartbeatMs,
@@ -1998,16 +1998,15 @@ async function main() {
     activeStore.append(attachment);
   }
 
-  /** 主题鸭人格通过用户消息注入，不进入 system prompt，保持 system/tools 前缀稳定。 */
-  function injectDuckPersonaMessage(): void {
-    if (!isThemedDuckPersona(duckPersona)) return;
-    const text = buildThemedDuckPersonaPrompt(duckPersona);
-    const msg: ModelMessage = {
-      role: 'user',
-      content: text,
-    };
-    messages.push(msg);
-    activeStore.append(msg);
+  /** 主题鸭人格只作为本轮临时消息追加到请求末尾，不进入 system prompt 或会话历史。 */
+  function getDuckPersonaTransientMessages(): ModelMessage[] {
+    if (!isThemedDuckPersona(duckPersona)) return [];
+    return [
+      {
+        role: 'user',
+        content: buildThemedDuckPersonaPrompt(duckPersona),
+      },
+    ];
   }
 
   async function handleModeCommand(command: string): Promise<void> {

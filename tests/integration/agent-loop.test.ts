@@ -49,6 +49,21 @@ describe('agentLoop 集成（mock model + mock tools）', () => {
     expect(result.messages.some((m) => m.role === 'assistant')).toBe(true)
   })
 
+  it('transientMessages 只参与模型请求，不写回会话历史', async () => {
+    const { model } = createMockModel([{ text: '已完成。', finishReason: 'stop' }])
+    const registry = makeRegistry()
+    const messages: ModelMessage[] = [{ role: 'user', content: '你好' }]
+
+    const result = await agentLoop(model, registry, messages, 'sys', {
+      quiet: true,
+      transientMessages: [{ role: 'user', content: '临时鸭子人格' }]
+    })
+
+    expect(messageListContains(model.doStreamCalls[0]?.prompt, '临时鸭子人格')).toBe(true)
+    expect(messageListContains(result.messages, '临时鸭子人格')).toBe(false)
+    expect(messageListContains(messages, '临时鸭子人格')).toBe(false)
+  })
+
   it('多步 ReAct：工具结果回写 messages 后模型继续', async () => {
     const { tool: probe, calls } = makeRecordingTool('probe', '工具返回值-X')
     const registry = makeRegistry(probe)
@@ -634,6 +649,25 @@ function createAuditStub(records: Array<{ event: string; payload: Record<string,
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function messageListContains(
+  messages: Array<{ content?: unknown }> | undefined,
+  text: string
+): boolean {
+  return messages?.some((message) => contentText(message.content).includes(text)) ?? false
+}
+
+function contentText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((part) => {
+      if (typeof part === 'string') return part
+      if (isRecord(part) && typeof part.text === 'string') return part.text
+      return ''
+    })
+    .join('\n')
 }
 
 function findAssistantReasoning(

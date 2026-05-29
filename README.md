@@ -1398,6 +1398,8 @@ System Prompt 由 `PromptBuilder` 按管道顺序拼接，每个 Pipe 可根据�
 
 TUI 状态栏默认只展示当前状态；需要查看模式、模型、cache 策略、任务系统、context 进度和 token 摘要时使用 `/status on` 打开详情，`/status off` 关闭。已完成历史会静态输出，流式输出期间只刷新当前轮，并限制 streaming 预览高度以减少 VSCode 等终端闪烁。执行中会同时保留中间进度旁白和工具调用摘要；等最终回答出现后，已完成工具调用会折叠，只留下对话内容。输入 `/` 时命令建议按类别分组展示，工具调用默认以一行紧凑摘要呈现，失败时显示恢复建议。
 
+`/ya [list|yellow|shanghai|heilongjiang|toggle]` 可切换主 Agent 鸭子人格。默认小黄鸭不注入额外提示；主题鸭只作为本轮临时用户消息放在模型请求末尾，不进入 system prompt、会话历史或压缩快照，因此切换鸭子不会改变 `/cache` 追踪的 system/tools prefix。
+
 TUI 输入历史会跨进程持久化：项目历史写入 `<cwd>/.q-code/history.jsonl`，全局历史写入 `<Q_CODE_HOME>/history/global.jsonl`，默认 `Q_CODE_HISTORY_SCOPE=both` 会同时读取/写入两边并按时间合并去重。空输入、空格开头输入、连续重复输入，以及包含 `password=` / `api_key=` / `token=` 的内容默认不会写入；可在 `settings.json` 中配置 `history.excludePatterns` 增加项目或用户级过滤规则，或设置 `history.excludeDefaults=false` 关闭默认敏感词过滤。`Q_CODE_HISTORY_REDACT=true` 会把历史文件切换为 SHA-256 + 前 40 字符摘要模式。`/history` 查看最近 30 条，`/history clear [global|project|both]` 清空指定作用域，`/history off` / `/history on` 可临时暂停或恢复本会话记录。
 
 | 命令                    | 说明                   |
@@ -1411,6 +1413,7 @@ TUI 输入历史会跨进程持久化：项目历史写入 `<cwd>/.q-code/histor
 | `/cost`                 | `/usage` 的兼容别名    |
 | `/cache [status|auto|on|off]` | 查看或切换 cache 策略 |
 | `/status [on|off|toggle]` | 打开或关闭 TUI 状态详情 |
+| `/ya [list|yellow|shanghai|heilongjiang|toggle]` | 查看或切换鸭子人格 |
 | `/compact [focus]`      | 手动触发上下文压缩     |
 | `/mode`                 | 查看当前模式           |
 | `/mode plan`            | 进入 Plan Mode         |
