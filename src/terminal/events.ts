@@ -111,6 +111,7 @@ export type TerminalEvent =
       agentMode: string
       taskMode: string
       cacheMode: CacheMode
+      duckPersona?: string
     })
   | (TerminalBaseEvent & {
       type: 'status_details_visibility'

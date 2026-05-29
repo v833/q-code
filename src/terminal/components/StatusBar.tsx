@@ -24,6 +24,7 @@ export function StatusBar({
     state.sessionInfo?.modelName ? `model ${shortModelName(state.sessionInfo.modelName)}` : '',
     state.sessionInfo?.cacheMode ? `cache ${state.sessionInfo.cacheMode}` : '',
     state.sessionInfo?.taskMode ? `tasks ${state.sessionInfo.taskMode}` : '',
+    state.sessionInfo?.duckPersona ? `ya ${state.sessionInfo.duckPersona}` : '',
     state.usage ? `tokens ${formatCompactNumber(state.usage.totalTokens)}` : '',
     runningAgents ? `bg ${runningAgents}` : '',
     state.sessionInfo?.sessionId ? `session ${shortSessionId(state.sessionInfo.sessionId)}` : ''

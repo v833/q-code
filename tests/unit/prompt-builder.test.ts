@@ -67,11 +67,18 @@ describe('PromptBuilder System Prompt 管道', () => {
   })
 
   describe('内置 pipe', () => {
-    it('coreRules 输出非空', () => {
+    it('coreRules 输出非空并含降压鸭人格', () => {
       const out = coreRules()(baseCtx())
       expect(out).toBeTruthy()
+      expect(out).toContain('降压鸭')
       expect(out).toContain('可公开的进度说明')
       expect(out).toContain('不要暴露隐藏推理链')
+    })
+
+    it('coreRules 可按 duckPersona 切换屁老鸭', () => {
+      const out = coreRules()(baseCtx({ duckPersona: 'heilongjiang' }))
+      expect(out).toContain('屁老鸭')
+      expect(out).toContain('扯犊子')
     })
 
     it('modeContext 区分 plan 与 normal 模式', () => {

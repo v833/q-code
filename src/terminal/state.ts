@@ -63,6 +63,7 @@ export interface TerminalSessionInfo {
   agentMode: string
   taskMode: string
   cacheMode: CacheMode
+  duckPersona?: string
 }
 
 /** TUI 全局 UI 状态，由 {@link terminalReducer} 根据事件更新。 */
@@ -384,7 +385,8 @@ export function terminalReducer(state: TerminalState, event: TerminalEvent): Ter
           modelName: event.modelName,
           agentMode: event.agentMode,
           taskMode: event.taskMode,
-          cacheMode: event.cacheMode
+          cacheMode: event.cacheMode,
+          ...(event.duckPersona ? { duckPersona: event.duckPersona } : {}),
         }
       }
 

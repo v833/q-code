@@ -57,6 +57,14 @@ import {
   toolGuide,
 } from './context/prompt-builder';
 import {
+  DEFAULT_DUCK_PERSONA_ID,
+  formatDuckPersonaHelp,
+  getDuckPersona,
+  resolveDuckPersonaArg,
+  resolveNextDuckPersona,
+  type DuckPersonaId,
+} from './context/duck-persona';
+import {
   deleteSession,
   exportSession,
   getSessionSummary,
@@ -620,6 +628,7 @@ async function main() {
   let planFilePath = getPlanFilePath(planOptions);
   let agentMode: ToolVisibilityMode = startInPlanMode ? 'plan' : 'normal';
   let taskMode: TaskMode = 'task';
+  let duckPersona: DuckPersonaId = DEFAULT_DUCK_PERSONA_ID;
   let needsPlanModeExitAttachment = false;
   let pendingPlanApproval = false;
   let pendingPlanSummary = '';
@@ -660,6 +669,7 @@ async function main() {
         modelName: currentModelNameForSnapshot(),
         agentMode,
         taskMode,
+        duckPersona,
         lastUserPromptDigest,
         ...(lastToolCall ? { lastToolCall } : {}),
         activeTurnInFlight,
@@ -940,6 +950,7 @@ async function main() {
       sessionId,
       agentMode,
       taskMode,
+      duckPersona,
       planFilePath,
       taskContext: options.taskContext,
       todoContext: options.todoContext,
@@ -1055,6 +1066,7 @@ async function main() {
       agentMode,
       taskMode,
       cacheMode: usageTracker.getCacheMode(),
+      duckPersona,
     });
   }
 
@@ -1297,6 +1309,7 @@ async function main() {
     print(
       `任务系统: ${taskMode} (${taskMode === 'task' ? 'Task V2 持久化任务图' : 'TodoWrite V1 会话清单'})`,
     );
+    print(`鸭子人格: ${getDuckPersona(duckPersona).name}`);
     if (agentMode === 'plan') print(`Plan 文件: ${planFilePath}`);
     print(
       `Context 上限: ${contextLimitTokens} tokens，压缩阈值: ${compactTriggerTokens} tokens (${Math.round(
@@ -2204,11 +2217,46 @@ async function main() {
         'Agents',
         (input) => handleTeamsCommand(input.raw),
       ),
+      command(
+        '/ya',
+        '查看或切换鸭子人格（降压鸭 / 屁老鸭）',
+        '/ya [shanghai|heilongjiang|toggle]',
+        'Core',
+        (input) => handleYaCommand(input.args),
+        ['/duck'],
+      ),
       command('/exit', '退出当前会话', '/exit', 'Core', () => closeCli(), [
         '/quit',
         '/bye',
       ]),
     ];
+  }
+
+  function handleYaCommand(rawArgs: string): void {
+    const arg = rawArgs.trim();
+    if (!arg) {
+      print(formatDuckPersonaHelp(duckPersona));
+      return;
+    }
+
+    const resolved = resolveDuckPersonaArg(arg);
+    if (!resolved) {
+      print(
+        '\n  [Ya] 未知选项。可用: shanghai（降压鸭）、heilongjiang（屁老鸭）、toggle',
+      );
+      return;
+    }
+
+    const next = resolveNextDuckPersona(duckPersona, resolved);
+    if (next === duckPersona) {
+      print(`\n  [Ya] 当前已是 ${getDuckPersona(next).name}`);
+      return;
+    }
+
+    duckPersona = next;
+    emitSessionInfo();
+    const persona = getDuckPersona(next);
+    print(`\n  [Ya] 已切换到 ${persona.name}（${persona.subtitle}）`);
   }
 
   function handleModelCommand(input: SlashCommandInput): void {
@@ -3672,6 +3720,7 @@ async function main() {
 
   const startupDuckBanner = formatStartupDuckBanner({
     teamsEnabled: isAgentTeamsEnabled(),
+    duckPersona,
   });
   if (!dumpSystemPrompt) {
     await maybeShowChangelogNotice({
