@@ -1,5 +1,5 @@
 /**
- * 主 Agent 鸭子人格：默认「小黄鸭」（无额外 system prompt）；主题鸭通过 `duckPersonaContext` pipe 可选追加。
+ * 主 Agent 鸭子人格：默认「小黄鸭」（无额外注入）；主题鸭通过本轮用户消息注入，不进 system prompt。
  */
 
 /** 可切换的鸭子人格 id。 */

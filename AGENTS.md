@@ -82,7 +82,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `src/index.ts`：CLI 启动、交互循环、模式切换、上下文压缩调度和整体编排。
 - `src/agent/`：核心 Agent Loop、重试、循环检测、模型等待心跳与单步模型请求超时。
 - `src/agents/`：SubAgent、后台 Agent、Agent Teams、worktree、mailbox、notification-store。
-- `src/context/`：System Prompt 管道、鸭子人格（`duck-persona.ts`，主题鸭经 `duckPersonaContext` 可选 pipe 追加）、上下文压缩与 offload、Plan Mode 附件/计划文件/意图识别、任务、Todo、记忆、运行环境和项目指令加载。
+- `src/context/`：System Prompt 管道、鸭子人格（`duck-persona.ts`，主题鸭通过用户消息注入，不进 system prompt）、上下文压缩与 offload、Plan Mode 附件/计划文件/意图识别、任务、Todo、记忆、运行环境和项目指令加载。
 - `src/tools/`：内置工具定义、注册表（含审计/Hooks 包装层）、自定义工具目录加载器、文件/搜索/计划/任务/团队/Memory/Skill/GitLab KB/Agent 等工具；`shell-tools.ts` 负责 `f`、后台 shell job、输出 spill、cwd 策略和危险命令/交互保护。
 - `src/mcp/`：MCP 配置、连接、工具适配和注册表。
 - `src/skills/`：Skills 加载、预算、条件激活和斜杠命令展开。
@@ -120,7 +120,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - 新代码/写文件/审计/安全约定 → `## 实现约定`
   - 新测试套件或专项跑法 → `## 测试策略`
   - PR 中没改 `AGENTS.md` 的新功能，视为未完成；评审优先回退或要求补全。
-- 鸭子人格默认「小黄鸭」不改动 `coreRules`（保持 provider cache 前缀稳定）；`/ya` 选中主题鸭时由 `duckPersonaContext` pipe 在 core 之后可选追加人格段落。
+- 鸭子人格默认「小黄鸭」不进 system prompt（保持 system/tools 前缀稳定）；`/ya` 选中主题鸭时通过用户消息注入，不进入 system prompt pipe。
 - 文件和会话持久化逻辑优先使用项目已有的原子写入、路径计算和存储 helper（如 `SessionStore`、`Q_CODE_HOME` 解析、`auditDir` 解析），避免临时拼接路径。
 - Prompt、工具描述、项目说明多为中文；新增用户可见文案时优先保持中文一致性。
 - 新增环境变量需同时更新：(a) `.env.example`；(b) `src/config/runtime-config.ts` 的 `SECTION_ALIASES`（让 toml 配置可用）；(c) README 配置表。

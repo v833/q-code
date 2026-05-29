@@ -40,7 +40,6 @@ import { agentLoop, type AgentLoopPreflightResult } from './agent/loop';
 import {
   coreRules,
   deferredTools,
-  duckPersonaContext,
   agentsContext,
   agentMdInstructions,
   modeContext,
@@ -58,9 +57,11 @@ import {
   toolGuide,
 } from './context/prompt-builder';
 import {
+  buildThemedDuckPersonaPrompt,
   DEFAULT_DUCK_PERSONA_ID,
   formatDuckPersonaHelp,
   getDuckPersona,
+  isThemedDuckPersona,
   listDuckPersonaPickerOptions,
   resolveDuckPersonaArg,
   resolveNextDuckPersona,
@@ -824,7 +825,6 @@ async function main() {
   function createSystemPromptBuilder(): PromptBuilder {
     return new PromptBuilder()
       .pipe('coreRules', coreRules())
-      .pipe('duckPersonaContext', duckPersonaContext())
       .pipe('modeContext', modeContext())
       .pipe('toolGuide', toolGuide())
       .pipe('taskGuide', taskGuide())
@@ -953,7 +953,6 @@ async function main() {
       sessionId,
       agentMode,
       taskMode,
-      duckPersona,
       planFilePath,
       taskContext: options.taskContext,
       todoContext: options.todoContext,
@@ -1714,6 +1713,7 @@ async function main() {
   ): Promise<void> {
     injectPendingTaskNotifications();
     await injectPlanModeMessages();
+    injectDuckPersonaMessage();
 
     const promptHook = await hooks.run(
       createHookEvent(
@@ -1996,6 +1996,18 @@ async function main() {
 
     messages.push(attachment);
     activeStore.append(attachment);
+  }
+
+  /** 主题鸭人格通过用户消息注入，不进入 system prompt，保持 system/tools 前缀稳定。 */
+  function injectDuckPersonaMessage(): void {
+    if (!isThemedDuckPersona(duckPersona)) return;
+    const text = buildThemedDuckPersonaPrompt(duckPersona);
+    const msg: ModelMessage = {
+      role: 'user',
+      content: text,
+    };
+    messages.push(msg);
+    activeStore.append(msg);
   }
 
   async function handleModeCommand(command: string): Promise<void> {
