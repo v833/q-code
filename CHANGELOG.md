@@ -6,6 +6,8 @@
 
 ## 1.2.3 (2026-05-29)
 
+- 重构: 小黄鸭默认人格与主题鸭可选 pipe
+- 维护: 同步更新日志
 - 其他: Merge pull request #1 from cheezone/feat/changelog-ci-and-startup-notice
 - 新功能: 主 Agent 降压鸭/屁老鸭人格与 /ya 切换
 - 修复: 更新日志改为 build/CI 自动生成，取消 PR 手动同步

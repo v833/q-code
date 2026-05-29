@@ -1,11 +1,25 @@
 {
-  "generatedAt": "2026-05-29T07:37:29.603Z",
+  "generatedAt": "2026-05-29T08:30:06.822Z",
   "currentVersion": "1.2.3",
   "releases": [
     {
       "version": "1.2.3",
       "date": "2026-05-29",
       "changes": [
+        {
+          "hash": "f4d1858",
+          "subject": "refactor: 小黄鸭默认人格与主题鸭可选 pipe",
+          "date": "2026-05-29",
+          "type": "refactor",
+          "message": "小黄鸭默认人格与主题鸭可选 pipe"
+        },
+        {
+          "hash": "59ee944",
+          "subject": "chore: 同步更新日志",
+          "date": "2026-05-29",
+          "type": "chore",
+          "message": "同步更新日志"
+        },
         {
           "hash": "4acfdbc",
           "subject": "Merge pull request #1 from cheezone/feat/changelog-ci-and-startup-notice",
