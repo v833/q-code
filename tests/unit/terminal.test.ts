@@ -808,8 +808,9 @@ describe('terminal layout helpers', () => {
   it('formats a startup duck banner for the initial terminal screen', () => {
     const banner = formatStartupDuckBanner()
 
-    expect(banner).toContain('小黄鸭已就位')
+    expect(banner).toContain('降压鸭已就位')
     expect(banner).toContain('/mode plan')
+    expect(banner).toContain('/ya 换鸭')
     expect(banner).toContain('pnpm run continue')
     expect(banner).not.toContain('/teams')
     expect(STARTUP_DUCK_SOURCE).toBe('startup_duck')
@@ -819,6 +820,11 @@ describe('terminal layout helpers', () => {
     const banner = formatStartupDuckBanner({ teamsEnabled: true })
 
     expect(banner).toContain('/teams 团队')
+  })
+
+  it('uses heilongjiang duck line in startup banner when requested', () => {
+    const banner = formatStartupDuckBanner({ duckPersona: 'heilongjiang' })
+    expect(banner).toContain('屁老鸭已就位')
   })
 
   it('estimates wrapped rows for long terminal lines', () => {

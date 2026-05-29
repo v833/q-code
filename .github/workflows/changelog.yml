@@ -1,0 +1,53 @@
+# 合并到 main 后自动同步 CHANGELOG.md / changelog.json，供 GitHub 浏览。
+# 发版产物中的 changelog.json 由 pnpm build 在打包时生成，PR 无需手动维护。
+name: Changelog
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: changelog-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changelog:
+    name: sync changelog on main
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 生成更新日志
+        run: pnpm changelog
+
+      - name: 提交更新日志
+        run: |
+          if git diff --quiet -- CHANGELOG.md changelog.json; then
+            echo '更新日志无变更，跳过提交。'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add CHANGELOG.md changelog.json
+          git commit -m 'chore: 同步更新日志'
+          git push

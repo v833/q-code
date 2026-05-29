@@ -21,6 +21,7 @@
   },
   "files": [
     "dist",
+    "changelog.json",
     "README.md",
     "LICENSE",
     ".env.example"
@@ -30,6 +31,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "changelog": "node scripts/generate-changelog.mjs",
     "start": "tsx src/index.ts",
     "continue": "tsx src/index.ts --continue",
     "test": "vitest run",

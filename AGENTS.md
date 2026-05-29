@@ -7,9 +7,9 @@
 - **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、项目记忆、Skills、SubAgent、Agent Teams、Worktree 隔离。
 - **工具执行**：文件/搜索工具、可配置超时与 spill 的 Shell 工具（Windows 优先 PowerShell7，缺失时回退 Windows PowerShell 5.1）、后台 Shell job（`f_status` / `f_tail` / `f_kill` / `f_list`）。
 - **集成扩展**：MCP server、Hooks（pre/post tool-use 决策）、Slash 命令注册表、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
-- **可观测性**：NDJSON 审计日志（默认开启）、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警。
+- **可观测性**：NDJSON 审计日志（默认开启）、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警、启动时版本更新说明（对比 `~/.q-code/last-version.json` 与包内 `changelog.json`）。
 - **评测**：`q-code eval` 本地优先 Agent 质量平台，覆盖固定任务集、mock/cli/真实模型 runner、LLM judge（opt-in）、工具轨迹、预算/成本、进度、文件副作用、策略安全、JSONL trace、Markdown/JUnit 报告、baseline 对比、趋势看板、定期回归与可选 Langfuse evaluator trace / dataset / scores 导出。
-- **TUI**：基于 Ink 的交互式 TUI（默认）、`--classic` 经典 readline、可经管道/CI 自动降级。
+- **TUI**：基于 Ink 的交互式 TUI（默认）、`--classic` 经典 readline、可经管道/CI 自动降级；主 Agent 默认人格为上海「降压鸭」，可用 `/ya` 切换黑龙江「屁老鸭」。
 - **CLI 子命令**：`q-code help|version|update|audit|init`（启动前 short-circuit），其余参数走主交互循环。
 
 ## 环境与工具
@@ -51,12 +51,13 @@ pnpm eval:compare           # 对比两个 eval run
 
 pnpm test:all               # pnpm test && pnpm test:legacy
 pnpm precommit              # typecheck + test:unit
-pnpm build                  # 调 scripts/build.mjs，产出 dist/
+pnpm build                  # 调 scripts/build.mjs：自动生成 changelog 并产出 dist/
+pnpm changelog              # 手动从 git tag / conventional commit 生成 CHANGELOG（调试用）
 ```
 
 - 提交前优先运行 `pnpm precommit`，它会执行 `pnpm typecheck && pnpm test:unit`。
 - 影响 Agent Loop、工具注册、会话、任务图、MCP、Skills、Hooks、Slash、审计日志或 SubAgent 行为时，优先补跑相关集成测试或 legacy 脚本。
-- CI 使用 Node.js 22 和 pnpm 9，并按 `typecheck -> pnpm test -> pnpm test:legacy` 顺序执行；`.github/workflows/eval-nightly.yml` 定期执行 `pnpm eval:nightly` 做 deterministic 质量回归。
+- CI 使用 Node.js 22 和 pnpm 9，并按 `typecheck -> pnpm test -> pnpm test:legacy` 顺序执行；`.github/workflows/eval-nightly.yml` 定期执行 `pnpm eval:nightly` 做 deterministic 质量回归；`.github/workflows/changelog.yml` 在 main 推送后自动同步 `CHANGELOG.md` / `changelog.json`（PR 无需手动维护）；`pnpm build` 会在打包前自动生成 `changelog.json` 并复制到 `dist/`。
 
 ## CLI 子命令
 
@@ -74,14 +75,14 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
 - `q-code eval promote <run-dir|run.json> --as <baseline-name>`：把一次 run 保存为 `.q-code/evals/baselines/<name>/` 命名 baseline。
 - `q-code eval trend [--suite <name>] [--limit N] [--runs-dir <dir>] [--out <dir>]`：聚合历史 run，写出 `.q-code/evals/trends/trend.json` 与 `trend.md`。
 
-主交互循环还接受以下启动参数：`--continue`、`--session <id>`、`--plan`、`--agent-teams`、`--classic`、`--debug`、`--dump-system-prompt`。
+主交互循环还接受以下启动参数：`--continue`、`--session <id>`、`--plan`、`--agent-teams`、`--classic`、`--debug`、`--dump-system-prompt`。内置 Slash 含 `/ya [shanghai|heilongjiang|toggle]`（别名 `/duck`）切换主 Agent 鸭子人格。
 
 ## 目录边界
 
 - `src/index.ts`：CLI 启动、交互循环、模式切换、上下文压缩调度和整体编排。
 - `src/agent/`：核心 Agent Loop、重试、循环检测、模型等待心跳与单步模型请求超时。
 - `src/agents/`：SubAgent、后台 Agent、Agent Teams、worktree、mailbox、notification-store。
-- `src/context/`：System Prompt 管道、上下文压缩与 offload、Plan Mode 附件/计划文件/意图识别、任务、Todo、记忆、运行环境和项目指令加载。
+- `src/context/`：System Prompt 管道、鸭子人格（`duck-persona.ts`）、上下文压缩与 offload、Plan Mode 附件/计划文件/意图识别、任务、Todo、记忆、运行环境和项目指令加载。
 - `src/tools/`：内置工具定义、注册表（含审计/Hooks 包装层）、自定义工具目录加载器、文件/搜索/计划/任务/团队/Memory/Skill/GitLab KB/Agent 等工具；`shell-tools.ts` 负责 `f`、后台 shell job、输出 spill、cwd 策略和危险命令/交互保护。
 - `src/mcp/`：MCP 配置、连接、工具适配和注册表。
 - `src/skills/`：Skills 加载、预算、条件激活和斜杠命令展开。
@@ -89,7 +90,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
 - `src/hooks/`：Pre/Post tool-use Hooks 的配置加载、matcher、command-runner 与 DefaultHookRunner。
 - `src/observability/`：NDJSON 审计日志（`audit.ts`）、可选 Langfuse/OpenTelemetry 导出（`langfuse.ts`，含 Agent step TTFT/吞吐/等待状态 attributes）与 `q-code audit verify|tail` 子命令实现（`audit-cli.ts`）。
 - `src/evals/`：Agent eval 子系统，包含 case loader、mock/cli-subprocess/real-agent runner、trace recorder、deterministic scorers、LLM judge、报告、Langfuse eval trace/dataset/scores 导出、趋势看板与 `q-code eval` CLI。
-- `src/runtime/`：早期 CLI 子命令路由（help/version/update/audit/init/eval）、`init-cli` 交互式配置向导、通用 reasoning 配置与 DeepSeek reasoning 兼容层、Shell 启动参数与 Windows PowerShell fallback、颜色环境 bootstrap、`getPackageVersion`、`runCliUpdate`、`installCrashGuard` 与崩溃报告生成。
+- `src/runtime/`：早期 CLI 子命令路由（help/version/update/audit/init/eval）、`init-cli` 交互式配置向导、通用 reasoning 配置与 DeepSeek reasoning 兼容层、Shell 启动参数与 Windows PowerShell fallback、颜色环境 bootstrap、`getPackageVersion`、`runCliUpdate`、启动更新说明（`changelog.ts`）、`installCrashGuard` 与崩溃报告生成。
 - `src/config/`：`runtime-config.ts` 负责加载 `~/.q-code/config.toml`、`<cwd>/.q-code/config.toml`、`.env`，统一映射到 `process.env`（支持多 section/alias）。
 - `src/session/`：`SessionStore`（JSONL append-only、metadata、trash/restore、export/search、cache 模式与 usage 记录持久化）。
 - `src/mentions/`：`@file` 文件引用解析、git/递归文件索引、项目级候选缓存与 watcher 刷新 store、fuzzy 排序、路径安全校验、文件内容截断和本轮上下文注入。
@@ -155,7 +156,8 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
   - Plan Mode 意图识别：`vitest run tests/unit/plan-intent.test.ts tests/unit/runtime-config.test.ts tests/unit/terminal.test.ts`
   - 终端/输入状态机改动：`vitest run tests/unit/terminal.test.ts`
   - TUI 输入历史：`vitest run tests/unit/history-store.test.ts tests/unit/terminal.test.ts tests/integration/history-flow.test.ts`
-  - 运行时配置/CLI 子命令：`vitest run tests/unit/runtime-config.test.ts tests/unit/cli-info.test.ts tests/unit/update.test.ts tests/unit/init-cli.test.ts`
+  - 运行时配置/CLI 子命令：`vitest run tests/unit/runtime-config.test.ts tests/unit/cli-info.test.ts tests/unit/update.test.ts tests/unit/changelog.test.ts tests/unit/init-cli.test.ts`
+  - 鸭子人格 / system prompt：`vitest run tests/unit/duck-persona.test.ts tests/unit/prompt-builder.test.ts`
   - 崩溃保护：`vitest run tests/unit/crash-guard.test.ts tests/unit/mcp-bootstrap.test.ts tests/unit/audit-logger.test.ts`
   - Infra / GitLab KB：`vitest run tests/unit/infra.test.ts tests/unit/infra-candidate.test.ts tests/unit/gitlab-kb.test.ts`
   - Agent 工具/SubAgent 参数传递：`vitest run tests/unit/agent-tools.test.ts tests/integration/audit-trail.test.ts`

@@ -1,0 +1,124 @@
+# Changelog
+
+本文件由 CI 根据 git tag 与 conventional commit 自动生成。
+
+当前版本：**1.2.3**
+
+## 1.2.3 (2026-05-28)
+
+- 修复: prevent explore agent recursive delegation (#52)
+- 新功能: make TUI cursor mode configurable (#51)
+- 修复: stabilize TUI sessions picker and cursor (#50)
+- 其他: Codex/powershell5 fallback (#48)
+- 修复: speed up initial /sessions list rendering (#47)
+
+## 1.2.2 (2026-05-28)
+
+- 新功能: add DeepSeek reasoning compatibility
+- 修复: add model wait observability (#42)
+
+## 1.2.1 (2026-05-28)
+
+- 其他: fix update command on Windows
+- 新功能: cache and refresh file mention index (#40)
+- 新功能: add persistent TUI input history (#39)
+
+## 1.2.0 (2026-05-27)
+
+- 新功能: add TUI session management (#38)
+- 新功能: add optional langfuse observability exporter (#36)
+- 新功能: add interactive q-code init wizard
+- 维护: prepare npm release 1.1.6
+- 新功能: show progress narration around tool calls
+- 文档: 全量补充 src 中文 JSDoc 并强化 shell 危险命令检测
+- 新功能: improve terminal code highlighting
+- 新功能: add file mention completion
+- 修复: add packages field to pnpm-workspace.yaml to fix CI cache issue
+- 其他: Merge pull request #13 from buddydeus/feat/tools
+- 新功能: 支持目录式自定义工具加载
+- 其他: Merge pull request #11 from v833/codex/issue-3-shell-tool-upgrade
+- 修复: harden shell job tailing
+- 新功能: upgrade shell tool jobs
+- 修复: add runtime crash guard
+- 修复: harden audit logging
+- 修复: 删除docs
+- 修复: 删除已实现prd
+- 新功能: **gitlab-kb** 新增GitLab Wiki知识库集成功能
+- 维护: update workspace changes
+- 文档: **issues** 添加10个企业级TUI能力issue模板与提交指南
+- 修复: **terminal** 修复TUI静态输出缓存问题
+- 新功能: **terminal** 优化TUI流式渲染，限制预览尺寸减少终端闪烁，拆分静态动态对话
+- 新功能: **terminal** 新增 /status 命令切换 TUI 状态详情显示
+- 新功能: **tui** 优化TUI状态栏、统计展示与命令提示分组
+- 新功能: **usage,context-report** 新增模型用量统计与上下文报告工具
+- 新功能: 更新任务列表和详情的输出格式为 Markdown，增强可读性
+- 新功能: 增强 shell 工具，支持跨平台命令执行和进程管理
+- 修复: 更新版本号至1.1.1
+- 新功能: 添加更新命令支持，允许全局更新 q-code CLI
+- 修复: node依赖升级到22
+- 文档: align release and ci docs
+- 修复: **tui** improve tool error reporting and input cursor rendering
+- 重构: **tools** 统一工具输出格式，改进原子写入与shell工具稳定性
+- 重构: 提取共享搜索忽略规则，添加shell环境配置与测试
+- 新功能: **terminal** 优化终端功能与UI，新增多项实用特性
+- 新功能: **cli** 新增-h/--help和-v/--version参数，优化版本展示逻辑
+- 新功能: **config** 新增 TOML 运行时配置系统并更新相关内容
+- 其他: 构建(包管理): 将npm包作用域改为@q-code-cli/q-code并更新配置与文档
+- 构建: 配置项目为可发布的 npm CLI，添加构建脚本
+- 修复: 新增安全防护、优化工具实现并补充测试
+- 性能: **terminal** 新增终端markdown解析字符限制并优化解析逻辑
+- 新功能: **terminal** 实现对话拆分渲染并优化性能
+- 新功能: **infra,terminal** 新增/infra candidate命令，优化终端渲染
+- 新功能: **markdown/terminal** 限制超大Markdown表格行数并添加流式长文本预览
+- 新功能: **terminal markdown** 支持解析并渲染GitHub风格markdown表格
+- 新功能: 新增企业AI基建集成与钩子扩展系统
+- 重构: **theme** 重构主题模块，优化导入路径并拆分文件
+- 新功能: 添加项目协作说明文档
+- 新功能: **terminal** 优化助手流式输出的处理与渲染体验
+- 新功能: **terminal, slash** 实现终端界面的斜杠命令支持系统
+- 修复: **terminal** 修复流式助手消息处理，优化会话布局逻辑
+- 新功能: **terminal/layout** 确保新提示符出现后历史对话仍可见
+- 新功能: **terminal** 隐藏已完成回合的工具调用并优化工具展示
+- 重构: **terminal** 重构终端UI并提取通用工具函数
+- 新功能: 优化终端UI、工具处理与文件写入稳定性
+- 修复: **终端, 代理循环** 修复终端状态异常并完善代理循环工具调用处理
+- 修复: **terminal input** 完善终端退格与删除键的处理
+- 新功能: **terminal** 添加 Ink TUI 交互式终端功能
+- 新功能: 新增Agent最大步数配置并优化上下文卸载功能
+- 新功能: **jit-context** 实现 JIT 上下文策略与上下文卸载系统
+- CI: 添加 pre-commit 钩子与 GitHub CI 工作流，修复注释错别字
+- 测试: 完善项目测试体系与工具链
+- 测试: 新增 Vitest 测试套件并完善项目配置
+- 新功能: **teams** 新增原子文件写入、过期成员清理及消息大小限制
+- 新功能: **agent-teams** 新增多智能体协作Agent Teams功能
+- 文档: **readme** 更新README以文档新的后台子代理和工作树隔离功能
+- 新功能: **agents, tools** 新增异步后台代理支持与工具执行目录上下文
+- 文档: **README** 全面更新并完善项目README文档
+- 维护: **gitignore** 添加 .playground 和 .playwright-mcp 到忽略列表
+- 新功能: **subagents** 实现完整的SubAgent子任务分发与管理系统
+- 新功能: **skills** 实现完整的可复用技能系统
+- 新功能: **mcp** 实现标准MCP协议集成，完善相关功能与文档
+- 新功能: **mcp** 新增完整的 MCP 服务器集成支持
+- 新功能: **task-system** 新增Task V2持久化任务系统并支持模式切换
+- 新功能: **todo** 新增会话级任务清单工具todo_write
+- 新功能: **plan-mode** 添加Plan Mode规划与审批工作流
+- 新功能: **memory** 新增项目级跨对话持久化记忆功能
+- 新功能: README.md
+- 新功能: **core** 添加会话管理、上下文压缩与token预算跟踪系统
+- 新功能: 上下文占用
+- 新功能: 压缩逻辑调整
+- 维护: 调整最大执行步数并更新环境变量示例配置
+- 维护: 调整代理令牌预算和文件读取结果字符上限
+- 新功能: add dedicated summary model configuration
+- 新功能: compressor
+- 重构: 重构提示词系统，新增会话持久化与恢复功能
+- 重构: 重构项目结构并完善代理与工具系统
+- 新功能: 新增 MCP 集成、工具搜索与性能监控功能
+- 其他: 功能(代理循环): 调整最大步数和令牌预算
+- 新功能: **工具集** 添加网页搜索和网页抓取工具及相关依赖
+- 新功能: 新增集中式日志工具、两个新工具并标准化控制台输出
+- 新功能: **tools** 新增编辑文件、glob搜索、grep搜索和bash执行工具
+- 新功能: **tool-registry** 新增工具注册系统并重构工具处理逻辑
+- 新功能: token
+- 新功能: init
+- 新功能: init

@@ -2,6 +2,12 @@
  * System prompt 管道：通过可注册的 pipe 函数按序拼接各上下文片段。
  */
 
+import {
+  buildDuckCoreRules,
+  DEFAULT_DUCK_PERSONA_ID,
+  type DuckPersonaId,
+} from './duck-persona'
+
 /** 单次 `PromptBuilder.build` 的输入上下文。 */
 export interface PromptContext {
   toolCount: number
@@ -22,6 +28,8 @@ export interface PromptContext {
   runtimeContext?: string
   agentMdContext?: string
   memoryContext?: string
+  /** 主 Agent 鸭子人格；缺省为上海降压鸭。 */
+  duckPersona?: DuckPersonaId
 }
 
 type PipeFn = (ctx: PromptContext) => string | null
@@ -66,15 +74,9 @@ export class PromptBuilder {
   }
 }
 
-/** 核心行为准则 pipe。 */
+/** 核心行为准则与人格 pipe。 */
 export function coreRules(): PipeFn {
-  return () => `你是 q-code，一个有工具调用能力的 AI 助手。
-你的行为准则：
-- 先读文件再修改，不要凭记忆编辑
-- 不要加没被要求的功能
-- 工具调用失败时，换一个思路而不是重复同样的操作
-- 执行需要多次工具调用的任务时，在关键工具调用前后输出简短、可公开的进度说明：说明你正在看什么、为什么看、刚确认了什么。每次 1-2 句即可，不要暴露隐藏推理链或内部草稿
-- 回答要简洁直接`
+  return (ctx) => buildDuckCoreRules(ctx.duckPersona ?? DEFAULT_DUCK_PERSONA_ID)
 }
 
 /** 工具使用与 JIT 上下文纪律 pipe；无工具时返回 null。 */
