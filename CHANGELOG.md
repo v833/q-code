@@ -6,6 +6,8 @@
 
 ## 1.2.3 (2026-05-29)
 
+- 修复: 主题鸭人格从 system prompt pipe 改为用户消息注入，避免破坏 system/tools cache
+- 维护: 同步更新日志
 - 重构: 小黄鸭默认人格与主题鸭可选 pipe
 - 维护: 同步更新日志
 - 其他: Merge pull request #1 from cheezone/feat/changelog-ci-and-startup-notice

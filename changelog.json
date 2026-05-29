@@ -1,11 +1,25 @@
 {
-  "generatedAt": "2026-05-29T08:30:06.822Z",
+  "generatedAt": "2026-05-29T08:53:57.466Z",
   "currentVersion": "1.2.3",
   "releases": [
     {
       "version": "1.2.3",
       "date": "2026-05-29",
       "changes": [
+        {
+          "hash": "cd73f13",
+          "subject": "fix: 主题鸭人格从 system prompt pipe 改为用户消息注入，避免破坏 system/tools cache",
+          "date": "2026-05-29",
+          "type": "fix",
+          "message": "主题鸭人格从 system prompt pipe 改为用户消息注入，避免破坏 system/tools cache"
+        },
+        {
+          "hash": "877dc66",
+          "subject": "chore: 同步更新日志",
+          "date": "2026-05-29",
+          "type": "chore",
+          "message": "同步更新日志"
+        },
         {
           "hash": "f4d1858",
           "subject": "refactor: 小黄鸭默认人格与主题鸭可选 pipe",
