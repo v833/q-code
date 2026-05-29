@@ -62,7 +62,7 @@ describe('terminal code highlighting', () => {
     const highlighted = highlightCode(code, 'ts')
 
     expect(highlighted).toContain(code)
-    expect(highlighted.startsWith('\x1b[32m')).toBe(true)
+    expect(highlighted.startsWith('\x1b[38;2;')).toBe(true)
     expect(highlighted.endsWith('\x1b[0m')).toBe(true)
   })
 
@@ -81,13 +81,23 @@ describe('terminal code highlighting', () => {
 
     const highlighted = highlightCode(diff, 'diff')
 
-    expect(highlighted).toContain('\x1b[90mdiff --git a/src/app.ts b/src/app.ts\x1b[0m')
-    expect(highlighted).toContain('\x1b[90mindex 1111111..2222222 100644\x1b[0m')
-    expect(highlighted).toContain('\x1b[90m--- a/src/app.ts\x1b[0m')
-    expect(highlighted).toContain('\x1b[90m+++ b/src/app.ts\x1b[0m')
-    expect(highlighted).toContain('\x1b[36m@@ -1,3 +1,3 @@\x1b[0m')
-    expect(highlighted).toContain('\x1b[31m-const oldValue = 1\x1b[0m')
-    expect(highlighted).toContain('\x1b[32m+const newValue = 2\x1b[0m')
-    expect(highlighted).toContain('\x1b[90m\\ No newline at end of file\x1b[0m')
+    expect(highlighted).toContain('\x1b[38;2;148;163;184mdiff --git a/src/app.ts b/src/app.ts\x1b[0m')
+    expect(highlighted).toContain('\x1b[38;2;148;163;184mindex 1111111..2222222 100644\x1b[0m')
+    expect(highlighted).toContain('\x1b[38;2;148;163;184m--- a/src/app.ts\x1b[0m')
+    expect(highlighted).toContain('\x1b[38;2;148;163;184m+++ b/src/app.ts\x1b[0m')
+    expect(highlighted).toContain('\x1b[38;2;103;232;249m@@ -1,3 +1,3 @@\x1b[0m')
+    expect(highlighted).toContain('\x1b[38;2;252;165;165m-const oldValue = 1\x1b[0m')
+    expect(highlighted).toContain('\x1b[38;2;134;239;172m+const newValue = 2\x1b[0m')
+    expect(highlighted).toContain('\x1b[38;2;148;163;184m\\ No newline at end of file\x1b[0m')
+  })
+
+  it('honors explicit theme options for diff blocks', () => {
+    const diff = '+const value = 1'
+
+    const dark = highlightCode(diff, 'diff', { theme: 'dark' })
+    const light = highlightCode(diff, 'diff', { theme: 'light' })
+
+    expect(dark).toContain('\x1b[38;2;134;239;172m+const value = 1\x1b[0m')
+    expect(light).toContain('\x1b[38;2;21;128;61m+const value = 1\x1b[0m')
   })
 })

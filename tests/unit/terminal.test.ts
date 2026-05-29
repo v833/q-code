@@ -667,18 +667,31 @@ describe('terminal markdown parser', () => {
       )
     )
 
-    expect(blocks).toEqual([
+    expect(blocks).toMatchObject([
       { type: 'heading', depth: 1, text: 'Title' },
-      { type: 'list', ordered: false, items: ['one', 'two'] },
+      { type: 'list', ordered: false, items: [{ text: 'one' }, { text: 'two' }] },
       { type: 'quote', text: 'note' },
       { type: 'code', language: 'ts', code: 'const x = 1' }
+    ])
+    expect(blocks[1]?.type === 'list' ? blocks[1].items[1]?.segments[0]?.type : undefined).toBe('strong')
+  })
+
+  it('preserves inline semantics inside blockquotes', () => {
+    const blocks = parseMarkdown('> **重点** 见 src/foo.ts:7')
+
+    expect(blocks).toMatchObject([{ type: 'quote', text: '重点 见 src/foo.ts:7' }])
+    expect(blocks[0]?.type === 'quote' ? blocks[0].segments.map((segment) => segment.type) : []).toEqual([
+      'strong',
+      'text',
+      'fileRef'
     ])
   })
 
   it('preserves markdown link targets in terminal text', () => {
     const blocks = parseMarkdown('See [README](README.md).')
 
-    expect(blocks).toEqual([{ type: 'paragraph', text: 'See README (README.md).' }])
+    expect(blocks).toMatchObject([{ type: 'paragraph', text: 'See README (README.md).' }])
+    expect(blocks[0]?.type === 'paragraph' ? blocks[0].segments[1]?.type : undefined).toBe('fileRef')
   })
 
   it('treats an unfinished fenced code block as code while streaming', () => {
@@ -697,7 +710,7 @@ describe('terminal markdown parser', () => {
       ].join('\n')
     )
 
-    expect(blocks).toEqual([
+    expect(blocks).toMatchObject([
       {
         type: 'table',
         headers: ['包名', '作用'],
@@ -719,7 +732,7 @@ describe('terminal markdown parser', () => {
       ].join('\n')
     )
 
-    expect(blocks).toEqual([
+    expect(blocks).toMatchObject([
       {
         type: 'table',
         headers: ['名称', '状态', '数量'],
@@ -727,16 +740,19 @@ describe('terminal markdown parser', () => {
         rows: [['alpha', 'ok (https://example.com)', '42']]
       }
     ])
+    expect(blocks[0]?.type === 'table' ? blocks[0].rowSegments[0]?.[0]?.[0]?.type : undefined).toBe('strong')
+    expect(blocks[0]?.type === 'table' ? blocks[0].rowSegments[0]?.[1]?.[0]?.type : undefined).toBe('link')
+    expect(blocks[0]?.type === 'table' ? blocks[0].rowSegments[0]?.[2]?.[0]?.type : undefined).toBe('inlineCode')
   })
 
   it('renders task list markers from marked list items', () => {
     const blocks = parseMarkdown(['- [x] 已完成', '- [ ] 待处理'].join('\n'))
 
-    expect(blocks).toEqual([
+    expect(blocks).toMatchObject([
       {
         type: 'list',
         ordered: false,
-        items: ['[x] 已完成', '[ ] 待处理']
+        items: [{ text: '[x] 已完成' }, { text: '[ ] 待处理' }]
       }
     ])
   })

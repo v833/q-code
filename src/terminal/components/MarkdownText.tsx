@@ -4,7 +4,25 @@
 import React, { useMemo } from 'react'
 import { Box, Text, useStdout } from 'ink'
 import { parseMarkdown, type MarkdownBlock } from '../markdown'
-import { renderMarkdownTable } from '../table-renderer'
+import {
+  computeMarkdownTableColumnWidths,
+  renderMarkdownTable
+} from '../table-renderer'
+import {
+  formatFileRefParts,
+  renderInlineSegmentsAnsi,
+  renderInlineSegmentsPlain,
+  resolveInlinePalette,
+  type InlinePalette,
+  type MarkdownInlineSegment,
+  type StatusTone
+} from '../utils/markdown-inline'
+import {
+  clipDisplayWidth,
+  clipDisplayWidthStart,
+  stringDisplayWidth
+} from '../utils/string-width'
+import { rgbToInkColor } from '../utils/ansi-style'
 import {
   highlightCode,
   isNoColorEnabled,
@@ -62,23 +80,28 @@ function MarkdownBlockView({
   block: MarkdownBlock
   dim: boolean
 }): React.JSX.Element {
+  const inlinePalette = resolveInlinePalette(resolveHighlightThemeMode())
   switch (block.type) {
     case 'heading':
       return (
-        <Text bold color={block.depth <= 2 ? 'cyan' : 'blue'}>
-          {block.text}
+        <Text bold color={rgbToInkColor(block.depth <= 2 ? inlinePalette.strong : inlinePalette.emphasis)}>
+          <InlineMarkdownText segments={block.segments} dim={dim} strong palette={inlinePalette} />
         </Text>
       )
     case 'paragraph':
-      return <Text dimColor={dim}>{block.text}</Text>
+      return <InlineMarkdownText segments={block.segments} dim={dim} palette={inlinePalette} />
     case 'quote':
-      return <Text color="gray">│ {block.text}</Text>
+      return (
+        <Text color={rgbToInkColor(inlinePalette.muted)}>
+          │ <InlineMarkdownText segments={block.segments} dim={dim} palette={inlinePalette} />
+        </Text>
+      )
     case 'list':
       return (
         <Box flexDirection="column">
           {block.items.map((item, index) => (
             <Text key={index} dimColor={dim}>
-              {block.ordered ? `${index + 1}.` : '•'} {item}
+              {block.ordered ? `${index + 1}.` : '•'} <InlineMarkdownText segments={item.segments} dim={dim} palette={inlinePalette} />
             </Text>
           ))}
         </Box>
@@ -101,6 +124,107 @@ function MarkdownBlockView({
     case 'rule':
       return <Text dimColor>────────────────────────────────</Text>
   }
+}
+
+function InlineMarkdownText({
+  segments,
+  dim,
+  strong = false,
+  palette
+}: {
+  segments: readonly MarkdownInlineSegment[]
+  dim: boolean
+  strong?: boolean
+  palette: InlinePalette
+}): React.JSX.Element {
+  return (
+    <Text dimColor={dim} bold={strong}>
+      {segments.map((segment, index) => (
+        <InlineSegmentText key={index} segment={segment} dim={dim} palette={palette} />
+      ))}
+    </Text>
+  )
+}
+
+function InlineSegmentText({
+  segment,
+  dim,
+  palette
+}: {
+  segment: MarkdownInlineSegment
+  dim: boolean
+  palette: InlinePalette
+}): React.JSX.Element {
+  switch (segment.type) {
+    case 'text':
+      return <Text dimColor={dim}>{segment.text}</Text>
+    case 'strong':
+      return (
+        <Text bold color={rgbToInkColor(palette.strong)}>
+          {segment.segments.map((child, index) => (
+            <InlineSegmentText key={index} segment={child} dim={false} palette={palette} />
+          ))}
+        </Text>
+      )
+    case 'emphasis':
+      return (
+        <Text italic color={rgbToInkColor(palette.emphasis)}>
+          {segment.segments.map((child, index) => (
+            <InlineSegmentText key={index} segment={child} dim={false} palette={palette} />
+          ))}
+        </Text>
+      )
+    case 'inlineCode':
+      return <Text color={rgbToInkColor(palette.inlineCode)}>{segment.text}</Text>
+    case 'link':
+      return (
+        <Text>
+          <Text color={rgbToInkColor(palette.link)} underline>
+            {segment.text}
+          </Text>
+          <Text color={rgbToInkColor(palette.muted)}> ({segment.href})</Text>
+        </Text>
+      )
+    case 'url':
+      return (
+        <Text color={rgbToInkColor(palette.link)} underline>
+          {segment.text}
+        </Text>
+      )
+    case 'fileRef':
+      return <FileRefText segment={segment} palette={palette} />
+    case 'issueRef':
+      return <Text color={rgbToInkColor(palette.issue)}>{segment.text}</Text>
+    case 'status':
+      return <Text bold color={rgbToInkColor(statusToneColor(segment.tone, palette))}>{segment.text}</Text>
+    case 'envVar':
+      return <Text color={rgbToInkColor(palette.inlineCode)}>{segment.text}</Text>
+    case 'command':
+      return <Text bold color={rgbToInkColor(palette.command)}>{segment.text}</Text>
+  }
+}
+
+function FileRefText({
+  segment,
+  palette
+}: {
+  segment: Extract<MarkdownInlineSegment, { type: 'fileRef' }>
+  palette: InlinePalette
+}): React.JSX.Element {
+  const parts = formatFileRefParts(segment)
+  return (
+    <Text>
+      {parts.label ? (
+        <>
+          <Text color={rgbToInkColor(palette.link)} underline>{parts.label}</Text>
+          <Text color={rgbToInkColor(palette.muted)}> (</Text>
+        </>
+      ) : null}
+      <Text color={rgbToInkColor(palette.filePath)}>{parts.path}</Text>
+      {parts.suffix ? <Text color={rgbToInkColor(palette.lineNumber)}>{parts.suffix}</Text> : null}
+      {parts.label ? <Text color={rgbToInkColor(palette.muted)}>)</Text> : null}
+    </Text>
+  )
 }
 
 function CodeBlockText({
@@ -132,21 +256,94 @@ function MarkdownTable({
   dim: boolean
 }): React.JSX.Element {
   const table = renderMarkdownTable(block)
+  const widths = computeMarkdownTableColumnWidths(block)
+  const noColor = isNoColorEnabled()
+  const themeMode = resolveHighlightThemeMode()
 
   return (
     <Box flexDirection="column" marginY={1} flexShrink={1}>
       <Text dimColor>{table.top}</Text>
-      <Text color="cyan" bold wrap="truncate-end">{table.header}</Text>
+      <Text bold wrap="truncate-end">
+        {renderSemanticTableRow(block.headerSegments, block.headers, widths, block.alignments, noColor, themeMode)}
+      </Text>
       <Text dimColor>{table.separator}</Text>
-      {table.rows.map((row, index) => (
+      {block.rowSegments.map((row, index) => (
         <Text key={index} dimColor={dim} wrap="truncate-end">
-          {row}
+          {renderSemanticTableRow(row, block.rows[index] ?? [], widths, block.alignments, noColor, themeMode)}
         </Text>
       ))}
       {table.omitted ? <Text dimColor>{table.omitted}</Text> : null}
       <Text dimColor>{table.bottom}</Text>
     </Box>
   )
+}
+
+function renderSemanticTableRow(
+  rowSegments: readonly (readonly MarkdownInlineSegment[])[],
+  plainCells: readonly string[],
+  widths: readonly number[],
+  alignments: readonly string[],
+  noColor: boolean,
+  theme: ReturnType<typeof resolveHighlightThemeMode>
+): string {
+  return `│${widths
+    .map((width, index) => {
+      const plain = plainCells[index] ?? ''
+      const segments = rowSegments[index] ?? [{ type: 'text' as const, text: plain }]
+      const cellPlain = renderInlineSegmentsPlain(segments)
+      const styled = renderStyledTableCell(segments, plain, width, noColor, theme)
+      return ` ${alignStyledCell(styled, stringDisplayWidth(plain) > width ? clipDisplayWidth(plain, width) : cellPlain, width, alignments[index] ?? 'left')} `
+    })
+    .join('│')}│`
+}
+
+function renderStyledTableCell(
+  segments: readonly MarkdownInlineSegment[],
+  plain: string,
+  width: number,
+  noColor: boolean,
+  theme: ReturnType<typeof resolveHighlightThemeMode>
+): string {
+  if (stringDisplayWidth(plain) <= width) return renderInlineSegmentsAnsi(segments, { noColor, theme })
+  if (segments.length === 1 && segments[0]?.type === 'fileRef') {
+    return renderClippedFileRefTableCell(segments[0], width, noColor, theme)
+  }
+  return clipDisplayWidth(plain, width)
+}
+
+function renderClippedFileRefTableCell(
+  segment: Extract<MarkdownInlineSegment, { type: 'fileRef' }>,
+  width: number,
+  noColor: boolean,
+  theme: ReturnType<typeof resolveHighlightThemeMode>
+): string {
+  const clipped = clipDisplayWidthStart(segment.text, width)
+  if (noColor) return clipped
+  const suffix = [
+    segment.line !== undefined ? `:${segment.line}` : '',
+    segment.column !== undefined ? `:${segment.column}` : ''
+  ].join('')
+  const clippedSegment: Extract<MarkdownInlineSegment, { type: 'fileRef' }> = suffix && clipped.endsWith(suffix)
+    ? { type: 'fileRef', text: clipped, path: clipped.slice(0, -suffix.length), line: segment.line, column: segment.column }
+    : { type: 'fileRef', text: clipped, path: clipped }
+  return renderInlineSegmentsAnsi([clippedSegment], { theme })
+}
+
+function statusToneColor(tone: StatusTone, palette: InlinePalette) {
+  if (tone === 'success') return palette.success
+  if (tone === 'warning') return palette.warning
+  return palette.error
+}
+
+function alignStyledCell(styled: string, plain: string, width: number, alignment: string): string {
+  const contentWidth = Math.min(stringDisplayWidth(plain), width)
+  const padding = Math.max(0, width - contentWidth)
+  if (alignment === 'right') return `${' '.repeat(padding)}${styled}`
+  if (alignment === 'center') {
+    const left = Math.floor(padding / 2)
+    return `${' '.repeat(left)}${styled}${' '.repeat(padding - left)}`
+  }
+  return `${styled}${' '.repeat(padding)}`
 }
 
 /** 是否应对文本执行 {@link parseMarkdown}。 */

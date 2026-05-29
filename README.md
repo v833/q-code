@@ -125,7 +125,7 @@ cp .env.example .env
 | `Q_CODE_SESSION_DIR`           | ❌   | 会话存储目录，默认 .sessions                                  |
 | `Q_CODE_HOME`                  | ❌   | q-code 全局配置目录，默认 `~/.q-code`                         |
 | `Q_CODE_DEBUG`                 | ❌   | 设为 1/true/yes/on 显示启动诊断信息（等价于 `--debug`）       |
-| `Q_CODE_THEME`                 | ❌   | 代码块高亮主题，`dark` / `light` / `auto`，默认 `auto`        |
+| `Q_CODE_THEME`                 | ❌   | TUI Markdown / 代码块高亮主题，`dark` / `light` / `auto`，默认 `auto` |
 | `Q_CODE_AUDIT_ENABLED`         | ❌   | 审计日志开关，默认开启；设为 false/0/off/no 可关闭            |
 | `Q_CODE_AUDIT_DIR`             | ❌   | 审计日志目录，默认 `<Q_CODE_HOME>/logs`                       |
 | `Q_CODE_AUDIT_RETENTION_DAYS`  | ❌   | 审计日志保留天数，默认 30                                    |
@@ -216,7 +216,7 @@ pnpm run continue       # 恢复上次会话
 | `--no-color`           | 关闭 ANSI 语法高亮和颜色输出                               |
 | `--debug`              | 显示启动诊断信息，包括 Prompt Pipe 和工具加载概览        |
 
-默认在交互式 TTY 中启动 Ink TUI；非 TTY、`--classic` 或 `Q_CODE_TUI=0` 会回退到传统 readline。TUI 将 Agent 输出、工具调用、上下文占用、任务进度、后台 Agent 和 token 用量统一渲染为事件流，支持 `Ctrl+J` 多行输入、`Ctrl+R` 历史搜索、`Esc` 清空/恢复输入、忙时 `Ctrl+C` 中断当前任务和 Markdown 代码块/列表/表格展示。多工具任务中，Agent 会在关键工具调用前后输出简短的公开进度说明；TUI 会按时间线把这些说明和工具调用交错展示，避免执行过程中只剩工具流水账。代码块会按语言做 ANSI 语法高亮，可通过 `Q_CODE_THEME=dark|light|auto` 控制配色，或使用 `--no-color` / `NO_COLOR=1` 关闭全部颜色。输入区使用真实终端光标锚定输入法候选窗，避免 macOS IME 跑到屏幕角落。
+默认在交互式 TTY 中启动 Ink TUI；非 TTY、`--classic` 或 `Q_CODE_TUI=0` 会回退到传统 readline。TUI 将 Agent 输出、工具调用、上下文占用、任务进度、后台 Agent 和 token 用量统一渲染为事件流，支持 `Ctrl+J` 多行输入、`Ctrl+R` 历史搜索、`Esc` 清空/恢复输入、忙时 `Ctrl+C` 中断当前任务和 Markdown 代码块/列表/表格展示。多工具任务中，Agent 会在关键工具调用前后输出简短的公开进度说明；TUI 会按时间线把这些说明和工具调用交错展示，避免执行过程中只剩工具流水账。Markdown 行内内容会保留语义高亮：`**重点**`、inline code、URL、issue ref、文件路径和 `src/foo.ts:123` 行号会使用不同视觉通道，便于在长回复中快速定位关键信息。代码块使用 24-bit ANSI 主题 palette，TypeScript / TSX、diff 等内容在明暗终端中都保持较高对比；可通过 `Q_CODE_THEME=dark|light|auto` 控制配色，终端无法暴露背景色或 auto 判断不准时建议手动指定 `light` / `dark`，也可使用 `--no-color` / `NO_COLOR=1` 关闭全部颜色。输入区使用真实终端光标锚定输入法候选窗，避免 macOS IME 跑到屏幕角落。
 
 ### @file 文件引用
 

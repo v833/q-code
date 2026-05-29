@@ -2,22 +2,35 @@
  * 基于 `marked` 的轻量 Markdown 解析：产出 TUI 可渲染的块结构（非完整 HTML）。
  */
 import { Lexer, lexer, type Token, type Tokens } from 'marked'
+import {
+  parseMarkdownInline,
+  renderInlineSegmentsPlain,
+  type MarkdownInlineSegment
+} from './utils/markdown-inline'
 
 /** TUI 支持的 Markdown 块联合类型。 */
 export type MarkdownBlock =
-  | { type: 'heading'; depth: number; text: string }
-  | { type: 'paragraph'; text: string }
-  | { type: 'list'; ordered: boolean; items: string[] }
+  | { type: 'heading'; depth: number; text: string; segments: MarkdownInlineSegment[] }
+  | { type: 'paragraph'; text: string; segments: MarkdownInlineSegment[] }
+  | { type: 'list'; ordered: boolean; items: MarkdownListItem[] }
   | {
       type: 'table'
       headers: string[]
       rows: string[][]
+      headerSegments: MarkdownInlineSegment[][]
+      rowSegments: MarkdownInlineSegment[][][]
       alignments: TableAlignment[]
       omittedRows?: number
     }
-  | { type: 'quote'; text: string }
+  | { type: 'quote'; text: string; segments: MarkdownInlineSegment[] }
   | { type: 'code'; language?: string; code: string }
   | { type: 'rule' }
+
+/** Markdown 列表项：`text` 兼容旧渲染，`segments` 用于语义高亮。 */
+export interface MarkdownListItem {
+  text: string
+  segments: MarkdownInlineSegment[]
+}
 
 /** GFM 表格列对齐方式。 */
 export type TableAlignment = 'left' | 'center' | 'right'
@@ -34,7 +47,7 @@ export function parseMarkdown(markdown: string): MarkdownBlock[] {
 
 /** 剥除行内 Markdown 标记，保留纯文本。 */
 export function stripInlineMarkdown(text: string): string {
-  return renderInlineTokens(Lexer.lexInline(text, { gfm: true, breaks: false }))
+  return renderInlineSegmentsPlain(parseMarkdownInline(text))
 }
 
 function tokensToBlocks(tokens: Token[]): MarkdownBlock[] {
@@ -54,13 +67,13 @@ function tokenToBlock(token: Token): MarkdownBlock | null {
     case 'def':
       return null
     case 'heading':
-      return { type: 'heading', depth: token.depth, text: renderInlineTokens(token.tokens ?? []) }
+      return createTextBlock('heading', token.tokens ?? [], token.depth)
     case 'paragraph':
-      return { type: 'paragraph', text: renderInlineTokens(token.tokens ?? []) }
+      return createTextBlock('paragraph', token.tokens ?? [])
     case 'text':
-      return { type: 'paragraph', text: renderInlineTokens(token.tokens ?? [token]) }
+      return createTextBlock('paragraph', token.tokens ?? [token])
     case 'blockquote':
-      return { type: 'quote', text: renderBlocksAsText(tokensToBlocks(token.tokens ?? [])) }
+      return createQuoteBlock(tokensToBlocks(token.tokens ?? []))
     case 'list':
       return {
         type: 'list',
@@ -79,10 +92,45 @@ function tokenToBlock(token: Token): MarkdownBlock | null {
     case 'hr':
       return { type: 'rule' }
     case 'html':
-      return token.text.trim() ? { type: 'paragraph', text: token.text.trim() } : null
+      return token.text.trim() ? createPlainTextBlock('paragraph', token.text.trim()) : null
     default:
-      return tokenHasInlineTokens(token) ? { type: 'paragraph', text: renderInlineTokens(token.tokens) } : null
+      return tokenHasInlineTokens(token) ? createTextBlock('paragraph', token.tokens) : null
   }
+}
+
+function createTextBlock(
+  type: 'heading',
+  tokens: Token[],
+  depth: number
+): Extract<MarkdownBlock, { type: 'heading' }>
+function createTextBlock(
+  type: 'paragraph',
+  tokens: Token[]
+): Extract<MarkdownBlock, { type: 'paragraph' }>
+function createTextBlock(type: 'heading' | 'paragraph', tokens: Token[], depth?: number): MarkdownBlock {
+  const segments = parseInlineTokensCompat(tokens)
+  const text = renderInlineSegmentsPlain(segments)
+  return type === 'heading'
+    ? { type, depth: depth ?? 1, text, segments }
+    : { type, text, segments }
+}
+
+function createPlainTextBlock(
+  type: 'paragraph' | 'quote',
+  text: string
+): Extract<MarkdownBlock, { type: 'paragraph' | 'quote' }> {
+  const segments = parseMarkdownInline(text)
+  return { type, text: renderInlineSegmentsPlain(segments), segments }
+}
+
+function createQuoteBlock(blocks: MarkdownBlock[]): Extract<MarkdownBlock, { type: 'quote' }> {
+  const segments: MarkdownInlineSegment[] = []
+  for (const [index, block] of blocks.entries()) {
+    if (index > 0) segments.push({ type: 'text', text: '\n' })
+    segments.push(...blockInlineSegments(block))
+  }
+  const text = renderInlineSegmentsPlain(segments).trim()
+  return { type: 'quote', text, segments: trimTextSegmentEdges(segments) }
 }
 
 function tableTokenToBlock(token: Tokens.Table): MarkdownBlock {
@@ -93,20 +141,28 @@ function tableTokenToBlock(token: Tokens.Table): MarkdownBlock {
     type: 'table',
     headers: token.header.map(renderTableCell),
     rows: rows.map((row) => row.map(renderTableCell)),
+    headerSegments: token.header.map(renderTableCellSegments),
+    rowSegments: rows.map((row) => row.map(renderTableCellSegments)),
     alignments: token.align.map((alignment) => alignment ?? 'left'),
     ...(omittedRows > 0 ? { omittedRows } : {})
   }
 }
 
 function renderTableCell(cell: Tokens.TableCell): string {
-  return renderInlineTokens(cell.tokens).trim()
+  return renderInlineSegmentsPlain(renderTableCellSegments(cell)).trim()
 }
 
-function renderListItem(item: Tokens.ListItem): string {
+function renderTableCellSegments(cell: Tokens.TableCell): MarkdownInlineSegment[] {
+  return parseInlineTokensCompat(cell.tokens)
+}
+
+function renderListItem(item: Tokens.ListItem): MarkdownListItem {
   const blocks = tokensToBlocks(item.tokens)
   const text = renderBlocksAsText(blocks)
   const checkbox = item.task ? `${item.checked ? '[x]' : '[ ]'} ` : ''
-  return `${checkbox}${text}`.trim()
+  const itemText = `${checkbox}${text}`.trim()
+  const segments = [...(checkbox ? parseMarkdownInline(checkbox) : []), ...listItemInlineSegments(item)]
+  return { text: itemText, segments: segments.length > 0 ? segments : parseMarkdownInline(itemText) }
 }
 
 function renderBlocksAsText(blocks: MarkdownBlock[]): string {
@@ -120,7 +176,7 @@ function renderBlockAsText(block: MarkdownBlock): string {
     case 'quote':
       return block.text
     case 'list':
-      return block.items.join('\n')
+      return block.items.map((item) => item.text).join('\n')
     case 'table':
       return [block.headers.join(' | '), ...block.rows.map((row) => row.join(' | '))].join('\n')
     case 'code':
@@ -130,35 +186,57 @@ function renderBlockAsText(block: MarkdownBlock): string {
   }
 }
 
-function renderInlineTokens(tokens: Token[]): string {
-  return tokens.map(renderInlineToken).join('')
+function blockInlineSegments(block: MarkdownBlock): MarkdownInlineSegment[] {
+  switch (block.type) {
+    case 'heading':
+    case 'paragraph':
+    case 'quote':
+      return block.segments
+    case 'list':
+      return joinSegmentLines(block.items.map((item) => item.segments))
+    case 'table':
+      return parseMarkdownInline(renderBlockAsText(block))
+    case 'code':
+      return [{ type: 'inlineCode', text: block.code }]
+    case 'rule':
+      return []
+  }
 }
 
-function renderInlineToken(token: Token): string {
-  switch (token.type) {
-    case 'text':
-    case 'escape':
-    case 'codespan':
-      return token.text
-    case 'strong':
-    case 'em':
-    case 'del':
-      if (!token.tokens) return token.text
-      return renderInlineTokens(token.tokens)
-    case 'link': {
-      const label = token.tokens ? renderInlineTokens(token.tokens) || token.text : token.text
-      return token.href ? `${label} (${token.href})` : label
-    }
-    case 'image':
-      return token.href ? `${token.text} (${token.href})` : token.text
-    case 'br':
-      return '\n'
-    case 'html':
-      return token.text
-    default:
-      if (tokenHasInlineTokens(token)) return renderInlineTokens(token.tokens)
-      return 'text' in token && typeof token.text === 'string' ? token.text : ''
+function joinSegmentLines(lines: MarkdownInlineSegment[][]): MarkdownInlineSegment[] {
+  return lines.flatMap((segments, index) => index === 0 ? segments : [{ type: 'text' as const, text: '\n' }, ...segments])
+}
+
+function trimTextSegmentEdges(segments: MarkdownInlineSegment[]): MarkdownInlineSegment[] {
+  const trimmed = [...segments]
+  while (trimmed[0]?.type === 'text' && trimmed[0].text.trim().length === 0) trimmed.shift()
+  while (trimmed.at(-1)?.type === 'text' && trimmed.at(-1)?.text.trim().length === 0) trimmed.pop()
+  const first = trimmed[0]
+  if (first?.type === 'text') first.text = first.text.trimStart()
+  const last = trimmed.at(-1)
+  if (last?.type === 'text') last.text = last.text.trimEnd()
+  return trimmed
+}
+
+function parseInlineTokensCompat(tokens: Token[]): MarkdownInlineSegment[] {
+  return parseMarkdownInline(tokens.map(renderRawInlineToken).join(''))
+}
+
+function listItemInlineSegments(item: Tokens.ListItem): MarkdownInlineSegment[] {
+  if (item.tokens.length === 1) {
+    const [token] = item.tokens
+    if (tokenHasInlineTokens(token)) return parseInlineTokensCompat(token.tokens)
+    if ('text' in token && typeof token.text === 'string') return parseMarkdownInline(token.text)
   }
+  return parseMarkdownInline(renderBlocksAsText(tokensToBlocks(item.tokens)))
+}
+
+function renderRawInlineToken(token: Token): string {
+  return 'raw' in token && typeof token.raw === 'string'
+    ? token.raw
+    : 'text' in token && typeof token.text === 'string'
+      ? token.text
+      : ''
 }
 
 function isTableToken(token: Token): token is Tokens.Table {

@@ -96,7 +96,7 @@ pnpm build                  # 调 scripts/build.mjs，产出 dist/
 - `src/usage/`：token 归一化、定价、cache 策略、`UsageTracker` 与 `/usage` 渲染。
 - `src/infra/`：企业 AI 基建配置同步（base URL / token / sync 状态 / 知识候选上报）。
 - `src/gitlab-kb/`：GitLab Wiki 知识库读取/搜索/发布（`/gitlab-kb` 命令背后逻辑）。
-- `src/terminal/`：Ink TUI、输入状态机、Plan Mode 入口建议确认面板、输入历史 JSONL 持久化（`history-store.ts`）、事件流、Markdown 渲染、表格、主题（`theme/`）、代码高亮、布局/光标 utils。
+- `src/terminal/`：Ink TUI、输入状态机、Plan Mode 入口建议确认面板、输入历史 JSONL 持久化（`history-store.ts`）、事件流、Markdown 块级/行内语义渲染、表格、主题（`theme/`）、24-bit 代码高亮、布局/光标 utils。
 - `src/utils/`：通用工具（logger、原子写、字符串、环境变量布尔判定等）。
 - `tests/unit/`：低成本单元测试。
 - `tests/integration/`：跨模块行为验证（agent-loop、session-recovery、task-graph、audit-trail、team-flow 等）。

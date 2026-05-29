@@ -27,7 +27,7 @@ const MAX_COLUMN_WIDTH = 64
  * 按列宽与对齐方式渲染 GFM 表格块为 Unicode 框线表格。
  */
 export function renderMarkdownTable(block: Extract<MarkdownBlock, { type: 'table' }>): RenderedMarkdownTable {
-  const widths = computeColumnWidths(block)
+  const widths = computeMarkdownTableColumnWidths(block)
   return {
     top: renderBorder('top', widths),
     header: renderTableRow(block.headers, widths, block.alignments),
@@ -38,7 +38,8 @@ export function renderMarkdownTable(block: Extract<MarkdownBlock, { type: 'table
   }
 }
 
-function computeColumnWidths(block: Extract<MarkdownBlock, { type: 'table' }>): number[] {
+/** 计算 Markdown 表格列宽，供字符串表格和语义高亮表格共用。 */
+export function computeMarkdownTableColumnWidths(block: Extract<MarkdownBlock, { type: 'table' }>): number[] {
   const columnCount = block.headers.length
   const widths = block.headers.map((cell) => stringDisplayWidth(cell))
   for (const row of block.rows) {

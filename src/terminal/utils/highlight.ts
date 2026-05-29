@@ -3,6 +3,7 @@
  */
 import { createRequire } from 'node:module'
 import type { HighlightOptions, Theme } from 'cli-highlight'
+import { applyAnsiTextStyle, rgb, type AnsiTextStyle, type RgbColor } from './ansi-style'
 
 /** 高亮主题模式；`auto` 时根据终端环境推断 dark/light。 */
 export type HighlightThemeMode = 'dark' | 'light' | 'auto'
@@ -52,94 +53,117 @@ export const HIGHLIGHT_LANGUAGE_SUBSET: string[] = [
 const require = createRequire(import.meta.url)
 let cliHighlightModule: typeof import('cli-highlight') | undefined
 
+const DARK_PALETTE = {
+  nearWhite: rgb(222, 226, 232),
+  slate: rgb(148, 163, 184),
+  cyan: rgb(103, 232, 249),
+  sky: rgb(125, 211, 252),
+  blue: rgb(147, 197, 253),
+  magenta: rgb(216, 180, 254),
+  amber: rgb(251, 191, 36),
+  green: rgb(134, 239, 172),
+  red: rgb(252, 165, 165)
+} as const
+
+const LIGHT_PALETTE = {
+  nearBlack: rgb(30, 41, 59),
+  slate: rgb(71, 85, 105),
+  cyan: rgb(8, 145, 178),
+  blue: rgb(29, 78, 216),
+  magenta: rgb(147, 51, 234),
+  amber: rgb(180, 83, 9),
+  green: rgb(21, 128, 61),
+  red: rgb(185, 28, 28)
+} as const
+
 const DARK_THEME = createTheme({
-  keyword: ['magenta'],
-  built_in: ['cyan'],
-  type: ['blue'],
-  literal: ['yellow'],
-  number: ['yellow'],
-  regexp: ['red'],
-  string: ['green'],
-  subst: ['cyan'],
-  symbol: ['yellow'],
-  class: ['blue'],
-  function: ['cyan'],
-  title: ['cyan'],
-  params: ['gray'],
-  comment: ['gray', 'dim'],
-  doctag: ['gray', 'dim'],
-  meta: ['gray'],
-  'meta-keyword': ['magenta'],
-  'meta-string': ['green'],
-  section: ['cyan'],
-  tag: ['blue'],
-  name: ['cyan'],
-  'builtin-name': ['cyan'],
-  attr: ['yellow'],
-  attribute: ['yellow'],
-  variable: ['white'],
-  bullet: ['cyan'],
-  code: ['green'],
-  emphasis: ['italic'],
-  strong: ['bold'],
-  formula: ['magenta'],
-  link: ['cyan'],
-  quote: ['gray'],
-  'selector-tag': ['cyan'],
-  'selector-id': ['magenta'],
-  'selector-class': ['blue'],
-  'selector-attr': ['yellow'],
-  'selector-pseudo': ['yellow'],
-  'template-tag': ['cyan'],
-  'template-variable': ['yellow'],
-  addition: ['green'],
-  deletion: ['red'],
-  default: ['white']
+  keyword: [DARK_PALETTE.magenta, 'bold'],
+  built_in: [DARK_PALETTE.sky],
+  type: [DARK_PALETTE.blue],
+  literal: [DARK_PALETTE.amber],
+  number: [DARK_PALETTE.amber],
+  regexp: [DARK_PALETTE.red],
+  string: [DARK_PALETTE.green],
+  subst: [DARK_PALETTE.sky],
+  symbol: [DARK_PALETTE.amber],
+  class: [DARK_PALETTE.blue, 'bold'],
+  function: [DARK_PALETTE.cyan],
+  title: [DARK_PALETTE.cyan],
+  params: [DARK_PALETTE.slate],
+  comment: [DARK_PALETTE.slate],
+  doctag: [DARK_PALETTE.slate],
+  meta: [DARK_PALETTE.slate],
+  'meta-keyword': [DARK_PALETTE.magenta],
+  'meta-string': [DARK_PALETTE.green],
+  section: [DARK_PALETTE.cyan, 'bold'],
+  tag: [DARK_PALETTE.blue],
+  name: [DARK_PALETTE.cyan],
+  'builtin-name': [DARK_PALETTE.cyan],
+  attr: [DARK_PALETTE.amber],
+  attribute: [DARK_PALETTE.amber],
+  variable: [DARK_PALETTE.nearWhite],
+  bullet: [DARK_PALETTE.cyan],
+  code: [DARK_PALETTE.green],
+  emphasis: [DARK_PALETTE.blue, 'italic'],
+  strong: [DARK_PALETTE.cyan, 'bold'],
+  formula: [DARK_PALETTE.magenta],
+  link: [DARK_PALETTE.cyan, 'underline'],
+  quote: [DARK_PALETTE.slate],
+  'selector-tag': [DARK_PALETTE.cyan],
+  'selector-id': [DARK_PALETTE.magenta],
+  'selector-class': [DARK_PALETTE.blue],
+  'selector-attr': [DARK_PALETTE.amber],
+  'selector-pseudo': [DARK_PALETTE.amber],
+  'template-tag': [DARK_PALETTE.cyan],
+  'template-variable': [DARK_PALETTE.amber],
+  addition: [DARK_PALETTE.green],
+  deletion: [DARK_PALETTE.red],
+  default: [DARK_PALETTE.nearWhite]
 })
 
 const LIGHT_THEME = createTheme({
-  keyword: ['blue'],
-  built_in: ['magenta'],
-  type: ['cyan'],
-  literal: ['red'],
-  number: ['magenta'],
-  regexp: ['red'],
-  string: ['green'],
-  subst: ['blue'],
-  symbol: ['magenta'],
-  class: ['blue'],
-  function: ['blue'],
-  title: ['blue'],
-  params: ['gray'],
-  comment: ['gray', 'dim'],
-  doctag: ['gray', 'dim'],
-  meta: ['gray'],
-  'meta-keyword': ['blue'],
-  'meta-string': ['green'],
-  section: ['blue'],
-  tag: ['blue'],
-  name: ['blue'],
-  'builtin-name': ['blue'],
-  attr: ['red'],
-  attribute: ['red'],
-  variable: ['blue'],
-  bullet: ['blue'],
-  code: ['green'],
-  emphasis: ['italic'],
-  strong: ['bold'],
-  formula: ['magenta'],
-  link: ['blue'],
-  quote: ['gray'],
-  'selector-tag': ['blue'],
-  'selector-id': ['magenta'],
-  'selector-class': ['cyan'],
-  'selector-attr': ['red'],
-  'selector-pseudo': ['red'],
-  'template-tag': ['blue'],
-  'template-variable': ['magenta'],
-  addition: ['green'],
-  deletion: ['red'],
-  default: ['black']
+  keyword: [LIGHT_PALETTE.blue, 'bold'],
+  built_in: [LIGHT_PALETTE.magenta],
+  type: [LIGHT_PALETTE.cyan],
+  literal: [LIGHT_PALETTE.red],
+  number: [LIGHT_PALETTE.magenta],
+  regexp: [LIGHT_PALETTE.red],
+  string: [LIGHT_PALETTE.green],
+  subst: [LIGHT_PALETTE.blue],
+  symbol: [LIGHT_PALETTE.magenta],
+  class: [LIGHT_PALETTE.blue, 'bold'],
+  function: [LIGHT_PALETTE.blue],
+  title: [LIGHT_PALETTE.blue],
+  params: [LIGHT_PALETTE.slate],
+  comment: [LIGHT_PALETTE.slate],
+  doctag: [LIGHT_PALETTE.slate],
+  meta: [LIGHT_PALETTE.slate],
+  'meta-keyword': [LIGHT_PALETTE.blue],
+  'meta-string': [LIGHT_PALETTE.green],
+  section: [LIGHT_PALETTE.blue, 'bold'],
+  tag: [LIGHT_PALETTE.blue],
+  name: [LIGHT_PALETTE.blue],
+  'builtin-name': [LIGHT_PALETTE.blue],
+  attr: [LIGHT_PALETTE.red],
+  attribute: [LIGHT_PALETTE.red],
+  variable: [LIGHT_PALETTE.nearBlack],
+  bullet: [LIGHT_PALETTE.blue],
+  code: [LIGHT_PALETTE.green],
+  emphasis: [LIGHT_PALETTE.blue, 'italic'],
+  strong: [LIGHT_PALETTE.blue, 'bold'],
+  formula: [LIGHT_PALETTE.magenta],
+  link: [LIGHT_PALETTE.blue, 'underline'],
+  quote: [LIGHT_PALETTE.slate],
+  'selector-tag': [LIGHT_PALETTE.blue],
+  'selector-id': [LIGHT_PALETTE.magenta],
+  'selector-class': [LIGHT_PALETTE.cyan],
+  'selector-attr': [LIGHT_PALETTE.red],
+  'selector-pseudo': [LIGHT_PALETTE.red],
+  'template-tag': [LIGHT_PALETTE.blue],
+  'template-variable': [LIGHT_PALETTE.magenta],
+  addition: [LIGHT_PALETTE.green],
+  deletion: [LIGHT_PALETTE.red],
+  default: [LIGHT_PALETTE.nearBlack]
 })
 
 const DIFF_HEADER_PREFIXES = ['diff --git ', 'index ', '--- ', '+++ ']
@@ -166,11 +190,11 @@ export function highlightCode(
   if (code.length === 0) return code
   if (options.noColor ?? isNoColorEnabled()) return code
   if (Buffer.byteLength(code, 'utf8') > MAX_HIGHLIGHT_CODE_BYTES) {
-    return colorize(code, 'green')
+    return colorize(code, resolveFallbackPalette(options.theme).green)
   }
 
   if (shouldRenderAsDiff(code, language)) {
-    return renderDiffCode(code)
+    return renderDiffCode(code, options.theme)
   }
 
   try {
@@ -185,7 +209,7 @@ export function highlightCode(
 
     return highlight(code, highlightOptions)
   } catch {
-    return colorize(code, 'green')
+    return colorize(code, resolveFallbackPalette(options.theme).green)
   }
 }
 
@@ -247,18 +271,19 @@ function shouldRenderAsDiff(code: string, language: string | undefined): boolean
   return firstNonEmptyLine.startsWith('+') || firstNonEmptyLine.startsWith('-')
 }
 
-function renderDiffCode(code: string): string {
+function renderDiffCode(code: string, theme?: HighlightThemeMode): string {
+  const palette = resolveDiffPalette(theme)
   return code
     .split(/\r?\n/)
     .map((line) => {
       if (!line) return line
-      if (line.startsWith('\\ No newline at end of file')) return colorize(line, 'gray')
-      if (line.startsWith('@@')) return colorize(line, 'cyan')
+      if (line.startsWith('\\ No newline at end of file')) return colorize(line, palette.muted)
+      if (line.startsWith('@@')) return colorize(line, palette.hunk)
       if (DIFF_HEADER_PREFIXES.some((prefix) => line.startsWith(prefix))) {
-        return colorize(line, 'gray')
+        return colorize(line, palette.muted)
       }
-      if (line.startsWith('+')) return colorize(line, 'green')
-      if (line.startsWith('-')) return colorize(line, 'red')
+      if (line.startsWith('+')) return colorize(line, palette.addition)
+      if (line.startsWith('-')) return colorize(line, palette.deletion)
       return line
     })
     .join('\n')
@@ -270,28 +295,35 @@ function resolveTheme(mode: HighlightThemeMode | undefined): Theme {
   return selected === 'light' ? LIGHT_THEME : DARK_THEME
 }
 
-function colorize(text: string, color: AnsiColor, extra: AnsiStyle[] = []): string {
+function colorize(text: string, color: RgbColor, extra: BasicAnsiStyle[] = []): string {
   return applyAnsiStyles(text, extra.length > 0 ? [...extra, color] : [color])
 }
 
-function createTheme(palette: Partial<Record<ThemeToken, readonly AnsiStyle[]>>): Theme {
+function createTheme(palette: Partial<Record<ThemeToken, readonly HighlightStyle[]>>): Theme {
   const theme: Partial<Theme> = {}
 
-  for (const [token, styles] of Object.entries(palette) as Array<[ThemeToken, readonly AnsiStyle[]]>) {
+  for (const [token, styles] of Object.entries(palette) as Array<[ThemeToken, readonly HighlightStyle[]]>) {
     theme[token] = makeFormatter(styles)
   }
 
   return theme as Theme
 }
 
-function makeFormatter(styles: readonly AnsiStyle[]): (text: string) => string {
+function makeFormatter(styles: readonly HighlightStyle[]): (text: string) => string {
   return (text: string) => applyAnsiStyles(text, styles)
 }
 
-function applyAnsiStyles(text: string, styles: readonly AnsiStyle[]): string {
+function applyAnsiStyles(text: string, styles: readonly HighlightStyle[]): string {
   if (styles.length === 0) return text
-  const codes = styles.map((style) => ANSI_CODES[style]).join(';')
-  return `\x1b[${codes}m${text}\x1b[0m`
+  const ansiStyle: AnsiTextStyle = {}
+  for (const style of styles) {
+    if (typeof style === 'string') {
+      ansiStyle[style] = true
+    } else {
+      ansiStyle.color = style
+    }
+  }
+  return applyAnsiTextStyle(text, ansiStyle)
 }
 
 function parseColorFgbg(raw: string): number | undefined {
@@ -313,34 +345,31 @@ function loadCliHighlight(): typeof import('cli-highlight') {
 
 type ThemeToken = Exclude<keyof Theme, 'default'> | 'default'
 
-type AnsiColor =
-  | 'black'
-  | 'red'
-  | 'green'
-  | 'yellow'
-  | 'blue'
-  | 'magenta'
-  | 'cyan'
-  | 'white'
-  | 'gray'
+type BasicAnsiStyle = 'bold' | 'italic' | 'underline'
+type HighlightStyle = RgbColor | BasicAnsiStyle
 
-type AnsiStyle = AnsiColor | 'bold' | 'dim' | 'italic' | 'underline' | 'inverse' | 'hidden' | 'strikethrough'
+function resolveFallbackPalette(theme?: HighlightThemeMode): typeof DARK_PALETTE | typeof LIGHT_PALETTE {
+  return resolveHighlightTheme(theme) === 'light' ? LIGHT_PALETTE : DARK_PALETTE
+}
 
-const ANSI_CODES: Record<AnsiStyle, number> = {
-  bold: 1,
-  dim: 2,
-  italic: 3,
-  underline: 4,
-  inverse: 7,
-  hidden: 8,
-  strikethrough: 9,
-  black: 30,
-  red: 31,
-  green: 32,
-  yellow: 33,
-  blue: 34,
-  magenta: 35,
-  cyan: 36,
-  white: 37,
-  gray: 90
+function resolveDiffPalette(theme?: HighlightThemeMode): {
+  muted: RgbColor
+  hunk: RgbColor
+  addition: RgbColor
+  deletion: RgbColor
+} {
+  const mode = resolveHighlightTheme(theme)
+  return mode === 'light'
+    ? {
+        muted: LIGHT_PALETTE.slate,
+        hunk: LIGHT_PALETTE.blue,
+        addition: LIGHT_PALETTE.green,
+        deletion: LIGHT_PALETTE.red
+      }
+    : {
+        muted: DARK_PALETTE.slate,
+        hunk: DARK_PALETTE.cyan,
+        addition: DARK_PALETTE.green,
+        deletion: DARK_PALETTE.red
+      }
 }

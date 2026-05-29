@@ -48,6 +48,23 @@ export function clipDisplayWidth(text: string, width: number): string {
   return `${output}…`
 }
 
+/** 按显示宽度保留尾部并在开头加省略号 `…`。 */
+export function clipDisplayWidthStart(text: string, width: number): string {
+  if (stringDisplayWidth(text) <= width) return text
+  if (width <= 0) return ''
+  if (width === 1) return '…'
+
+  let output = ''
+  let used = 0
+  for (const char of splitGraphemes(text).reverse()) {
+    const charWidth = graphemeDisplayWidth(char)
+    if (used + charWidth > width - 1) break
+    output = `${char}${output}`
+    used += charWidth
+  }
+  return `…${output}`
+}
+
 function stripAnsi(text: string): string {
   return text.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
 }
