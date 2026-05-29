@@ -4,7 +4,7 @@
  */
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { Box, Static, Text, useApp, useInput, useStdin, useStdout } from 'ink'
-import type { TerminalEventBus } from './events'
+import type { TerminalBackgroundAgentItem, TerminalEventBus } from './events'
 import { createInitialTerminalState, terminalReducer, type TranscriptItem } from './state'
 import {
   backspace,
@@ -23,6 +23,15 @@ import {
 } from './input'
 import { shouldBackspace, shouldDeleteForward } from './keys'
 import {
+  canKillAgent,
+  formatSubAgentWaitHint,
+  getSubAgentMonitorToggleAction,
+  getRunningAgentIds,
+  shouldShowSubAgentWaitHint,
+  sortAgentMonitorAgents
+} from './agent-monitor'
+import {
+  AgentMonitorPanel,
   CommandSuggestions,
   ConversationView,
   Header,
@@ -62,6 +71,12 @@ export interface TerminalAppProps {
   /** 用户按 Enter 提交非空输入时调用。 */
   onSubmit: (input: string) => Promise<void> | void
   onSessionPickerSelect?: (sessionId: string) => Promise<void> | void
+  /** Agent Monitor 中请求停止一个后台 SubAgent。 */
+  onAgentKill?: (agentId: string) => Promise<boolean> | boolean
+  /** Agent Monitor 中请求停止全部后台 SubAgent。 */
+  onAgentKillAll?: (agentIds: string[]) => Promise<number> | number
+  /** Agent Monitor 中请求清理已完成的 SubAgent。 */
+  onAgentClearCompleted?: () => Promise<number> | number
   /** 忙碌时 Ctrl+C 首次按下时调用，用于中断当前 Agent 轮次。 */
   onInterrupt?: () => Promise<void> | void
   /** 用户按 Shift+Tab 请求切换 Plan/Normal 模式。 */
@@ -349,9 +364,15 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
   const showSlashCommands = fileMentionAtCursor === null && filteredSlashCommands.length > 0
   const suggestionNotice = fileMentionAtCursor ? fileMentionIndexNotice(fileMentionIndex) : undefined
   const suggestionsVisible = (showFileMentions || showSlashCommands || Boolean(suggestionNotice)) && !isBusy
-  const isInteractiveOverlayOpen = Boolean(state.modelsPicker || state.duckPicker || state.sessionPicker)
+  const isInteractiveOverlayOpen = Boolean(
+    state.modelsPicker || state.sessionPicker || state.agentMonitor
+  )
+  const handleAgentOutputLineCount = (agentId: string, lineCount: number): void => {
+    dispatch({ type: 'agent_monitor_output_lines', agentId, lineCount })
+  }
   const previousSuggestionsVisible = useRef(false)
   const [shouldClearSuggestions, setShouldClearSuggestions] = useState(false)
+  const killAllChordActive = useRef(false)
 
   useEffect(() => {
     const flushAssistantDelta = () => {
@@ -485,6 +506,9 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
     const isShiftTab = key.tab && key.shift
     const isMultilineShortcut =
       (key.ctrl && (value === 'j' || value === '\n')) || (key.meta && key.return)
+    const isCtrlX = key.ctrl && value === 'x'
+    const isCtrlK = key.ctrl && value === 'k'
+    const isCtrlA = key.ctrl && value === 'a'
 
     if (isShiftTab && !isBusy && !isInteractiveOverlayOpen && !suggestionsVisible) {
       setIsBusy(true)
@@ -516,6 +540,189 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
         dispatch({ type: 'plan_entry_suggestion_clear' })
         void Promise.resolve(props.onPlanEntryCancel?.(request))
           .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+        return
+      }
+      return
+    }
+
+    if (isCtrlA) {
+      const toggleAction = getSubAgentMonitorToggleAction({
+        agents: state.backgroundAgents,
+        isBusy,
+        monitorOpen: state.agentMonitor !== undefined
+      })
+      if (toggleAction) {
+        dispatch({ type: toggleAction === 'open' ? 'agent_monitor_open' : 'agent_monitor_close' })
+        return
+      }
+    }
+
+    if (isCtrlC && isBusy) {
+      if (interruptRequested) {
+        void Promise.resolve(props.onExit()).finally(() => exit())
+        return
+      }
+      setInterruptRequested(true)
+      dispatch({ type: 'message', role: 'system', text: '正在中断当前任务...' })
+      void Promise.resolve(props.onInterrupt?.()).catch((error) => {
+        dispatch({ type: 'error', text: formatErrorMessage(error) })
+      })
+      return
+    }
+
+    if (state.agentMonitor) {
+      if (state.agentMonitor.view === 'list') {
+        const agents = state.backgroundAgents
+        const selectedAgent = agents[state.agentMonitor.selectedIndex]
+        if (state.agentMonitor.confirmKillAll) {
+          if (key.escape || (!key.ctrl && !key.meta && (value === 'n' || value === 'N'))) {
+            dispatch({ type: 'agent_monitor_confirm_kill_all', visible: false })
+            return
+          }
+          if (isBusy) return
+          if (key.return || (!key.ctrl && !key.meta && (value === 'y' || value === 'Y'))) {
+            const runningIds = getRunningAgentIds(agents)
+            dispatch({ type: 'agent_monitor_confirm_kill_all', visible: false })
+            if (runningIds.length === 0) {
+              dispatch({ type: 'agent_monitor_notice', text: '当前没有可单独停止的后台 SubAgent。' })
+              return
+            }
+            setIsBusy(true)
+            void Promise.resolve(props.onAgentKillAll?.(runningIds) ?? 0)
+              .then((count) => {
+                dispatch({ type: 'agent_monitor_notice', text: `已请求停止 ${count} 个后台 SubAgent。` })
+              })
+              .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+              .finally(() => setIsBusy(false))
+            return
+          }
+          return
+        }
+
+        if (key.upArrow) {
+          const count = agents.length
+          dispatch({
+            type: 'agent_monitor_select',
+            selectedIndex: count > 0
+              ? state.agentMonitor.selectedIndex <= 0
+                ? count - 1
+                : state.agentMonitor.selectedIndex - 1
+              : 0
+          })
+          return
+        }
+        if (key.downArrow) {
+          const count = agents.length
+          dispatch({
+            type: 'agent_monitor_select',
+            selectedIndex: count > 0
+              ? state.agentMonitor.selectedIndex >= count - 1
+                ? 0
+                : state.agentMonitor.selectedIndex + 1
+              : 0
+          })
+          return
+        }
+        if (key.escape) {
+          dispatch({ type: 'agent_monitor_back' })
+          return
+        }
+        if (key.return) {
+          if (selectedAgent) dispatch({ type: 'agent_monitor_detail', agentId: selectedAgent.agentId })
+          return
+        }
+        if (isBusy) return
+        if (isCtrlX) {
+          killAllChordActive.current = true
+          dispatch({ type: 'agent_monitor_notice', text: '继续按 Ctrl+K 停止全部 running Agent。' })
+          return
+        }
+        if (isCtrlK && killAllChordActive.current) {
+          killAllChordActive.current = false
+          if (getRunningAgentIds(agents).length === 0) {
+            dispatch({ type: 'agent_monitor_notice', text: '当前没有可单独停止的后台 SubAgent。' })
+            return
+          }
+          dispatch({ type: 'agent_monitor_confirm_kill_all', visible: true })
+          return
+        }
+        killAllChordActive.current = false
+        if (!key.ctrl && !key.meta && (value === 'x' || value === 'X')) {
+          if (!canKillAgent(selectedAgent)) {
+            dispatch({ type: 'agent_monitor_notice', text: '当前选中的 SubAgent 不是可单独停止的后台运行。' })
+            return
+          }
+          setIsBusy(true)
+          void Promise.resolve(props.onAgentKill?.(selectedAgent.agentId) ?? false)
+            .then((killed) => {
+              dispatch({
+                type: 'agent_monitor_notice',
+                text: killed
+                  ? `已请求停止 ${selectedAgent.agentId}。`
+                  : `${selectedAgent.agentId} 当前无法停止。`
+              })
+            })
+            .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+            .finally(() => setIsBusy(false))
+          return
+        }
+        if (!key.ctrl && !key.meta && (value === 'c' || value === 'C')) {
+          setIsBusy(true)
+          void Promise.resolve(props.onAgentClearCompleted?.() ?? 0)
+            .then((count) => {
+              dispatch({ type: 'agent_monitor_clear_completed' })
+              dispatch({
+                type: 'agent_monitor_notice',
+                text: count > 0
+                  ? `已清理 ${count} 个 completed Agent。`
+                  : '当前没有 completed Agent 需要清理。'
+              })
+            })
+            .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+            .finally(() => setIsBusy(false))
+          return
+        }
+        return
+      }
+
+      const detailMonitor = state.agentMonitor
+      const selectedAgent = state.backgroundAgents.find(
+        (agent) => agent.agentId === detailMonitor.agentId
+      )
+      if (key.escape) {
+        dispatch({ type: 'agent_monitor_back' })
+        return
+      }
+      if (key.upArrow) {
+        dispatch({ type: 'agent_monitor_scroll', delta: 1 })
+        return
+      }
+      if (key.downArrow) {
+        dispatch({ type: 'agent_monitor_scroll', delta: -1 })
+        return
+      }
+      if (rawInput === '\x1b[F' || rawInput === '\x1bOF' || value === '\u0005') {
+        dispatch({ type: 'agent_monitor_follow_tail' })
+        return
+      }
+      if (isBusy) return
+      if (!key.ctrl && !key.meta && (value === 'x' || value === 'X')) {
+        if (!canKillAgent(selectedAgent)) {
+          dispatch({ type: 'agent_monitor_notice', text: '当前 SubAgent 不是可单独停止的后台运行。' })
+          return
+        }
+        setIsBusy(true)
+        void Promise.resolve(props.onAgentKill?.(selectedAgent.agentId) ?? false)
+          .then((killed) => {
+            dispatch({
+              type: 'agent_monitor_notice',
+              text: killed
+                ? `已请求停止 ${selectedAgent.agentId}。`
+                : `${selectedAgent.agentId} 当前无法停止。`
+            })
+          })
+          .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+          .finally(() => setIsBusy(false))
         return
       }
       return
@@ -740,19 +947,6 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
       return
     }
 
-    if (isCtrlC && isBusy) {
-      if (interruptRequested) {
-        void Promise.resolve(props.onExit()).finally(() => exit())
-        return
-      }
-      setInterruptRequested(true)
-      dispatch({ type: 'message', role: 'system', text: '正在中断当前任务...' })
-      void Promise.resolve(props.onInterrupt?.()).catch((error) => {
-        dispatch({ type: 'error', text: formatErrorMessage(error) })
-      })
-      return
-    }
-
     if (isCtrlC) {
       void Promise.resolve(props.onExit()).finally(() => exit())
       return
@@ -909,6 +1103,16 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
         <SessionPickerPanel picker={state.sessionPicker} renaming={sessionPickerRenaming} />
         <ModelsPickerPanel picker={state.modelsPicker} />
         <DuckPickerPanel picker={state.duckPicker} />
+        <AgentMonitorPanel
+          monitor={state.agentMonitor}
+          agents={sortAgentMonitorAgents(state.backgroundAgents)}
+          onOutputLineCount={handleAgentOutputLineCount}
+        />
+        <SubAgentWaitHint
+          agents={state.backgroundAgents}
+          isBusy={isBusy}
+          monitorOpen={state.agentMonitor !== undefined}
+        />
         <PlanEntrySuggestion suggestion={state.planEntrySuggestion} />
         {suggestionsVisible ? (
           <CommandSuggestions
@@ -926,7 +1130,8 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
             state.sessionPicker !== undefined ||
             sessionPickerRenaming !== undefined ||
             state.modelsPicker !== undefined ||
-            state.duckPicker !== undefined
+            state.duckPicker !== undefined ||
+            state.agentMonitor !== undefined
           }
           useRealCursor={process.env.Q_CODE_TUI_CURSOR?.trim().toLowerCase() === 'ansi'}
           historySearchLabel={historySearchLabel}
@@ -934,6 +1139,23 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
         />
       </Box>
     </>
+  )
+}
+
+function SubAgentWaitHint({
+  agents,
+  isBusy,
+  monitorOpen
+}: {
+  agents: TerminalBackgroundAgentItem[]
+  isBusy: boolean
+  monitorOpen: boolean
+}): React.JSX.Element | null {
+  if (!shouldShowSubAgentWaitHint(agents, isBusy, monitorOpen)) return null
+  return (
+    <Box marginTop={1}>
+      <Text color="gray">  {formatSubAgentWaitHint(agents)}</Text>
+    </Box>
   )
 }
 

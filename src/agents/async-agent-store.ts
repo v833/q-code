@@ -1,15 +1,17 @@
 /**
- * 进程内后台 SubAgent / 队友运行状态表。
+ * 进程内 SubAgent / 队友运行状态表。
  *
- * `registerAsyncAgent` 在 `Agent` 工具以 `run_in_background` 启动时登记；
+ * `registerAsyncAgent` 在 `Agent` 工具启动同步或后台 SubAgent 时登记；
  * UI、`/agents` 与生命周期回调通过订阅接口观察状态变化。
  */
 import type { AgentRunResult } from './types'
 
-/** 后台 Agent 的生命周期状态。 */
+/** SubAgent 的生命周期状态。 */
 export type AsyncAgentStatus = 'running' | 'completed' | 'failed' | 'killed'
+/** SubAgent 的执行方式：同步阻塞当前轮次，或后台并行运行。 */
+export type AsyncAgentExecution = 'foreground' | 'background'
 
-/** 单个后台 Agent 的运行时条目（含可中止的 `AbortController`）。 */
+/** 单个 SubAgent 的运行时条目（后台条目含可中止的 `AbortController`）。 */
 export interface AsyncAgentEntry {
   agentId: string
   agentType: string
@@ -17,6 +19,7 @@ export interface AsyncAgentEntry {
   prompt: string
   startedAt: string
   status: AsyncAgentStatus
+  execution: AsyncAgentExecution
   abortController: AbortController
   /** JSONL 任务输出文件路径（见 `task-output.ts`）。 */
   outputFile: string
@@ -42,6 +45,7 @@ export interface RegisterAsyncAgentInit {
   description: string
   prompt: string
   outputFile: string
+  execution?: AsyncAgentExecution
   isolated?: boolean
   worktreePath?: string
   worktreeBranch?: string
@@ -53,7 +57,7 @@ const entries = new Map<string, AsyncAgentEntry>()
 const listeners = new Set<AsyncAgentListener>()
 
 /**
- * 登记新的后台 Agent。`agentId` 重复时抛错。
+ * 登记新的 SubAgent。`agentId` 重复时抛错。
  * 初始状态为 `running` 并通知订阅者。
  */
 export function registerAsyncAgent(init: RegisterAsyncAgentInit): AsyncAgentEntry {
@@ -68,6 +72,7 @@ export function registerAsyncAgent(init: RegisterAsyncAgentInit): AsyncAgentEntr
     prompt: init.prompt,
     startedAt: new Date().toISOString(),
     status: 'running',
+    execution: init.execution ?? 'background',
     abortController: new AbortController(),
     outputFile: init.outputFile,
     isolated: init.isolated === true,
@@ -151,12 +156,12 @@ export function failAsyncAgent(
 }
 
 /**
- * 请求中止后台 Agent：触发 `abortController` 并将状态设为 `killed`。
- * 若已非 `running` 则返回 false。
+ * 请求中止后台 SubAgent：触发 `abortController` 并将状态设为 `killed`。
+ * 若已非 `running` 或并非后台 SubAgent 则返回 false。
  */
 export function killAsyncAgent(agentId: string): boolean {
   const current = entries.get(agentId)
-  if (!current || current.status !== 'running') return false
+  if (!current || current.status !== 'running' || current.execution !== 'background') return false
 
   current.abortController.abort(new Error('Background agent was killed'))
   const next: AsyncAgentEntry = {
@@ -214,6 +219,29 @@ export function subscribeAsyncAgents(listener: AsyncAgentListener): () => void {
   return () => {
     listeners.delete(listener)
   }
+}
+
+/** 移除单个已结束的 SubAgent 条目（不中断运行中的 Agent）。 */
+export function removeAsyncAgent(agentId: string): boolean {
+  if (!entries.has(agentId)) return false
+  const entry = entries.get(agentId)!
+  if (entry.status === 'running') return false
+  entries.delete(agentId)
+  notify(agentId, null)
+  return true
+}
+
+/** 清理全部已成功完成的 SubAgent 条目；失败/终止条目保留用于排障。 */
+export function clearCompletedAsyncAgents(): number {
+  const completedIds = [...entries.values()]
+    .filter((entry) => entry.status === 'completed')
+    .map((entry) => entry.agentId)
+
+  for (const agentId of completedIds) {
+    entries.delete(agentId)
+    notify(agentId, null)
+  }
+  return completedIds.length
 }
 
 /** 清空全部条目并通知订阅者（测试用）。 */

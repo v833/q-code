@@ -2,14 +2,20 @@
  * Agent 子进程工具：同步/后台子 Agent、Agent Teams 队友校验与 worktree 隔离。
  */
 import { randomUUID } from 'node:crypto'
-import { failAsyncAgent, registerAsyncAgent } from '../agents/async-agent-store'
+import {
+  completeAsyncAgent,
+  failAsyncAgent,
+  registerAsyncAgent,
+  updateAsyncAgentProgress
+} from '../agents/async-agent-store'
 import { findAgent, getAllAgents } from '../agents/registry'
+import { resolveAgentTools } from '../agents/resolve-agent-tools'
 import {
   runAsyncAgentLifecycle,
   type RunAsyncAgentLifecycleParams
 } from '../agents/run-async-agent'
 import { runChildAgent, type RunChildAgentParams } from '../agents/run-agent'
-import { ensureTaskOutputFile } from '../agents/task-output'
+import { appendTaskOutput, ensureTaskOutputFile, previewToolResult } from '../agents/task-output'
 import { getActiveTeam } from '../agents/team-context'
 import {
   addTeamMember,
@@ -20,7 +26,7 @@ import {
   TeamFileMissingError,
   type TeamMember
 } from '../agents/team-helpers'
-import type { AgentIsolation, AgentRunResult } from '../agents/types'
+import type { AgentDefinition, AgentIsolation, AgentRunResult } from '../agents/types'
 import { cleanupWorktreeIfClean, createAgentWorktree, type WorktreeInfo } from '../agents/worktree'
 import { isAgentTeamsEnabled } from '../utils/agent-teams-enabled'
 import type { HookRunner } from '../hooks'
@@ -50,7 +56,7 @@ export interface AgentToolController {
 
 /** 同步子 Agent 执行函数类型（可注入测试替身）。 */
 export type ChildAgentRunner = (params: RunChildAgentParams) => Promise<AgentRunResult>
-/** 后台 Agent 生命周期函数类型（可注入测试替身）。 */
+/** 后台 SubAgent 生命周期函数类型（可注入测试替身）。 */
 export type AsyncAgentLifecycleRunner = (params: RunAsyncAgentLifecycleParams) => Promise<void>
 
 interface AgentInput {
@@ -74,6 +80,11 @@ interface NormalizedAgentInput {
   name?: string
   teamName?: string
 }
+
+let foregroundReadCount = 0
+let foregroundWriteLocked = false
+let foregroundPendingWrites = 0
+const foregroundWaitQueue: Array<() => void> = []
 
 /**
  * 创建 `Agent` 工具：支持 SubAgent、后台运行与 Agent Teams 命名队友。
@@ -134,7 +145,7 @@ export function createAgentTool(
       required: ['prompt', 'description'],
       additionalProperties: false
     },
-    isConcurrencySafe: false,
+    isConcurrencySafe: true,
     isReadOnly: false,
     contextCost: 'medium',
     resultShape: 'agent-report',
@@ -166,16 +177,151 @@ export function createAgentTool(
       const availableTools = controller.getAvailableTools()
       const effectiveIsolation = input.isolation ?? definition.isolation ?? 'none'
       const agentId = createAgentId(agentType, teamValidation.identity?.agentName)
+      const releaseAgentSlot = await acquireAgentRunSlot(
+        input.runInBackground !== true &&
+          effectiveIsolation === 'none' &&
+          isReadOnlyAgentRun(definition, availableTools)
+      )
       const isolationSetup = await setupWorktreeIfRequested(effectiveIsolation, cwd, agentId)
 
       if (input.runInBackground === true) {
-        const outputFile = await ensureTaskOutputFile({ cwd, sessionId, agentId })
-        const entry = registerAsyncAgent({
+        try {
+          const outputFile = await ensureTaskOutputFile({ cwd, sessionId, agentId })
+          const entry = registerAsyncAgent({
+            agentId,
+            agentType,
+            description: input.description,
+            prompt: input.prompt,
+            outputFile,
+            execution: 'background',
+            isolated: Boolean(isolationSetup.worktreeInfo),
+            ...(isolationSetup.worktreeInfo
+              ? {
+                  worktreePath: isolationSetup.worktreeInfo.worktreePath,
+                  worktreeBranch: isolationSetup.worktreeInfo.worktreeBranch
+                }
+              : {})
+          })
+
+          // Register the teammate in team.json BEFORE launching the async
+          // lifecycle. If the launch races a SendMessage from the lead's
+          // next turn, the recipient must already be on the roster — and
+          // the lead's next system-prompt render must list it as active.
+          if (teamValidation.identity) {
+            try {
+              await registerTeammate({
+                identity: teamValidation.identity,
+                agentId,
+                agentType,
+                model: modelName,
+                outputFile,
+                worktreeInfo: isolationSetup.worktreeInfo
+              })
+            } catch (error) {
+              // team.json is gone (user manually deleted, or a different
+              // process disbanded the team between TeamCreate and now).
+              // Roll the async-store entry back so /agents listing is honest.
+              failAsyncAgent(agentId, formatError(error), 0)
+              const message =
+                error instanceof TeamFileMissingError
+                  ? `Error: cannot register teammate "${teamValidation.identity.agentName}" — ${error.message}. Run TeamDelete to clear the in-process state, then TeamCreate again.`
+                  : `Error: failed to register teammate: ${formatError(error)}`
+              return message
+            }
+          }
+
+          // Build the asyncRunner params first; if `controller.createModel`
+          // throws synchronously we MUST roll back the bookkeeping (entry
+          // in async-store, member in team.json) so we don't leak a ghost
+          // teammate that's permanently isActive=true.
+          let runnerParams: RunAsyncAgentLifecycleParams
+          try {
+            runnerParams = {
+              entry,
+              agentDefinition: definition,
+              prompt: input.prompt,
+              availableTools,
+              model: controller.createModel(modelName),
+              modelName,
+              runtimeContext: controller.getRuntimeContext?.(),
+              agentMdContext: controller.getAgentMdContext?.(),
+              maxOutputTokens: controller.getMaxOutputTokens?.(),
+              escalatedMaxOutputTokens: controller.getEscalatedMaxOutputTokens?.(),
+              providerOptions: controller.getProviderOptions?.(modelName),
+              modelWaitHeartbeatMs: controller.getModelWaitHeartbeatMs?.(),
+              modelSlowRequestWarnMs: controller.getModelSlowRequestWarnMs?.(),
+              modelStalledRequestWarnMs: controller.getModelStalledRequestWarnMs?.(),
+              modelRequestTimeoutMs: controller.getModelRequestTimeoutMs?.(),
+              modelRequestLabel: controller.getModelRequestLabel?.(modelName),
+              sessionId,
+              hooks: controller.getHooks?.() ?? context.hooks,
+              ...(isolationSetup.worktreeInfo ? { worktreeInfo: isolationSetup.worktreeInfo } : {}),
+              ...(teamValidation.identity ? { teammateIdentity: teamValidation.identity } : {})
+            }
+          } catch (error) {
+            await rollbackTeammateLaunch(agentId, teamValidation.identity, error)
+            return `Error: failed to construct background agent: ${formatError(error)}`
+          }
+
+          void asyncRunner(runnerParams).catch(() => {
+            /* runAsyncAgentLifecycle owns user-visible failure reporting. */
+          })
+          getAuditLogger().emit(
+            'subagent.spawn',
+            {
+              agentId,
+              agentType,
+              background: true,
+              description: input.description,
+              prompt: createMessageSummaryPayload(input.prompt),
+              ...(teamValidation.identity
+                ? {
+                    teamName: teamValidation.identity.teamName,
+                    agentName: teamValidation.identity.agentName
+                  }
+                : {})
+            },
+            {
+              sessionId,
+              cwd,
+              agent: teamValidation.identity
+                ? {
+                    kind: 'teammate',
+                    agentName: teamValidation.identity.agentName,
+                    teamName: teamValidation.identity.teamName,
+                    agentType
+                  }
+                : { kind: 'subagent', agentId, agentType }
+            }
+          )
+
+          return formatAsyncLaunchResult({
+            agentType,
+            description: input.description,
+            modelName,
+            agentId,
+            outputFile,
+            worktreeInfo: isolationSetup.worktreeInfo,
+            isolationWarning: isolationSetup.warning,
+            teammateIdentity: teamValidation.identity
+          })
+        } finally {
+          releaseAgentSlot()
+        }
+      }
+
+      let outputFile: string | undefined
+      let entry: ReturnType<typeof registerAsyncAgent> | undefined
+      try {
+        const currentOutputFile = await ensureTaskOutputFile({ cwd, sessionId, agentId })
+        outputFile = currentOutputFile
+        const currentEntry = registerAsyncAgent({
           agentId,
           agentType,
           description: input.description,
           prompt: input.prompt,
-          outputFile,
+          outputFile: currentOutputFile,
+          execution: 'foreground',
           isolated: Boolean(isolationSetup.worktreeInfo),
           ...(isolationSetup.worktreeInfo
             ? {
@@ -184,112 +330,14 @@ export function createAgentTool(
               }
             : {})
         })
-
-        // Register the teammate in team.json BEFORE launching the async
-        // lifecycle. If the launch races a SendMessage from the lead's
-        // next turn, the recipient must already be on the roster — and
-        // the lead's next system-prompt render must list it as active.
-        if (teamValidation.identity) {
-          try {
-            await registerTeammate({
-              identity: teamValidation.identity,
-              agentId,
-              agentType,
-              model: modelName,
-              outputFile,
-              worktreeInfo: isolationSetup.worktreeInfo
-            })
-          } catch (error) {
-            // team.json is gone (user manually deleted, or a different
-            // process disbanded the team between TeamCreate and now).
-            // Roll the async-store entry back so /agents listing is honest.
-            failAsyncAgent(agentId, formatError(error), 0)
-            const message =
-              error instanceof TeamFileMissingError
-                ? `Error: cannot register teammate "${teamValidation.identity.agentName}" — ${error.message}. Run TeamDelete to clear the in-process state, then TeamCreate again.`
-                : `Error: failed to register teammate: ${formatError(error)}`
-            return message
-          }
-        }
-
-        // Build the asyncRunner params first; if `controller.createModel`
-        // throws synchronously we MUST roll back the bookkeeping (entry
-        // in async-store, member in team.json) so we don't leak a ghost
-        // teammate that's permanently isActive=true.
-        let runnerParams: RunAsyncAgentLifecycleParams
-        try {
-          runnerParams = {
-            entry,
-            agentDefinition: definition,
-            prompt: input.prompt,
-            availableTools,
-            model: controller.createModel(modelName),
-            modelName,
-            runtimeContext: controller.getRuntimeContext?.(),
-            agentMdContext: controller.getAgentMdContext?.(),
-            maxOutputTokens: controller.getMaxOutputTokens?.(),
-            escalatedMaxOutputTokens: controller.getEscalatedMaxOutputTokens?.(),
-            providerOptions: controller.getProviderOptions?.(modelName),
-            modelWaitHeartbeatMs: controller.getModelWaitHeartbeatMs?.(),
-            modelSlowRequestWarnMs: controller.getModelSlowRequestWarnMs?.(),
-            modelStalledRequestWarnMs: controller.getModelStalledRequestWarnMs?.(),
-            modelRequestTimeoutMs: controller.getModelRequestTimeoutMs?.(),
-            modelRequestLabel: controller.getModelRequestLabel?.(modelName),
-            sessionId,
-            hooks: controller.getHooks?.() ?? context.hooks,
-            ...(isolationSetup.worktreeInfo ? { worktreeInfo: isolationSetup.worktreeInfo } : {}),
-            ...(teamValidation.identity ? { teammateIdentity: teamValidation.identity } : {})
-          }
-        } catch (error) {
-          await rollbackTeammateLaunch(agentId, teamValidation.identity, error)
-          return `Error: failed to construct background agent: ${formatError(error)}`
-        }
-
-        void asyncRunner(runnerParams).catch(() => {
-          /* runAsyncAgentLifecycle owns user-visible failure reporting. */
-        })
-        getAuditLogger().emit(
-          'subagent.spawn',
-          {
-            agentId,
-            agentType,
-            background: true,
-            description: input.description,
-            prompt: createMessageSummaryPayload(input.prompt),
-            ...(teamValidation.identity
-              ? {
-                  teamName: teamValidation.identity.teamName,
-                  agentName: teamValidation.identity.agentName
-                }
-              : {})
-          },
-          {
-            sessionId,
-            cwd,
-            agent: teamValidation.identity
-              ? {
-                  kind: 'teammate',
-                  agentName: teamValidation.identity.agentName,
-                  teamName: teamValidation.identity.teamName,
-                  agentType
-                }
-              : { kind: 'subagent', agentId, agentType }
-          }
-        )
-
-        return formatAsyncLaunchResult({
+        entry = currentEntry
+        await appendTaskOutput(currentOutputFile, {
+          type: 'started',
           agentType,
           description: input.description,
-          modelName,
-          agentId,
-          outputFile,
-          worktreeInfo: isolationSetup.worktreeInfo,
-          isolationWarning: isolationSetup.warning,
-          teammateIdentity: teamValidation.identity
+          prompt: input.prompt
         })
-      }
 
-      try {
         const result = await runner({
           agentDefinition: definition,
           prompt: input.prompt,
@@ -307,12 +355,75 @@ export function createAgentTool(
           modelRequestTimeoutMs: controller.getModelRequestTimeoutMs?.(),
           modelRequestLabel: controller.getModelRequestLabel?.(modelName),
           sessionId,
+          ...(context.abortSignal ? { abortSignal: context.abortSignal } : {}),
+          quiet: true,
           hooks: controller.getHooks?.() ?? context.hooks,
           ...(isolationSetup.worktreeInfo
             ? { cwdOverride: isolationSetup.worktreeInfo.worktreePath }
-            : {})
+            : {}),
+          onProgress: (event) => {
+            switch (event.type) {
+              case 'text':
+                void appendTaskOutput(currentOutputFile, { type: 'text', text: event.text })
+                break
+              case 'tool_use':
+                void appendTaskOutput(currentOutputFile, {
+                  type: 'tool_use',
+                  toolName: event.toolName,
+                  ...(event.toolCallId ? { toolCallId: event.toolCallId } : {})
+                })
+                updateAsyncAgentProgress(agentId, { lastToolName: event.toolName })
+                break
+              case 'tool_progress':
+                void appendTaskOutput(currentOutputFile, {
+                  type: 'tool_progress',
+                  toolName: event.toolName,
+                  ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
+                  text: event.text
+                })
+                updateAsyncAgentProgress(agentId, { lastToolName: event.toolName })
+                break
+              case 'tool_result':
+                void appendTaskOutput(currentOutputFile, {
+                  type: 'tool_result',
+                  toolName: event.toolName,
+                  ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
+                  isError: event.isError === true,
+                  preview: previewToolResult(event.output)
+                })
+                updateAsyncAgentProgress(agentId, {
+                  toolUseCount: currentEntry.toolUseCount + 1,
+                  lastToolName: event.toolName
+                })
+                currentEntry.toolUseCount += 1
+                break
+              case 'turn_usage':
+                void appendTaskOutput(currentOutputFile, {
+                  type: 'turn_usage',
+                  inputTokens: event.cumulativeUsage.inputTokens,
+                  outputTokens: event.cumulativeUsage.outputTokens,
+                  totalTokens: event.cumulativeUsage.totalTokens,
+                  turn: event.turnCount
+                })
+                updateAsyncAgentProgress(agentId, {
+                  inputTokens: event.cumulativeUsage.inputTokens,
+                  outputTokens: event.cumulativeUsage.outputTokens,
+                  totalTokens: event.cumulativeUsage.totalTokens,
+                  turnCount: event.turnCount
+                })
+                break
+            }
+          }
         })
         const worktreeFinal = await cleanupWorktreeIfClean(isolationSetup.worktreeInfo)
+        await appendTaskOutput(currentOutputFile, {
+          type: 'completed',
+          finalText: result.finalText,
+          durationMs: result.totalDurationMs,
+          totalTokens: result.totalTokens,
+          toolUseCount: result.totalToolUseCount
+        })
+        completeAsyncAgent(agentId, result, worktreeFinal)
 
         return formatAgentToolResult({
           agentType,
@@ -324,17 +435,66 @@ export function createAgentTool(
         })
       } catch (error) {
         const worktreeFinal = await cleanupWorktreeIfClean(isolationSetup.worktreeInfo)
+        const message = error instanceof Error ? error.message : String(error)
+        const durationMs = entry ? Date.now() - Date.parse(entry.startedAt) : 0
+        if (entry) failAsyncAgent(agentId, message, durationMs, worktreeFinal)
+        if (outputFile) {
+          await appendTaskOutput(outputFile, {
+            type: 'failed',
+            error: message,
+            durationMs
+          })
+        }
         return formatAgentToolFailure({
           agentType,
           description: input.description,
           modelName,
-          error: error instanceof Error ? error.message : String(error),
+          error: message,
           worktreeFinal,
           isolationWarning: isolationSetup.warning
         })
+      } finally {
+        releaseAgentSlot()
       }
     }
   }
+}
+
+function isReadOnlyAgentRun(definition: AgentDefinition, availableTools: ToolDefinition[]): boolean {
+  const resolved = resolveAgentTools(definition, availableTools)
+  return resolved.resolvedTools.length > 0 && resolved.resolvedTools.every((tool) => tool.isReadOnly === true)
+}
+
+async function acquireAgentRunSlot(readOnly: boolean): Promise<() => void> {
+  if (readOnly) {
+    while (foregroundWriteLocked || foregroundPendingWrites > 0) {
+      await new Promise<void>((resolve) => foregroundWaitQueue.push(resolve))
+    }
+    foregroundReadCount++
+    return () => {
+      foregroundReadCount--
+      if (foregroundReadCount === 0) drainForegroundWaitQueue()
+    }
+  }
+
+  foregroundPendingWrites++
+  try {
+    while (foregroundWriteLocked || foregroundReadCount > 0) {
+      await new Promise<void>((resolve) => foregroundWaitQueue.push(resolve))
+    }
+  } finally {
+    foregroundPendingWrites--
+  }
+  foregroundWriteLocked = true
+  return () => {
+    foregroundWriteLocked = false
+    drainForegroundWaitQueue()
+  }
+}
+
+function drainForegroundWaitQueue(): void {
+  const waiting = foregroundWaitQueue.splice(0)
+  for (const resolve of waiting) resolve()
 }
 
 function normalizeInput(input: AgentInput): NormalizedAgentInput {

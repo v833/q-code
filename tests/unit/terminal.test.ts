@@ -467,6 +467,210 @@ describe('terminal state reducer', () => {
     expect(state.transcript).toHaveLength(0)
   })
 
+  it('opens and navigates the agent monitor without transcript noise', () => {
+    let state = createInitialTerminalState()
+    state = terminalReducer(state, {
+      type: 'background_agents',
+      agents: [
+        {
+          agentId: 'agent-old',
+          agentType: 'reviewer',
+          description: 'old',
+          startedAt: '2026-05-29T01:00:00.000Z',
+          status: 'completed',
+          toolUseCount: 1
+        },
+        {
+          agentId: 'agent-new',
+          agentType: 'Explore',
+          description: 'new',
+          startedAt: '2026-05-29T02:00:00.000Z',
+          status: 'running',
+          toolUseCount: 2,
+          totalTokens: 3200
+        }
+      ]
+    })
+
+    state = terminalReducer(state, { type: 'agent_monitor_open' })
+    expect(state.agentMonitor).toMatchObject({
+      view: 'list',
+      selectedIndex: 0,
+      confirmKillAll: false
+    })
+    expect(state.backgroundAgents).toHaveLength(1)
+    expect(state.backgroundAgents[0]?.agentId).toBe('agent-new')
+
+    state = terminalReducer(state, { type: 'agent_monitor_detail', agentId: 'agent-new' })
+    expect(state.agentMonitor).toMatchObject({
+      view: 'detail',
+      agentId: 'agent-new',
+      scrollOffset: 0,
+      followTail: true,
+      outputLineCount: 0
+    })
+
+    state = terminalReducer(state, {
+      type: 'agent_monitor_output_lines',
+      agentId: 'agent-new',
+      lineCount: 8
+    })
+    state = terminalReducer(state, { type: 'agent_monitor_scroll', delta: 2 })
+    expect(state.agentMonitor).toMatchObject({
+      view: 'detail',
+      scrollOffset: 2,
+      followTail: false,
+      outputLineCount: 8
+    })
+
+    state = terminalReducer(state, {
+      type: 'agent_monitor_output_lines',
+      agentId: 'agent-new',
+      lineCount: 11
+    })
+    expect(state.agentMonitor).toMatchObject({
+      view: 'detail',
+      scrollOffset: 5,
+      followTail: false,
+      outputLineCount: 11
+    })
+
+    state = terminalReducer(state, { type: 'agent_monitor_follow_tail' })
+    expect(state.agentMonitor).toMatchObject({
+      view: 'detail',
+      scrollOffset: 0,
+      followTail: true
+    })
+
+    state = terminalReducer(state, { type: 'agent_monitor_back' })
+    expect(state.agentMonitor).toMatchObject({
+      view: 'list',
+      selectedIndex: 0
+    })
+    state = terminalReducer(state, { type: 'agent_monitor_back' })
+    expect(state.agentMonitor).toBeUndefined()
+    expect(state.transcript).toHaveLength(0)
+  })
+
+  it('keeps agent monitor selection in range when background agents change', () => {
+    let state = createInitialTerminalState()
+    state = terminalReducer(state, {
+      type: 'background_agents',
+      agents: [
+        {
+          agentId: 'agent-1',
+          agentType: 'Explore',
+          description: 'one',
+          status: 'running',
+          toolUseCount: 0
+        },
+        {
+          agentId: 'agent-2',
+          agentType: 'Explore',
+          description: 'two',
+          status: 'running',
+          toolUseCount: 0
+        }
+      ]
+    })
+    state = terminalReducer(state, { type: 'agent_monitor_open' })
+    state = terminalReducer(state, { type: 'agent_monitor_select', selectedIndex: 1 })
+    state = terminalReducer(state, {
+      type: 'background_agents',
+      agents: [
+        {
+          agentId: 'agent-1',
+          agentType: 'Explore',
+          description: 'one',
+          status: 'completed',
+          toolUseCount: 0
+        }
+      ]
+    })
+
+    expect(state.backgroundAgents).toEqual([])
+    expect(state.agentMonitor).toMatchObject({
+      view: 'list',
+      selectedIndex: 0
+    })
+  })
+
+  it('hides completed agents and reconciles detail view when clearing completed agents', () => {
+    let state = createInitialTerminalState()
+    state = terminalReducer(state, {
+      type: 'background_agents',
+      agents: [
+        {
+          agentId: 'agent-completed',
+          agentType: 'Explore',
+          description: 'done',
+          status: 'completed',
+          toolUseCount: 1
+        },
+        {
+          agentId: 'agent-failed',
+          agentType: 'Explore',
+          description: 'failed',
+          status: 'failed',
+          error: 'boom',
+          toolUseCount: 1
+        }
+      ]
+    })
+
+    expect(state.backgroundAgents.map((agent) => agent.agentId)).toEqual(['agent-failed'])
+
+    state = terminalReducer(state, { type: 'agent_monitor_detail', agentId: 'agent-completed' })
+    state = terminalReducer(state, { type: 'agent_monitor_clear_completed' })
+
+    expect(state.agentMonitor).toMatchObject({
+      view: 'list',
+      selectedIndex: 0,
+      notice: 'SubAgent agent-completed 已不在列表中。'
+    })
+  })
+
+  it('moves detail view back to list when selected agent disappears', () => {
+    let state = createInitialTerminalState()
+    state = terminalReducer(state, {
+      type: 'background_agents',
+      agents: [
+        {
+          agentId: 'agent-1',
+          agentType: 'Explore',
+          description: 'one',
+          status: 'running',
+          toolUseCount: 0
+        }
+      ]
+    })
+    state = terminalReducer(state, { type: 'agent_monitor_detail', agentId: 'agent-1' })
+    state = terminalReducer(state, { type: 'background_agents', agents: [] })
+
+    expect(state.agentMonitor).toMatchObject({
+      view: 'list',
+      selectedIndex: 0,
+      notice: 'SubAgent agent-1 已不在列表中。'
+    })
+  })
+
+  it('tracks stop-all confirmation and lightweight notices in agent monitor', () => {
+    let state = createInitialTerminalState()
+    state = terminalReducer(state, { type: 'agent_monitor_open' })
+    state = terminalReducer(state, { type: 'agent_monitor_confirm_kill_all', visible: true })
+
+    expect(state.agentMonitor).toMatchObject({
+      view: 'list',
+      confirmKillAll: true
+    })
+
+    state = terminalReducer(state, { type: 'agent_monitor_notice', text: '当前没有 running Agent 可停止。' })
+    expect(state.agentMonitor).toMatchObject({
+      view: 'list',
+      notice: '当前没有 running Agent 可停止。'
+    })
+  })
+
   it('stores tool context cost metadata and recovery hints', () => {
     let state = createInitialTerminalState()
     state = terminalReducer(state, {

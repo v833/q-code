@@ -1,4 +1,5 @@
 /** TUI React 组件 barrel 导出。 */
+export { AgentMonitorPanel } from './AgentMonitorPanel'
 export { ConversationView } from './ConversationView'
 export { CommandSuggestions } from './CommandSuggestions'
 export { Header } from './Header'

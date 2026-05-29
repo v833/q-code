@@ -1,5 +1,5 @@
 /**
- * 状态栏：Agent 状态、可选详情（上下文条、用量、进度、后台 Agent、JIT 提示）。
+ * 状态栏：Agent 状态、可选详情（上下文条、用量、进度、SubAgent、JIT 提示）。
  */
 import React from 'react'
 import { Box, Text } from 'ink'
@@ -51,7 +51,7 @@ export function StatusBar({
         </Box>
       ) : null}
       {state.progressItems.length > 0 ? <ProgressSummary state={state} /> : null}
-      {state.backgroundAgents.length > 0 ? <BackgroundAgentSummary state={state} /> : null}
+      {state.backgroundAgents.length > 0 ? <SubAgentSummary state={state} /> : null}
       {state.statusDetailsVisible && state.jitMessages.length > 0 ? (
         <Text color={animeTheme.textDim}>  JIT: {state.jitMessages[state.jitMessages.length - 1]}</Text>
       ) : null}
@@ -85,7 +85,7 @@ function ProgressSummary({ state }: { state: TerminalState }): React.JSX.Element
   )
 }
 
-function BackgroundAgentSummary({ state }: { state: TerminalState }): React.JSX.Element {
+function SubAgentSummary({ state }: { state: TerminalState }): React.JSX.Element {
   const running = state.backgroundAgents.filter((agent) => agent.status === 'running')
   const latest = running[0] ?? state.backgroundAgents[state.backgroundAgents.length - 1]
   if (!latest) return <Text />
@@ -98,7 +98,7 @@ function BackgroundAgentSummary({ state }: { state: TerminalState }): React.JSX.
 
   return (
     <Text color={latest.status === 'failed' ? animeTheme.danger : animeTheme.textDim}>
-      {'  '}Background {running.length}/{state.backgroundAgents.length}: {latest.agentId} [{latest.status}] {detail}
+      {'  '}SubAgents {running.length}/{state.backgroundAgents.length}: {latest.agentId} [{latest.execution ?? 'background'} {latest.status}] {detail}
     </Text>
   )
 }

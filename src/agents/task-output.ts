@@ -1,5 +1,5 @@
 /**
- * 后台 SubAgent 的 JSONL 任务转录：按事件追加到
+ * SubAgent 的 JSONL 任务转录：按事件追加到
  * `<projectDir>/async-agents/<session>/<agentId>.output`。
  *
  * 文件仅用于可观测性与 `/agents` 查看；写入失败不影响任务完成。

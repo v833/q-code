@@ -22,21 +22,28 @@ export interface TerminalProgressItem {
   activeForm?: string
 }
 
-/** 后台 SubAgent 在状态栏中的摘要行。 */
+/** SubAgent 在状态栏和 Agent Monitor 中的摘要行。 */
 export interface TerminalBackgroundAgentItem {
   agentId: string
   agentType: string
   description: string
+  startedAt?: string
   status: 'running' | 'completed' | 'failed' | 'killed'
+  execution?: 'foreground' | 'background'
   isolated?: boolean
   worktreePath?: string
   worktreeBranch?: string
   lastToolName?: string
   toolUseCount?: number
+  turnCount?: number
   totalTokens?: number
+  inputTokens?: number
+  outputTokens?: number
   durationMs?: number
   outputFile?: string
+  finalText?: string
   error?: string
+  reason?: string
 }
 
 /** 多数终端事件共用的可选溯源字段。 */
@@ -132,6 +139,46 @@ export type TerminalEvent =
   | (TerminalBaseEvent & {
       type: 'background_agents'
       agents: TerminalBackgroundAgentItem[]
+    })
+  | (TerminalBaseEvent & {
+      type: 'agent_monitor_open'
+    })
+  | (TerminalBaseEvent & {
+      type: 'agent_monitor_close'
+    })
+  | (TerminalBaseEvent & {
+      type: 'agent_monitor_back'
+    })
+  | (TerminalBaseEvent & {
+      type: 'agent_monitor_select'
+      selectedIndex: number
+    })
+  | (TerminalBaseEvent & {
+      type: 'agent_monitor_detail'
+      agentId: string
+    })
+  | (TerminalBaseEvent & {
+      type: 'agent_monitor_scroll'
+      delta: number
+    })
+  | (TerminalBaseEvent & {
+      type: 'agent_monitor_follow_tail'
+    })
+  | (TerminalBaseEvent & {
+      type: 'agent_monitor_output_lines'
+      agentId: string
+      lineCount: number
+    })
+  | (TerminalBaseEvent & {
+      type: 'agent_monitor_confirm_kill_all'
+      visible: boolean
+    })
+  | (TerminalBaseEvent & {
+      type: 'agent_monitor_clear_completed'
+    })
+  | (TerminalBaseEvent & {
+      type: 'agent_monitor_notice'
+      text?: string
     })
   | (TerminalBaseEvent & {
       type: 'error'

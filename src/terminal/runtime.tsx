@@ -23,6 +23,9 @@ export interface TerminalRuntimeOptions {
   inputHistoryStore?: HistoryStore
   onSubmit: (input: string) => Promise<void> | void
   onSessionPickerSelect?: (sessionId: string) => Promise<void> | void
+  onAgentKill?: (agentId: string) => Promise<boolean> | boolean
+  onAgentKillAll?: (agentIds: string[]) => Promise<number> | number
+  onAgentClearCompleted?: () => Promise<number> | number
   onInterrupt?: () => Promise<void> | void
   onModeToggle?: () => Promise<void> | void
   onPlanEntryAccept?: (input: string) => Promise<void> | void
@@ -60,6 +63,9 @@ export function startTerminalRuntime(options: TerminalRuntimeOptions): TerminalR
       inputHistoryStore={options.inputHistoryStore}
       onSubmit={options.onSubmit}
       onSessionPickerSelect={options.onSessionPickerSelect}
+      onAgentKill={options.onAgentKill}
+      onAgentKillAll={options.onAgentKillAll}
+      onAgentClearCompleted={options.onAgentClearCompleted}
       onInterrupt={options.onInterrupt}
       onModeToggle={options.onModeToggle}
       onPlanEntryAccept={options.onPlanEntryAccept}

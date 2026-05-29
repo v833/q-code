@@ -69,7 +69,7 @@ export interface RunChildAgentParams {
   teammateIdentity?: TeammateIdentity
 }
 
-/** 子 Agent 运行过程中的进度事件（供后台任务 JSONL 等消费）。 */
+/** 子 Agent 运行过程中的进度事件（供 Agent Monitor / JSONL 等消费）。 */
 export type ChildAgentProgressEvent =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; toolName: string; toolCallId?: string }

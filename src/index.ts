@@ -180,6 +180,7 @@ import {
   getUserAgentsDir,
 } from './agents/load-agents-dir';
 import {
+  clearCompletedAsyncAgents,
   getAllAsyncAgents,
   killAsyncAgent,
   subscribeAsyncAgents,
@@ -582,7 +583,7 @@ async function main() {
   const emitBackgroundAgents = (): void => {
     emitTerminal({
       type: 'background_agents',
-      agents: getAllAsyncAgents().map(formatTerminalBackgroundAgent),
+      agents: getVisibleAsyncAgents().map(formatTerminalBackgroundAgent),
     });
   };
   const emitTaskProgress = async (): Promise<void> => {
@@ -680,6 +681,7 @@ async function main() {
           agentId: agent.agentId,
           agentType: agent.agentType,
           status: agent.status,
+          execution: agent.execution,
           isolated: agent.isolated,
           ...(agent.worktreePath ? { worktreePath: agent.worktreePath } : {}),
           ...(agent.worktreeBranch
@@ -1287,6 +1289,15 @@ async function main() {
       onSubmit: handleInput,
       onSessionPickerSelect: (targetSessionId) =>
         switchSession(targetSessionId, { clearTranscript: true }),
+      onAgentKill: (agentId) => killAsyncAgent(agentId),
+      onAgentKillAll: (agentIds) => {
+        let killed = 0;
+        for (const agentId of agentIds) {
+          if (killAsyncAgent(agentId)) killed += 1;
+        }
+        return killed;
+      },
+      onAgentClearCompleted: () => clearCompletedAsyncAgents(),
       onInterrupt: interruptActiveTurn,
       onModeToggle: () => togglePlanMode('shortcut'),
       onPlanEntryAccept: (input) => acceptPlanEntrySuggestion(input),
@@ -2220,7 +2231,7 @@ async function main() {
       command(
         '/agents',
         '列出 sub-agent 和后台任务',
-        '/agents [kill]',
+        '/agents [list|kill|clear-completed]',
         'Agents',
         (input) => handleAgentsCommand(input.raw),
       ),
@@ -2471,7 +2482,8 @@ async function main() {
       return;
     }
     const previousSessionId = sessionId;
-    const runningAgents = getAllAsyncAgents().filter((agent) => agent.status === 'running');
+    const runningAgents = getAllAsyncAgents()
+      .filter((agent) => agent.status === 'running' && agent.execution === 'background');
     if (!options.preopenedStore && !getSessionSummary(targetId, { cwd: activeStore.cwd })) {
       print(`\n  [Sessions] 未找到会话: ${targetId}`);
       return;
@@ -3350,18 +3362,43 @@ async function main() {
       const killed = killAsyncAgent(agentId);
       print(
         killed
-          ? `\n  [Agents] 已请求终止后台任务 ${agentId}`
-          : `\n  [Agents] 未找到运行中的后台任务 ${agentId}`,
+          ? `\n  [Agents] 已请求终止后台 SubAgent ${agentId}`
+          : `\n  [Agents] 未找到可单独停止的后台 SubAgent ${agentId}`,
       );
       return;
     }
+    if (args[0] === 'clear-completed') {
+      if (args.length > 1) {
+        print('\n  [Agents] 用法: /agents clear-completed');
+        return;
+      }
+      const removed = clearCompletedAsyncAgents();
+      emitBackgroundAgents();
+      print(
+        removed > 0
+          ? `\n  [Agents] 已清理 ${removed} 个 completed SubAgent。`
+          : '\n  [Agents] 当前没有 completed SubAgent 需要清理。',
+      );
+      return;
+    }
+    if (useTui && args.length === 0) {
+      emitBackgroundAgents();
+      emitTerminal({ type: 'agent_monitor_open' });
+      return;
+    }
+    if (args[0] === 'list') {
+      args.shift();
+    }
     if (args.length > 0) {
-      print('\n  [Agents] 用法: /agents、/agents kill <agent_id>');
+      print('\n  [Agents] 用法: /agents、/agents list、/agents kill <agent_id>、/agents clear-completed');
       return;
     }
 
     const agents = getAllAgents();
-    const asyncAgents = getAllAsyncAgents();
+    const asyncAgents = getVisibleAsyncAgents();
+    const completedCount = getAllAsyncAgents()
+      .filter((entry) => entry.status === 'completed')
+      .length;
     if (agents.length === 0) {
       print('\nSubAgents (0 loaded)');
       print('  没有找到 SubAgents。可添加到:');
@@ -3389,9 +3426,9 @@ async function main() {
       lines.push(`  ${agent.whenToUse}`);
     }
     lines.push('');
-    lines.push(`Background agents (${asyncAgents.length})`);
+    lines.push(`SubAgent runs (${asyncAgents.length})`);
     if (asyncAgents.length === 0) {
-      lines.push('  当前没有后台任务。');
+      lines.push('  当前没有需要展示的 SubAgent 运行条目。');
     } else {
       for (const entry of asyncAgents) {
         const bits = [
@@ -3417,6 +3454,9 @@ async function main() {
         if (entry.error) lines.push(`  error=${entry.error}`);
       }
     }
+    if (completedCount > 0) {
+      lines.push(`  已隐藏 completed SubAgent ${completedCount} 个；可用 /agents clear-completed 清理。`);
+    }
     if (pendingNotificationCount() > 0) {
       lines.push('');
       lines.push(`待注入通知: ${pendingNotificationCount()} 条`);
@@ -3426,7 +3466,7 @@ async function main() {
     lines.push(`  用户级: ${JSON.stringify(path.join(getUserAgentsDir(), '<name>.md'))}`);
     lines.push(`  项目级: ${JSON.stringify(path.join(getProjectAgentsDir(activeStore.cwd), '<name>.md'))}`);
     lines.push(
-      '修改 agent 文件后需要重启 q-code；终止后台任务可用 /agents kill <agent_id>。',
+      '修改 agent 文件后需要重启 q-code；终止后台 SubAgent 可用 /agents kill <agent_id>；清理成功完成的 SubAgent 可用 /agents clear-completed。',
     );
     if (isAgentTeamsEnabled()) {
       const active = getActiveTeam();
@@ -3789,7 +3829,7 @@ async function main() {
   }
 }
 
-/** 将后台 Agent 存储条目映射为 `background_agents` 终端事件载荷。 */
+/** 将 SubAgent 存储条目映射为 `background_agents` 终端事件载荷。 */
 function formatTerminalBackgroundAgent(
   entry: AsyncAgentEntry,
 ): Extract<TerminalEvent, { type: 'background_agents' }>['agents'][number] {
@@ -3797,24 +3837,45 @@ function formatTerminalBackgroundAgent(
     agentId: entry.agentId,
     agentType: entry.agentType,
     description: entry.description,
+    startedAt: entry.startedAt,
     status: entry.status,
+    execution: entry.execution,
     isolated: entry.isolated,
     ...(entry.worktreePath ? { worktreePath: entry.worktreePath } : {}),
     ...(entry.worktreeBranch ? { worktreeBranch: entry.worktreeBranch } : {}),
     ...(entry.lastToolName ? { lastToolName: entry.lastToolName } : {}),
     toolUseCount: entry.toolUseCount,
+    ...(entry.turnCount !== undefined ? { turnCount: entry.turnCount } : {}),
     ...(entry.totalTokens !== undefined
       ? { totalTokens: entry.totalTokens }
       : {}),
+    ...(entry.inputTokens !== undefined ? { inputTokens: entry.inputTokens } : {}),
+    ...(entry.outputTokens !== undefined
+      ? { outputTokens: entry.outputTokens }
+      : {}),
     ...(entry.durationMs !== undefined ? { durationMs: entry.durationMs } : {}),
     outputFile: entry.outputFile,
+    ...(entry.finalText ? { finalText: truncateTerminalAgentText(entry.finalText, 2000) } : {}),
     ...(entry.error ? { error: entry.error } : {}),
+    ...(entry.reason ? { reason: entry.reason } : {}),
   };
+}
+
+/** 返回终端默认应展示的 SubAgent；成功完成的条目通过清理命令维护。 */
+function getVisibleAsyncAgents(): AsyncAgentEntry[] {
+  return getAllAsyncAgents().filter((entry) => entry.status !== 'completed');
 }
 
 /** 返回只读数组最后一条记录，空数组为 `undefined`。 */
 function lastUsageRecord<T>(records: readonly T[]): T | undefined {
   return records.length > 0 ? records[records.length - 1] : undefined;
+}
+
+/** 限制进入 TUI event bus 的 SubAgent 摘要文本，详情全文仍以 output tail 为准。 */
+function truncateTerminalAgentText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const keepChars = Math.max(0, maxChars - 32);
+  return `${text.slice(0, keepChars)}\n... truncated ${text.length - keepChars} chars`;
 }
 
 main().catch(console.error);

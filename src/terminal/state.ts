@@ -11,6 +11,10 @@ import type {
 import type { SessionSummary } from '../session/store'
 import type { SlashCommandSuggestion } from '../slash'
 import type { CacheMode } from '../usage'
+import {
+  clampAgentMonitorSelectedIndex,
+  sortAgentMonitorAgents
+} from './agent-monitor'
 
 /** transcript 中单条记录的类别。 */
 export type TranscriptItemKind = 'message' | 'tool' | 'usage' | 'context'
@@ -66,6 +70,23 @@ export interface TerminalSessionInfo {
   duckPersona?: string
 }
 
+/** Agent Monitor 当前面板状态。 */
+export type TerminalAgentMonitorState =
+  | {
+      view: 'list'
+      selectedIndex: number
+      confirmKillAll: boolean
+      notice?: string
+    }
+  | {
+      view: 'detail'
+      agentId: string
+      scrollOffset: number
+      followTail: boolean
+      outputLineCount: number
+      notice?: string
+    }
+
 /** TUI 全局 UI 状态，由 {@link terminalReducer} 根据事件更新。 */
 export interface TerminalState {
   transcript: TranscriptItem[]
@@ -101,6 +122,7 @@ export interface TerminalState {
     selectedIndex: number
     activePersonaId: string
   }
+  agentMonitor?: TerminalAgentMonitorState
   progressItems: TerminalProgressItem[]
   backgroundAgents: TerminalBackgroundAgentItem[]
   jitMessages: string[]
@@ -124,6 +146,7 @@ export function createInitialTerminalState(): TerminalState {
     sessionPicker: undefined,
     modelsPicker: undefined,
     duckPicker: undefined,
+    agentMonitor: undefined,
     progressItems: [],
     backgroundAgents: [],
     jitMessages: [],
@@ -447,6 +470,7 @@ export function terminalReducer(state: TerminalState, event: TerminalEvent): Ter
         planEntrySuggestion: undefined,
         progressItems: [],
         backgroundAgents: [],
+        agentMonitor: undefined,
         status: 'idle',
         statusText: 'Ready'
       }
@@ -513,10 +537,190 @@ export function terminalReducer(state: TerminalState, event: TerminalEvent): Ter
       }
 
     case 'background_agents':
+      return reconcileAgentMonitor({
+        ...state,
+        backgroundAgents: sortAgentMonitorAgents(event.agents)
+      })
+
+    case 'agent_monitor_open':
       return {
         ...state,
-        backgroundAgents: event.agents
+        sessionPicker: undefined,
+        modelsPicker: undefined,
+        agentMonitor: {
+          view: 'list',
+          selectedIndex: clampAgentMonitorSelectedIndex(
+            state.agentMonitor?.view === 'list' ? state.agentMonitor.selectedIndex : 0,
+            state.backgroundAgents.length
+          ),
+          confirmKillAll: false
+        }
       }
+
+    case 'agent_monitor_close':
+      return {
+        ...state,
+        agentMonitor: undefined
+      }
+
+    case 'agent_monitor_back':
+      if (!state.agentMonitor) return state
+      if (state.agentMonitor.view === 'detail') {
+        const detailMonitor = state.agentMonitor
+        const selectedIndex = clampAgentMonitorSelectedIndex(
+          state.backgroundAgents.findIndex((agent) => agent.agentId === detailMonitor.agentId),
+          state.backgroundAgents.length
+        )
+        return {
+          ...state,
+          agentMonitor: {
+            view: 'list',
+            selectedIndex,
+            confirmKillAll: false
+          }
+        }
+      }
+      return {
+        ...state,
+        agentMonitor: undefined
+      }
+
+    case 'agent_monitor_select':
+      if (!state.agentMonitor || state.agentMonitor.view !== 'list') return state
+      return {
+        ...state,
+        agentMonitor: {
+          ...state.agentMonitor,
+          selectedIndex: clampAgentMonitorSelectedIndex(
+            event.selectedIndex,
+            state.backgroundAgents.length
+          ),
+          confirmKillAll: false,
+          notice: undefined
+        }
+      }
+
+    case 'agent_monitor_detail':
+      return {
+        ...state,
+        agentMonitor: {
+          view: 'detail',
+          agentId: event.agentId,
+          scrollOffset: 0,
+          followTail: true,
+          outputLineCount: 0
+        }
+      }
+
+    case 'agent_monitor_scroll':
+      if (!state.agentMonitor || state.agentMonitor.view !== 'detail') return state
+      return {
+        ...state,
+        agentMonitor: {
+          ...state.agentMonitor,
+          scrollOffset: Math.max(0, state.agentMonitor.scrollOffset + event.delta),
+          followTail: event.delta < 0 && state.agentMonitor.scrollOffset + event.delta <= 0,
+          notice: undefined
+        }
+      }
+
+    case 'agent_monitor_follow_tail':
+      if (!state.agentMonitor || state.agentMonitor.view !== 'detail') return state
+      return {
+        ...state,
+        agentMonitor: {
+          ...state.agentMonitor,
+          scrollOffset: 0,
+          followTail: true,
+          outputLineCount: state.agentMonitor.outputLineCount,
+          notice: undefined
+        }
+      }
+
+    case 'agent_monitor_output_lines':
+      if (
+        !state.agentMonitor ||
+        state.agentMonitor.view !== 'detail' ||
+        state.agentMonitor.agentId !== event.agentId
+      ) {
+        return state
+      }
+      if (state.agentMonitor.followTail) {
+        return {
+          ...state,
+          agentMonitor: {
+            ...state.agentMonitor,
+            outputLineCount: event.lineCount,
+            scrollOffset: 0
+          }
+        }
+      }
+      return {
+        ...state,
+        agentMonitor: {
+          ...state.agentMonitor,
+          outputLineCount: event.lineCount,
+          scrollOffset: Math.max(
+            0,
+            state.agentMonitor.scrollOffset +
+              Math.max(0, event.lineCount - state.agentMonitor.outputLineCount)
+          )
+        }
+      }
+
+    case 'agent_monitor_confirm_kill_all':
+      if (!state.agentMonitor || state.agentMonitor.view !== 'list') return state
+      return {
+        ...state,
+        agentMonitor: {
+          ...state.agentMonitor,
+          confirmKillAll: event.visible,
+          notice: undefined
+        }
+      }
+
+    case 'agent_monitor_clear_completed':
+      return reconcileAgentMonitor({
+        ...state,
+        backgroundAgents: state.backgroundAgents.filter((agent) => agent.status !== 'completed')
+      })
+
+    case 'agent_monitor_notice':
+      if (!state.agentMonitor) return state
+      return {
+        ...state,
+        agentMonitor: {
+          ...state.agentMonitor,
+          notice: event.text
+        }
+      }
+  }
+}
+
+function reconcileAgentMonitor(state: TerminalState): TerminalState {
+  const monitor = state.agentMonitor
+  if (!monitor) return state
+  if (monitor.view === 'list') {
+    return {
+      ...state,
+      agentMonitor: {
+        ...monitor,
+        selectedIndex: clampAgentMonitorSelectedIndex(
+          monitor.selectedIndex,
+          state.backgroundAgents.length
+        )
+      }
+    }
+  }
+  if (state.backgroundAgents.some((agent) => agent.agentId === monitor.agentId)) return state
+  return {
+    ...state,
+    agentMonitor: {
+      view: 'list',
+      selectedIndex: 0,
+      confirmKillAll: false,
+      notice: `SubAgent ${monitor.agentId} 已不在列表中。`
+    }
   }
 }
 
