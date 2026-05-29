@@ -51,13 +51,13 @@ pnpm eval:compare           # 对比两个 eval run
 
 pnpm test:all               # pnpm test && pnpm test:legacy
 pnpm precommit              # typecheck + test:unit
-pnpm build                  # 调 scripts/build.mjs，产出 dist/
-pnpm changelog              # 从 git tag / conventional commit 生成 CHANGELOG.md 与 changelog.json
+pnpm build                  # 调 scripts/build.mjs：自动生成 changelog 并产出 dist/
+pnpm changelog              # 手动从 git tag / conventional commit 生成 CHANGELOG（调试用）
 ```
 
 - 提交前优先运行 `pnpm precommit`，它会执行 `pnpm typecheck && pnpm test:unit`。
 - 影响 Agent Loop、工具注册、会话、任务图、MCP、Skills、Hooks、Slash、审计日志或 SubAgent 行为时，优先补跑相关集成测试或 legacy 脚本。
-- CI 使用 Node.js 22 和 pnpm 9，并按 `typecheck -> pnpm test -> pnpm test:legacy` 顺序执行；`.github/workflows/eval-nightly.yml` 定期执行 `pnpm eval:nightly` 做 deterministic 质量回归；`.github/workflows/changelog.yml` 在 main 推送后同步 `CHANGELOG.md` / `changelog.json`，PR 会校验二者已与 `pnpm changelog` 一致。
+- CI 使用 Node.js 22 和 pnpm 9，并按 `typecheck -> pnpm test -> pnpm test:legacy` 顺序执行；`.github/workflows/eval-nightly.yml` 定期执行 `pnpm eval:nightly` 做 deterministic 质量回归；`.github/workflows/changelog.yml` 在 main 推送后自动同步 `CHANGELOG.md` / `changelog.json`（PR 无需手动维护）；`pnpm build` 会在打包前自动生成 `changelog.json` 并复制到 `dist/`。
 
 ## CLI 子命令
 

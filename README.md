@@ -35,7 +35,7 @@ q-code update
 q-code update --dry-run  # 仅查看将执行的更新命令
 ```
 
-更新后再次启动时，若版本高于上次使用记录（`~/.q-code/last-version.json`），会在 TUI / 经典模式下展示自上次版本以来的变更摘要；完整历史见仓库根目录 `CHANGELOG.md`。设为 `Q_CODE_CHANGELOG=0` 可关闭启动提示。
+更新后再次启动时，若版本高于上次使用记录（`~/.q-code/last-version.json`），会在 TUI / 经典模式下展示自上次版本以来的变更摘要；完整历史见 `CHANGELOG.md`（合并到 main 后由 CI 自动维护，发版时 `pnpm build` 会生成最新的 `changelog.json`）。设为 `Q_CODE_CHANGELOG=0` 可关闭启动提示。
 
 首次使用可运行交互式初始化向导，生成 `config.toml`：
 
