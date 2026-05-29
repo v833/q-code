@@ -40,6 +40,7 @@ import { agentLoop, type AgentLoopPreflightResult } from './agent/loop';
 import {
   coreRules,
   deferredTools,
+  duckPersonaContext,
   agentsContext,
   agentMdInstructions,
   modeContext,
@@ -60,6 +61,7 @@ import {
   DEFAULT_DUCK_PERSONA_ID,
   formatDuckPersonaHelp,
   getDuckPersona,
+  listDuckPersonaPickerOptions,
   resolveDuckPersonaArg,
   resolveNextDuckPersona,
   type DuckPersonaId,
@@ -822,6 +824,7 @@ async function main() {
   function createSystemPromptBuilder(): PromptBuilder {
     return new PromptBuilder()
       .pipe('coreRules', coreRules())
+      .pipe('duckPersonaContext', duckPersonaContext())
       .pipe('modeContext', modeContext())
       .pipe('toolGuide', toolGuide())
       .pipe('taskGuide', taskGuide())
@@ -2219,8 +2222,8 @@ async function main() {
       ),
       command(
         '/ya',
-        '查看或切换鸭子人格（降压鸭 / 屁老鸭）',
-        '/ya [shanghai|heilongjiang|toggle]',
+        '查看或切换鸭子人格（默认小黄鸭；主题鸭：降压鸭 / 屁老鸭）',
+        '/ya [list|yellow|shanghai|heilongjiang|toggle]',
         'Core',
         (input) => handleYaCommand(input.args),
         ['/duck'],
@@ -2232,9 +2235,24 @@ async function main() {
     ];
   }
 
+  function openDuckPicker(): void {
+    const personas = listDuckPersonaPickerOptions();
+    const preferredIndex = personas.findIndex((persona) => persona.id === duckPersona);
+    emitTerminal({
+      type: 'duck_picker',
+      personas,
+      selectedIndex: preferredIndex >= 0 ? preferredIndex : 0,
+      activePersonaId: duckPersona,
+    });
+  }
+
   function handleYaCommand(rawArgs: string): void {
     const arg = rawArgs.trim();
     if (!arg) {
+      if (useTui) {
+        openDuckPicker();
+        return;
+      }
       print(formatDuckPersonaHelp(duckPersona));
       return;
     }
@@ -2242,8 +2260,17 @@ async function main() {
     const resolved = resolveDuckPersonaArg(arg);
     if (!resolved) {
       print(
-        '\n  [Ya] 未知选项。可用: shanghai（降压鸭）、heilongjiang（屁老鸭）、toggle',
+        '\n  [Ya] 未知选项。可用: list、yellow（小黄鸭）、shanghai（降压鸭）、heilongjiang（屁老鸭）、toggle',
       );
+      return;
+    }
+
+    if (resolved === 'list') {
+      if (useTui) {
+        openDuckPicker();
+        return;
+      }
+      print(formatDuckPersonaHelp(duckPersona));
       return;
     }
 

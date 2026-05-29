@@ -137,6 +137,60 @@ function ModelsPickerPanel({
   )
 }
 
+function DuckPickerPanel({
+  picker
+}: {
+  picker?: {
+    personas: Array<{
+      id: string
+      displayName: string
+      subtitle: string
+      themed: boolean
+    }>
+    selectedIndex: number
+    activePersonaId: string
+  }
+}): React.JSX.Element | null {
+  if (!picker || picker.personas.length === 0) return null
+  const selectedPersona = picker.personas[picker.selectedIndex]
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text color="cyan">Ya（鸭子人格）</Text>
+      <Text color="gray">  active: {picker.activePersonaId}</Text>
+      <Box marginTop={1}>
+        <Box width={3}><Text color="yellow"> </Text></Box>
+        <Box width={16}><Text color="cyan">Name</Text></Box>
+        <Box width={28}><Text color="cyan">Subtitle</Text></Box>
+        <Text color="cyan">Type</Text>
+      </Box>
+      {picker.personas.map((persona, index) => {
+        const selected = index === picker.selectedIndex
+        const active = persona.id === picker.activePersonaId
+        return (
+          <Box key={persona.id}>
+            <Box width={3}>
+              <Text color={selected ? 'yellow' : 'gray'}>{selected ? '›' : ' '}</Text>
+            </Box>
+            <Box width={16}>
+              <Text color={selected ? 'white' : 'gray'}>{truncate(persona.displayName, 14)}</Text>
+            </Box>
+            <Box width={28}>
+              <Text color="gray">{truncate(persona.subtitle, 26)}</Text>
+            </Box>
+            <Text color={active ? 'yellow' : 'gray'}>
+              {active ? 'active' : persona.themed ? 'themed' : 'default'}
+            </Text>
+          </Box>
+        )
+      })}
+      <Text color="gray">
+        {'  '}↑/↓ 选择 · Enter 切换 (/ya) · Esc 关闭
+        {selectedPersona ? ` · 当前选择: ${selectedPersona.id}` : ''}
+      </Text>
+    </Box>
+  )
+}
+
 function SessionPickerPanel({
   picker,
   renaming
@@ -295,7 +349,7 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
   const showSlashCommands = fileMentionAtCursor === null && filteredSlashCommands.length > 0
   const suggestionNotice = fileMentionAtCursor ? fileMentionIndexNotice(fileMentionIndex) : undefined
   const suggestionsVisible = (showFileMentions || showSlashCommands || Boolean(suggestionNotice)) && !isBusy
-  const isInteractiveOverlayOpen = Boolean(state.modelsPicker || state.sessionPicker)
+  const isInteractiveOverlayOpen = Boolean(state.modelsPicker || state.duckPicker || state.sessionPicker)
   const previousSuggestionsVisible = useRef(false)
   const [shouldClearSuggestions, setShouldClearSuggestions] = useState(false)
 
@@ -517,6 +571,54 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
       }
 
       // models picker 打开期间，禁止向输入框写入普通字符。
+      return
+    }
+
+    if (state.duckPicker && !isBusy) {
+      if (key.upArrow) {
+        const count = state.duckPicker.personas.length
+        if (count > 0) {
+          const selectedIndex =
+            state.duckPicker.selectedIndex <= 0 ? count - 1 : state.duckPicker.selectedIndex - 1
+          dispatch({
+            type: 'duck_picker',
+            personas: state.duckPicker.personas,
+            selectedIndex,
+            activePersonaId: state.duckPicker.activePersonaId
+          })
+        }
+        return
+      }
+      if (key.downArrow) {
+        const count = state.duckPicker.personas.length
+        if (count > 0) {
+          const selectedIndex =
+            state.duckPicker.selectedIndex >= count - 1 ? 0 : state.duckPicker.selectedIndex + 1
+          dispatch({
+            type: 'duck_picker',
+            personas: state.duckPicker.personas,
+            selectedIndex,
+            activePersonaId: state.duckPicker.activePersonaId
+          })
+        }
+        return
+      }
+      if (key.escape) {
+        dispatch({ type: 'duck_picker_close' })
+        return
+      }
+      if (key.return) {
+        const selected = state.duckPicker.personas[state.duckPicker.selectedIndex]
+        dispatch({ type: 'duck_picker_close' })
+        if (selected) {
+          setIsBusy(true)
+          void Promise.resolve(props.onSubmit(`/ya ${selected.id}`))
+            .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+            .finally(() => setIsBusy(false))
+        }
+        return
+      }
+
       return
     }
 
@@ -806,6 +908,7 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
         <StatusBar state={state} isBusy={isBusy} hasStreamingAssistant={hasStreamingAssistant} />
         <SessionPickerPanel picker={state.sessionPicker} renaming={sessionPickerRenaming} />
         <ModelsPickerPanel picker={state.modelsPicker} />
+        <DuckPickerPanel picker={state.duckPicker} />
         <PlanEntrySuggestion suggestion={state.planEntrySuggestion} />
         {suggestionsVisible ? (
           <CommandSuggestions
@@ -822,7 +925,8 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
             isBusy ||
             state.sessionPicker !== undefined ||
             sessionPickerRenaming !== undefined ||
-            state.modelsPicker !== undefined
+            state.modelsPicker !== undefined ||
+            state.duckPicker !== undefined
           }
           useRealCursor={process.env.Q_CODE_TUI_CURSOR?.trim().toLowerCase() === 'ansi'}
           historySearchLabel={historySearchLabel}

@@ -3,8 +3,9 @@
  */
 
 import {
-  buildDuckCoreRules,
+  buildThemedDuckPersonaPrompt,
   DEFAULT_DUCK_PERSONA_ID,
+  isThemedDuckPersona,
   type DuckPersonaId,
 } from './duck-persona'
 
@@ -28,7 +29,7 @@ export interface PromptContext {
   runtimeContext?: string
   agentMdContext?: string
   memoryContext?: string
-  /** 主 Agent 鸭子人格；缺省为上海降压鸭。 */
+  /** 主 Agent 鸭子人格；缺省为小黄鸭。 */
   duckPersona?: DuckPersonaId
 }
 
@@ -74,9 +75,26 @@ export class PromptBuilder {
   }
 }
 
-/** 核心行为准则与人格 pipe。 */
+/** 核心行为准则 pipe（稳定前缀，便于 provider cache 命中）。 */
 export function coreRules(): PipeFn {
-  return (ctx) => buildDuckCoreRules(ctx.duckPersona ?? DEFAULT_DUCK_PERSONA_ID)
+  return () => `你是 q-code，一个有工具调用能力的 AI 助手。
+你的行为准则：
+- 先读文件再修改，不要凭记忆编辑
+- 不要加没被要求的功能
+- 工具调用失败时，换一个思路而不是重复同样的操作
+- 执行需要多次工具调用的任务时，在关键工具调用前后输出简短、可公开的进度说明：说明你正在看什么、为什么看、刚确认了什么。每次 1-2 句即可，不要暴露隐藏推理链或内部草稿
+- 回答要简洁直接`
+}
+
+/**
+ * 主题鸭人格可选 pipe：仅在用户通过 `/ya` 选中主题鸭时追加，不改变 coreRules 前缀。
+ */
+export function duckPersonaContext(): PipeFn {
+  return (ctx) => {
+    const personaId = ctx.duckPersona ?? DEFAULT_DUCK_PERSONA_ID
+    if (!isThemedDuckPersona(personaId)) return null
+    return buildThemedDuckPersonaPrompt(personaId)
+  }
 }
 
 /** 工具使用与 JIT 上下文纪律 pipe；无工具时返回 null。 */

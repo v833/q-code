@@ -4,6 +4,7 @@ import {
   agentMdInstructions,
   agentsContext,
   coreRules,
+  duckPersonaContext,
   modeContext,
   projectMemory,
   runtimeEnvironment,
@@ -67,18 +68,27 @@ describe('PromptBuilder System Prompt 管道', () => {
   })
 
   describe('内置 pipe', () => {
-    it('coreRules 输出非空并含降压鸭人格', () => {
-      const out = coreRules()(baseCtx())
-      expect(out).toBeTruthy()
-      expect(out).toContain('降压鸭')
-      expect(out).toContain('可公开的进度说明')
-      expect(out).toContain('不要暴露隐藏推理链')
+    it('coreRules 保持稳定，不随鸭子人格变化', () => {
+      const defaultOut = coreRules()(baseCtx())
+      const shanghaiOut = coreRules()(baseCtx({ duckPersona: 'shanghai' }))
+      expect(defaultOut).toBe(shanghaiOut)
+      expect(defaultOut).toContain('你是 q-code，一个有工具调用能力的 AI 助手')
+      expect(defaultOut).toContain('可公开的进度说明')
+      expect(defaultOut).not.toContain('降压鸭')
+      expect(defaultOut).not.toContain('说话纪律')
     })
 
-    it('coreRules 可按 duckPersona 切换屁老鸭', () => {
-      const out = coreRules()(baseCtx({ duckPersona: 'heilongjiang' }))
-      expect(out).toContain('屁老鸭')
-      expect(out).toContain('扯犊子')
+    it('duckPersonaContext 默认关闭，主题鸭时追加人格 pipe', () => {
+      expect(duckPersonaContext()(baseCtx())).toBeNull()
+      expect(duckPersonaContext()(baseCtx({ duckPersona: 'yellow' }))).toBeNull()
+
+      const shanghai = duckPersonaContext()(baseCtx({ duckPersona: 'shanghai' }))
+      expect(shanghai).toContain('[主题鸭人格：降压鸭]')
+      expect(shanghai).toContain('说话纪律')
+
+      const heilongjiang = duckPersonaContext()(baseCtx({ duckPersona: 'heilongjiang' }))
+      expect(heilongjiang).toContain('[主题鸭人格：屁老鸭]')
+      expect(heilongjiang).toContain('扯犊子')
     })
 
     it('modeContext 区分 plan 与 normal 模式', () => {

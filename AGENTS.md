@@ -9,7 +9,7 @@
 - **集成扩展**：MCP server、Hooks（pre/post tool-use 决策）、Slash 命令注册表、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
 - **可观测性**：NDJSON 审计日志（默认开启）、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警、启动时版本更新说明（对比 `~/.q-code/last-version.json` 与包内 `changelog.json`）。
 - **评测**：`q-code eval` 本地优先 Agent 质量平台，覆盖固定任务集、mock/cli/真实模型 runner、LLM judge（opt-in）、工具轨迹、预算/成本、进度、文件副作用、策略安全、JSONL trace、Markdown/JUnit 报告、baseline 对比、趋势看板、定期回归与可选 Langfuse evaluator trace / dataset / scores 导出。
-- **TUI**：基于 Ink 的交互式 TUI（默认）、`--classic` 经典 readline、可经管道/CI 自动降级；主 Agent 默认人格为上海「降压鸭」，可用 `/ya` 切换黑龙江「屁老鸭」。
+- **TUI**：基于 Ink 的交互式 TUI（默认）、`--classic` 经典 readline、可经管道/CI 自动降级；主 Agent 默认人格为「小黄鸭」，可用 `/ya` 主动切换到主题鸭「降压鸭」「屁老鸭」。
 - **CLI 子命令**：`q-code help|version|update|audit|init`（启动前 short-circuit），其余参数走主交互循环。
 
 ## 环境与工具
@@ -75,14 +75,14 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `q-code eval promote <run-dir|run.json> --as <baseline-name>`：把一次 run 保存为 `.q-code/evals/baselines/<name>/` 命名 baseline。
 - `q-code eval trend [--suite <name>] [--limit N] [--runs-dir <dir>] [--out <dir>]`：聚合历史 run，写出 `.q-code/evals/trends/trend.json` 与 `trend.md`。
 
-主交互循环还接受以下启动参数：`--continue`、`--session <id>`、`--plan`、`--agent-teams`、`--classic`、`--debug`、`--dump-system-prompt`。内置 Slash 含 `/ya [shanghai|heilongjiang|toggle]`（别名 `/duck`）切换主 Agent 鸭子人格。
+主交互循环还接受以下启动参数：`--continue`、`--session <id>`、`--plan`、`--agent-teams`、`--classic`、`--debug`、`--dump-system-prompt`。内置 Slash 含 `/ya [list|yellow|shanghai|heilongjiang|toggle]`（别名 `/duck`）；TUI 下 `/ya` 或 `/ya list` 打开鸭子选择器（↑/↓ + Enter），默认 `yellow`（小黄鸭）。
 
 ## 目录边界
 
 - `src/index.ts`：CLI 启动、交互循环、模式切换、上下文压缩调度和整体编排。
 - `src/agent/`：核心 Agent Loop、重试、循环检测、模型等待心跳与单步模型请求超时。
 - `src/agents/`：SubAgent、后台 Agent、Agent Teams、worktree、mailbox、notification-store。
-- `src/context/`：System Prompt 管道、鸭子人格（`duck-persona.ts`）、上下文压缩与 offload、Plan Mode 附件/计划文件/意图识别、任务、Todo、记忆、运行环境和项目指令加载。
+- `src/context/`：System Prompt 管道、鸭子人格（`duck-persona.ts`，主题鸭经 `duckPersonaContext` 可选 pipe 追加）、上下文压缩与 offload、Plan Mode 附件/计划文件/意图识别、任务、Todo、记忆、运行环境和项目指令加载。
 - `src/tools/`：内置工具定义、注册表（含审计/Hooks 包装层）、自定义工具目录加载器、文件/搜索/计划/任务/团队/Memory/Skill/GitLab KB/Agent 等工具；`shell-tools.ts` 负责 `f`、后台 shell job、输出 spill、cwd 策略和危险命令/交互保护。
 - `src/mcp/`：MCP 配置、连接、工具适配和注册表。
 - `src/skills/`：Skills 加载、预算、条件激活和斜杠命令展开。
@@ -120,6 +120,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - 新代码/写文件/审计/安全约定 → `## 实现约定`
   - 新测试套件或专项跑法 → `## 测试策略`
   - PR 中没改 `AGENTS.md` 的新功能，视为未完成；评审优先回退或要求补全。
+- 鸭子人格默认「小黄鸭」不改动 `coreRules`（保持 provider cache 前缀稳定）；`/ya` 选中主题鸭时由 `duckPersonaContext` pipe 在 core 之后可选追加人格段落。
 - 文件和会话持久化逻辑优先使用项目已有的原子写入、路径计算和存储 helper（如 `SessionStore`、`Q_CODE_HOME` 解析、`auditDir` 解析），避免临时拼接路径。
 - Prompt、工具描述、项目说明多为中文；新增用户可见文案时优先保持中文一致性。
 - 新增环境变量需同时更新：(a) `.env.example`；(b) `src/config/runtime-config.ts` 的 `SECTION_ALIASES`（让 toml 配置可用）；(c) README 配置表。
