@@ -1,11 +1,95 @@
 {
-  "generatedAt": "2026-05-29T06:58:50.826Z",
+  "generatedAt": "2026-05-29T07:37:29.603Z",
   "currentVersion": "1.2.3",
   "releases": [
     {
       "version": "1.2.3",
-      "date": "2026-05-28",
+      "date": "2026-05-29",
       "changes": [
+        {
+          "hash": "4acfdbc",
+          "subject": "Merge pull request #1 from cheezone/feat/changelog-ci-and-startup-notice",
+          "date": "2026-05-29",
+          "type": "other",
+          "message": "Merge pull request #1 from cheezone/feat/changelog-ci-and-startup-notice"
+        },
+        {
+          "hash": "61952f2",
+          "subject": "feat: 主 Agent 降压鸭/屁老鸭人格与 /ya 切换",
+          "date": "2026-05-29",
+          "type": "feat",
+          "message": "主 Agent 降压鸭/屁老鸭人格与 /ya 切换"
+        },
+        {
+          "hash": "82a139e",
+          "subject": "fix: 更新日志改为 build/CI 自动生成，取消 PR 手动同步",
+          "date": "2026-05-29",
+          "type": "fix",
+          "message": "更新日志改为 build/CI 自动生成，取消 PR 手动同步"
+        },
+        {
+          "hash": "831b519",
+          "subject": "feat: 添加更新日志 CI 与启动版本变更提示",
+          "date": "2026-05-29",
+          "type": "feat",
+          "message": "添加更新日志 CI 与启动版本变更提示"
+        },
+        {
+          "hash": "b7ccc44",
+          "subject": "feat: add semantic markdown highlighting (#62)",
+          "date": "2026-05-29",
+          "type": "feat",
+          "message": "add semantic markdown highlighting (#62)"
+        },
+        {
+          "hash": "42b4bd7",
+          "subject": "revert: restore scoped npm package name",
+          "date": "2026-05-29",
+          "type": "revert",
+          "message": "restore scoped npm package name"
+        },
+        {
+          "hash": "b147a49",
+          "subject": "test: stabilize session switch exit flow",
+          "date": "2026-05-29",
+          "type": "test",
+          "message": "stabilize session switch exit flow"
+        },
+        {
+          "hash": "64668f9",
+          "subject": "chore: rename npm package to q-code",
+          "date": "2026-05-29",
+          "type": "chore",
+          "message": "rename npm package to q-code"
+        },
+        {
+          "hash": "55fc315",
+          "subject": "feat: add natural language plan mode intents (#59)",
+          "date": "2026-05-28",
+          "type": "feat",
+          "message": "add natural language plan mode intents (#59)"
+        },
+        {
+          "hash": "101f180",
+          "subject": "fix: 修正 skills 加载优先级并改进 /skills TUI 展示 (#61)",
+          "date": "2026-05-28",
+          "type": "fix",
+          "message": "修正 skills 加载优先级并改进 /skills TUI 展示 (#61)"
+        },
+        {
+          "hash": "c2f6275",
+          "subject": "fix: improve TUI cursor input (#57)",
+          "date": "2026-05-28",
+          "type": "fix",
+          "message": "improve TUI cursor input (#57)"
+        },
+        {
+          "hash": "e24abe2",
+          "subject": "feat: add /models list picker (#53)",
+          "date": "2026-05-28",
+          "type": "feat",
+          "message": "add /models list picker (#53)"
+        },
         {
           "hash": "8211d95",
           "subject": "fix: prevent explore agent recursive delegation (#52)",
@@ -40,13 +124,7 @@
           "date": "2026-05-28",
           "type": "fix",
           "message": "speed up initial /sessions list rendering (#47)"
-        }
-      ]
-    },
-    {
-      "version": "1.2.2",
-      "date": "2026-05-28",
-      "changes": [
+        },
         {
           "hash": "3086da3",
           "subject": "feat: add DeepSeek reasoning compatibility",
@@ -60,13 +138,7 @@
           "date": "2026-05-28",
           "type": "fix",
           "message": "add model wait observability (#42)"
-        }
-      ]
-    },
-    {
-      "version": "1.2.1",
-      "date": "2026-05-28",
-      "changes": [
+        },
         {
           "hash": "8d0ed47",
           "subject": "fix update command on Windows",
@@ -87,13 +159,7 @@
           "date": "2026-05-28",
           "type": "feat",
           "message": "add persistent TUI input history (#39)"
-        }
-      ]
-    },
-    {
-      "version": "1.2.0",
-      "date": "2026-05-27",
-      "changes": [
+        },
         {
           "hash": "24c3ab5",
           "subject": "feat: add TUI session management (#38)",
