@@ -66,6 +66,7 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     project_root: 'Q_CODE_PROJECT_ROOT',
     teams: 'Q_CODE_TEAMS',
     debug: 'Q_CODE_DEBUG',
+    changelog: 'Q_CODE_CHANGELOG',
     audit_enabled: 'Q_CODE_AUDIT_ENABLED',
     audit_dir: 'Q_CODE_AUDIT_DIR',
     audit_retention_days: 'Q_CODE_AUDIT_RETENTION_DAYS',

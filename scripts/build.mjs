@@ -1,4 +1,5 @@
-import { chmod, mkdir, rm } from 'node:fs/promises'
+import { copyFile, chmod, mkdir, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { build } from 'esbuild'
 
 await rm('dist', { recursive: true, force: true })
@@ -18,3 +19,7 @@ await build({
 })
 
 await chmod('dist/index.js', 0o755)
+
+if (existsSync('changelog.json')) {
+  await copyFile('changelog.json', 'dist/changelog.json')
+}

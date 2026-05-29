@@ -232,6 +232,7 @@ import {
   isDebugMode,
 } from './runtime/cli-info';
 import { runCliUpdate } from './runtime/update';
+import { maybeShowChangelogNotice } from './runtime/changelog';
 import { installCrashGuard, sha256ForCrashGuard } from './runtime/crash-guard';
 import { runAuditCli } from './observability/audit-cli';
 import { runInitCli } from './runtime/init-cli';
@@ -3672,6 +3673,18 @@ async function main() {
   const startupDuckBanner = formatStartupDuckBanner({
     teamsEnabled: isAgentTeamsEnabled(),
   });
+  if (!dumpSystemPrompt) {
+    await maybeShowChangelogNotice({
+      currentVersion: packageVersion,
+      print: (text) => {
+        if (useTui) {
+          emitTerminal({ type: 'message', role: 'system', text });
+        } else {
+          console.log(`\n${text}\n`);
+        }
+      },
+    });
+  }
   if (useTui) {
     emitTerminal({
       type: 'message',

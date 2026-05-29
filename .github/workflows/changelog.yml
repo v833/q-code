@@ -1,0 +1,67 @@
+# 根据 git tag 与 conventional commit 自动生成 CHANGELOG.md / changelog.json。
+# - push 到 main：生成并自动提交（若有变更）
+# - PR：生成后校验工作区干净，避免遗漏更新
+name: Changelog
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: changelog-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changelog:
+    name: generate changelog
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 生成更新日志
+        run: pnpm changelog
+
+      - name: PR 校验更新日志已同步
+        if: github.event_name == 'pull_request'
+        run: |
+          if ! git diff --quiet -- CHANGELOG.md changelog.json; then
+            echo 'CHANGELOG.md 或 changelog.json 与当前分支不同步。'
+            echo '请在本地运行 pnpm changelog 并提交结果。'
+            git --no-pager diff -- CHANGELOG.md changelog.json
+            exit 1
+          fi
+
+      - name: 提交更新日志
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          if git diff --quiet -- CHANGELOG.md changelog.json; then
+            echo '更新日志无变更，跳过提交。'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add CHANGELOG.md changelog.json
+          git commit -m 'chore: 同步更新日志'
+          git push

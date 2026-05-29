@@ -35,6 +35,8 @@ q-code update
 q-code update --dry-run  # 仅查看将执行的更新命令
 ```
 
+更新后再次启动时，若版本高于上次使用记录（`~/.q-code/last-version.json`），会在 TUI / 经典模式下展示自上次版本以来的变更摘要；完整历史见仓库根目录 `CHANGELOG.md`。设为 `Q_CODE_CHANGELOG=0` 可关闭启动提示。
+
 首次使用可运行交互式初始化向导，生成 `config.toml`：
 
 ```bash
@@ -125,6 +127,7 @@ cp .env.example .env
 | `Q_CODE_SESSION_DIR`           | ❌   | 会话存储目录，默认 .sessions                                  |
 | `Q_CODE_HOME`                  | ❌   | q-code 全局配置目录，默认 `~/.q-code`                         |
 | `Q_CODE_DEBUG`                 | ❌   | 设为 1/true/yes/on 显示启动诊断信息（等价于 `--debug`）       |
+| `Q_CODE_CHANGELOG`             | ❌   | 启动时展示版本更新说明，默认开启；设为 0/false/off/no 可关闭 |
 | `Q_CODE_THEME`                 | ❌   | TUI Markdown / 代码块高亮主题，`dark` / `light` / `auto`，默认 `auto` |
 | `Q_CODE_AUDIT_ENABLED`         | ❌   | 审计日志开关，默认开启；设为 false/0/off/no 可关闭            |
 | `Q_CODE_AUDIT_DIR`             | ❌   | 审计日志目录，默认 `<Q_CODE_HOME>/logs`                       |
