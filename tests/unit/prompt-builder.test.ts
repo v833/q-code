@@ -8,13 +8,16 @@ import {
   projectMemory,
   runtimeEnvironment,
   sessionContext,
+  skillDiscipline,
   skillsContext,
   taskContext,
   taskGuide,
   teamsContext,
   todoContext,
   todoGuide,
+  toolDiscipline,
   toolGuide,
+  toolRuntimeSummary,
   type PromptContext
 } from '../../src/context/prompt-builder'
 import { EXPLORE_AGENT } from '../../src/agents/built-in/explore'
@@ -88,6 +91,14 @@ describe('PromptBuilder System Prompt 管道', () => {
       expect(skillsContext()(baseCtx())).toBeNull()
     })
 
+    it('skillDiscipline 保持稳定，不包含当前 Skill 列表', () => {
+      const out = skillDiscipline()(baseCtx({ skillsContext: '- reviewer: review code' }))
+
+      expect(String(out)).toContain('Skill')
+      expect(String(out)).toContain('当前模型可见 Skill')
+      expect(String(out)).not.toContain('reviewer')
+    })
+
     it('agentsContext / teamsContext / runtime / agentMd 透传各自字段', () => {
       const ctx = baseCtx({
         skillsContext: 'SK',
@@ -135,13 +146,33 @@ describe('PromptBuilder System Prompt 管道', () => {
       expect(String(out)).toMatch(/42/)
     })
 
-    it('toolGuide 仅在 Agent 工具可用时建议委派给 Agent/Explore', () => {
-      const withAgent = toolGuide()(baseCtx({ canDelegateToAgents: true }))
-      const withoutAgent = toolGuide()(baseCtx({ canDelegateToAgents: false }))
+    it('toolDiscipline 保持稳定，不包含工具数量或委派状态', () => {
+      const out = toolDiscipline()(baseCtx({
+        toolCount: 42,
+        canDelegateToAgents: true,
+        jitToolSummary: '高成本: read_file'
+      }))
 
+      expect(String(out)).toContain('[JIT Context Discipline]')
+      expect(String(out)).toContain('list_directory/glob → grep → read_file')
+      expect(String(out)).not.toContain('42')
+      expect(String(out)).not.toContain('Agent/Explore')
+      expect(String(out)).not.toContain('高成本: read_file')
+    })
+
+    it('toolRuntimeSummary 承载工具数量、JIT 摘要和委派状态', () => {
+      const withAgent = toolRuntimeSummary()(baseCtx({
+        toolCount: 42,
+        canDelegateToAgents: true,
+        jitToolSummary: '高成本: read_file'
+      }))
+      const withoutAgent = toolRuntimeSummary()(baseCtx({ canDelegateToAgents: false }))
+
+      expect(String(withAgent)).toContain('42')
       expect(String(withAgent)).toContain('Agent/Explore')
+      expect(String(withAgent)).toContain('高成本: read_file')
       expect(String(withoutAgent)).not.toContain('Agent/Explore')
-      expect(String(withoutAgent)).toContain('不要调用当前工具列表中不存在的委派工具')
+      expect(String(withoutAgent)).toContain('不要假设或调用不可见的委派能力')
     })
 
     it('Explore agent system prompt 明确禁止递归委派', () => {
@@ -152,12 +183,76 @@ describe('PromptBuilder System Prompt 管道', () => {
     })
 
     it('sessionContext 在有历史消息时输出 sessionId', () => {
-      // 0 条历史时不输出（避免新会话 prompt 噪音）
-      expect(sessionContext()(baseCtx({ sessionId: 'abc-123' }))).toBeNull()
-
       const out = sessionContext()(baseCtx({ sessionId: 'abc-123', sessionMessageCount: 5 }))
+      const nextOut = sessionContext()(baseCtx({ sessionId: 'abc-123', sessionMessageCount: 7 }))
       expect(String(out)).toContain('abc-123')
-      expect(String(out)).toContain('5')
+      expect(String(out)).not.toContain('5')
+      expect(nextOut).toBe(out)
+    })
+
+    it('inspect exposes named sections for cache diagnostics', () => {
+      const builder = new PromptBuilder()
+        .pipe({ name: 'coreRules', stability: 'stable', category: 'core', cacheCritical: true }, coreRules())
+        .pipe({ name: 'agentMdInstructions', stability: 'stable', category: 'project', cacheCritical: true }, agentMdInstructions())
+        .pipe({ name: 'runtimeEnvironment', stability: 'dynamic', category: 'runtime' }, runtimeEnvironment())
+
+      const sections = builder.inspect(baseCtx({
+        agentMdContext: 'stable project rules',
+        runtimeContext: 'dynamic runtime'
+      }))
+
+      expect(sections.map((section) => section.name)).toEqual([
+        'coreRules',
+        'agentMdInstructions',
+        'runtimeEnvironment'
+      ])
+      expect(sections.find((section) => section.name === 'coreRules')).toMatchObject({
+        stability: 'stable',
+        category: 'core',
+        cacheCritical: true
+      })
+      expect(sections.find((section) => section.name === 'agentMdInstructions')?.chars)
+        .toBeGreaterThan(0)
+    })
+
+    it('recommended cache order keeps project instructions before runtime context', () => {
+      const builder = new PromptBuilder()
+        .pipe({ name: 'coreRules', stability: 'stable', category: 'core' }, coreRules())
+        .pipe({ name: 'agentMdInstructions', stability: 'stable', category: 'project' }, agentMdInstructions())
+        .pipe({ name: 'toolDiscipline', stability: 'stable', category: 'tools' }, toolDiscipline())
+        .pipe({ name: 'toolRuntimeSummary', stability: 'dynamic', category: 'tools' }, toolRuntimeSummary())
+        .pipe({ name: 'runtimeEnvironment', stability: 'dynamic', category: 'runtime' }, runtimeEnvironment())
+        .pipe({ name: 'sessionContext', stability: 'session-stable', category: 'session' }, sessionContext())
+
+      const out = builder.build(baseCtx({
+        agentMdContext: 'PROJECT_RULES',
+        runtimeContext: 'RUNTIME_CONTEXT',
+        sessionMessageCount: 10
+      }))
+
+      expect(out.indexOf('PROJECT_RULES')).toBeLessThan(out.indexOf('RUNTIME_CONTEXT'))
+    })
+
+    it('stable pipes stay before dynamic pipes in the cache prefix', () => {
+      const builder = new PromptBuilder()
+        .pipe({ name: 'coreRules', stability: 'stable', category: 'core' }, coreRules())
+        .pipe({ name: 'agentMdInstructions', stability: 'stable', category: 'project' }, agentMdInstructions())
+        .pipe({ name: 'toolDiscipline', stability: 'stable', category: 'tools' }, toolDiscipline())
+        .pipe({ name: 'skillDiscipline', stability: 'stable', category: 'skills' }, skillDiscipline())
+        .pipe({ name: 'toolRuntimeSummary', stability: 'dynamic', category: 'tools' }, toolRuntimeSummary())
+        .pipe({ name: 'runtimeEnvironment', stability: 'dynamic', category: 'runtime' }, runtimeEnvironment())
+
+      const sections = builder.inspect(baseCtx({
+        agentMdContext: 'PROJECT_RULES',
+        runtimeContext: 'RUNTIME_CONTEXT'
+      }))
+      const firstDynamicIndex = sections.findIndex((section) => section.stability === 'dynamic')
+      const stableAfterDynamic = sections
+        .slice(firstDynamicIndex + 1)
+        .filter((section) => section.stability === 'stable')
+
+      expect(firstDynamicIndex).toBeGreaterThan(0)
+      expect(stableAfterDynamic).toEqual([])
     })
   })
 })

@@ -1,7 +1,7 @@
 /**
  * 向主 Agent system prompt 注入 SubAgent 目录说明（`<system-reminder>` 块）。
  *
- * 列出当前已注册的 `AgentDefinition`，并附带自定义 Agent 的 Markdown 模板。
+ * 列出当前已注册的 `AgentDefinition`，保持常驻提示简短以稳定 prompt cache 前缀。
  */
 import type { AgentDefinition } from './types'
 
@@ -34,27 +34,6 @@ export function formatAgentsSystemReminder(agents: AgentDefinition[]): string {
     '',
     'Available sub-agents:',
     ...lines,
-    '',
-    'Defining a new project sub-agent:',
-    '- File path: `<cwd>/.q-code/agents/<name>.md`.',
-    '- User-level shared agents can be placed at `~/.q-code/agents/<name>.md`.',
-    '- Format: Markdown with YAML frontmatter plus a body that becomes the sub-agent system prompt.',
-    '- Required fields: `name`, `description`.',
-    '- Optional fields: `tools`, `disallowedTools`, `model`, `maxTurns`, `readOnlyOnly`, `isolation` (`none` or `worktree`).',
-    '- Restart q-code after creating or editing agent files.',
-    '',
-    'Template:',
-    '```markdown',
-    '---',
-    'name: reviewer',
-    'description: Use for focused code review of a small change set.',
-    'tools: "read_file,grep,glob"',
-    'disallowedTools: "write_file,edit_file"',
-    'isolation: worktree',
-    'maxTurns: 12',
-    '---',
-    'You are a focused code review sub-agent. Return findings first, then residual risk.',
-    '```',
     '</system-reminder>'
   ].join('\n')
 }

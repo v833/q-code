@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CachePrefixTracker,
   UsageTracker,
+  annotateCachePrefixSnapshot,
   computeCost,
   createCachePrefixSnapshot,
   normalizeUsage,
@@ -196,6 +197,199 @@ describe('cache status', () => {
     expect(tracker.observe(first).stable).toBe(true)
     expect(tracker.observe(second)).toMatchObject({ stable: false, changes: 1 })
     expect(tracker.observe(second)).toMatchObject({ stable: true, changes: 1 })
+  })
+
+  it('reports changed prompt sections and stable prefix ratio', () => {
+    const tool = makeMockTool('probe', () => 'ok')
+    const first = createCachePrefixSnapshot({
+      systemPrompt: 'AAA\n\nBBB\n\nCCC',
+      tools: [tool],
+      activeToolSchemaTokens: 100,
+      systemSections: [
+        { name: 'stableA', enabled: true, text: 'AAA', chars: 3 },
+        { name: 'stableB', enabled: true, text: 'BBB', chars: 3, stability: 'stable', category: 'core' },
+        { name: 'dynamicC', enabled: true, text: 'CCC', chars: 3, stability: 'dynamic', category: 'runtime' }
+      ]
+    })
+    const second = annotateCachePrefixSnapshot(
+      createCachePrefixSnapshot({
+        systemPrompt: 'AAA\n\nBBB\n\nDDD',
+        tools: [tool],
+        activeToolSchemaTokens: 100,
+        systemSections: [
+          { name: 'stableA', enabled: true, text: 'AAA', chars: 3 },
+          { name: 'stableB', enabled: true, text: 'BBB', chars: 3, stability: 'stable', category: 'core' },
+          { name: 'dynamicC', enabled: true, text: 'DDD', chars: 3, stability: 'dynamic', category: 'runtime' }
+        ]
+      }),
+      first
+    )
+
+    expect(second.systemSections?.map((section) => section.changed)).toEqual([
+      false,
+      false,
+      true
+    ])
+    expect(second.stablePrefixRatio).toBeCloseTo(6 / 9)
+    const status = renderCacheStatus({
+      mode: 'auto',
+      totals: new UsageTracker().totals(),
+      prefix: {
+        current: second,
+        previous: first,
+        stable: false,
+        changes: 1
+      }
+    })
+    expect(status).toContain('dynamicC')
+    expect(status).toContain('runtime')
+  })
+
+  it('treats inserted prompt sections as a prefix break', () => {
+    const tool = makeMockTool('probe', () => 'ok')
+    const first = createCachePrefixSnapshot({
+      systemPrompt: 'AAA\n\nBBB',
+      tools: [tool],
+      activeToolSchemaTokens: 100,
+      systemSections: [
+        { name: 'stableA', enabled: true, text: 'AAA', chars: 3 },
+        { name: 'stableB', enabled: true, text: 'BBB', chars: 3 }
+      ]
+    })
+    const second = annotateCachePrefixSnapshot(
+      createCachePrefixSnapshot({
+        systemPrompt: 'AAA\n\nXXX\n\nBBB',
+        tools: [tool],
+        activeToolSchemaTokens: 100,
+        systemSections: [
+          { name: 'stableA', enabled: true, text: 'AAA', chars: 3 },
+          { name: 'insertedRuntime', enabled: true, text: 'XXX', chars: 3 },
+          { name: 'stableB', enabled: true, text: 'BBB', chars: 3 }
+        ]
+      }),
+      first
+    )
+
+    expect(second.systemSections?.map((section) => [section.name, section.changed])).toEqual([
+      ['stableA', false],
+      ['insertedRuntime', true],
+      ['stableB', true]
+    ])
+    expect(second.stablePrefixRatio).toBeCloseTo(3 / 9)
+  })
+
+  it('reports changed tool schema sections', () => {
+    const first = createCachePrefixSnapshot({
+      systemPrompt: 'system',
+      tools: [
+        makeMockTool('read_file', () => 'ok'),
+        makeMockTool('grep', () => 'ok')
+      ],
+      activeToolSchemaTokens: 100
+    })
+    const second = annotateCachePrefixSnapshot(
+      createCachePrefixSnapshot({
+        systemPrompt: 'system',
+        tools: [
+          makeMockTool('read_file', () => 'ok', { description: 'changed read file tool' }),
+          makeMockTool('grep', () => 'ok')
+        ],
+        activeToolSchemaTokens: 100
+      }),
+      first
+    )
+
+    expect(second.toolSections?.find((section) => section.name === 'read_file')?.changed).toBe(true)
+    expect(second.toolSections?.find((section) => section.name === 'grep')?.changed).toBe(false)
+    const status = renderCacheStatus({
+      mode: 'auto',
+      totals: new UsageTracker().totals(),
+      prefix: {
+        current: second,
+        previous: first,
+        stable: false,
+        changes: 1
+      }
+    })
+    expect(status).toContain('Tools changed: read_file')
+    expect(status).toContain('Tool sections:')
+  })
+
+  it('reports added and removed tool schema sections', () => {
+    const first = createCachePrefixSnapshot({
+      systemPrompt: 'system',
+      tools: [
+        makeMockTool('read_file', () => 'ok'),
+        makeMockTool('grep', () => 'ok')
+      ],
+      activeToolSchemaTokens: 100
+    })
+    const second = annotateCachePrefixSnapshot(
+      createCachePrefixSnapshot({
+        systemPrompt: 'system',
+        tools: [
+          makeMockTool('read_file', () => 'ok'),
+          makeMockTool('glob', () => 'ok')
+        ],
+        activeToolSchemaTokens: 100
+      }),
+      first
+    )
+
+    expect(second.toolSections?.find((section) => section.name === 'read_file')?.changed).toBe(false)
+    expect(second.toolSections?.find((section) => section.name === 'glob')?.changed).toBe(true)
+    expect(second.removedToolSections?.find((section) => section.name === 'grep')).toMatchObject({
+      changed: true,
+      removed: true
+    })
+    const status = renderCacheStatus({
+      mode: 'auto',
+      totals: new UsageTracker().totals(),
+      prefix: {
+        current: second,
+        previous: first,
+        stable: false,
+        changes: 1
+      }
+    })
+    expect(status).toContain('Tools changed: glob, grep')
+    expect(status).toContain('removed')
+  })
+
+  it('does not carry removed diagnostics into the next observed snapshot', () => {
+    const tracker = new CachePrefixTracker()
+    const tool = makeMockTool('probe', () => 'ok')
+    const first = createCachePrefixSnapshot({
+      systemPrompt: 'AAA\n\nBBB',
+      tools: [tool, makeMockTool('gone', () => 'ok')],
+      activeToolSchemaTokens: 100,
+      systemSections: [
+        { name: 'stableA', enabled: true, text: 'AAA', chars: 3 },
+        { name: 'removedB', enabled: true, text: 'BBB', chars: 3 }
+      ]
+    })
+    const secondBase = createCachePrefixSnapshot({
+      systemPrompt: 'AAA',
+      tools: [tool],
+      activeToolSchemaTokens: 50,
+      systemSections: [
+        { name: 'stableA', enabled: true, text: 'AAA', chars: 3 }
+      ]
+    })
+    const second = annotateCachePrefixSnapshot(secondBase, first)
+    tracker.observe(first)
+    tracker.observe(second)
+
+    expect(second.removedSystemSections?.map((section) => section.name)).toEqual(['removedB'])
+    expect(second.systemSections?.map((section) => section.name)).toEqual(['stableA'])
+    expect(second.removedToolSections?.map((section) => section.name)).toEqual(['gone'])
+    expect(second.toolSections?.map((section) => section.name)).toEqual(['probe'])
+
+    const third = annotateCachePrefixSnapshot(secondBase, tracker.status().current)
+    expect(third.removedSystemSections).toBeUndefined()
+    expect(third.removedToolSections).toBeUndefined()
+    expect(third.systemSections?.map((section) => section.changed)).toEqual([false])
+    expect(third.toolSections?.map((section) => section.changed)).toEqual([false])
   })
 
   it('renders implicit provider cache caveat when mode is off', () => {

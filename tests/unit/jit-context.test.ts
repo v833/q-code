@@ -9,7 +9,7 @@ import {
   OFFLOAD_MARKER,
   offloadLargeToolResults
 } from '../../src/context/offload'
-import { toolGuide, type PromptContext } from '../../src/context/prompt-builder'
+import { toolDiscipline, toolRuntimeSummary, type PromptContext } from '../../src/context/prompt-builder'
 import { ToolRegistry } from '../../src/tools/registry'
 import { makeMockTool } from '../_helpers/mock-tool'
 import { setupTempHome, type TempHome } from '../_helpers/temp-home'
@@ -65,8 +65,17 @@ describe('JIT Context 工具成本阶梯与 prompt discipline', () => {
     expect(registry.getJitToolSummary()).toContain('mcp__docs__fetch(网页/外部内容)')
   })
 
-  it('toolGuide 注入 JIT prompt discipline 和工具成本阶梯', () => {
-    const out = toolGuide()(
+  it('toolDiscipline 稳定注入 JIT prompt discipline', () => {
+    const out = toolDiscipline()(baseCtx({ toolCount: 12 }))
+
+    expect(out).toContain('[JIT Context Discipline]')
+    expect(out).toContain('list_directory/glob → grep → read_file')
+    expect(out).toContain('渐进式披露')
+    expect(out).not.toContain('Agent/Explore')
+  })
+
+  it('toolRuntimeSummary 动态注入当前工具成本阶梯', () => {
+    const out = toolRuntimeSummary()(
       baseCtx({
         toolCount: 12,
         jitToolSummary: [
@@ -77,10 +86,6 @@ describe('JIT Context 工具成本阶梯与 prompt discipline', () => {
       })
     )
 
-    expect(out).toContain('[JIT Context Discipline]')
-    expect(out).toContain('list_directory/glob → grep → read_file')
-    expect(out).toContain('渐进式披露')
-    expect(out).not.toContain('Agent/Explore')
     expect(out).toContain('当前工具成本阶梯')
     expect(out).toContain('高成本: read_file')
   })

@@ -156,7 +156,7 @@ export interface AgentLoopOptions {
   transientMessages?: ModelMessage[]
   contextUsage?: (
     messages: ModelMessage[],
-    context: { usageAnchor?: UsageAnchor }
+    context: { usageAnchor?: UsageAnchor; requestMessages: ModelMessage[] }
   ) => { used: number; limit: number; state?: string }
   modelName?: string
   onUsage?: (turnUsage: TokenUsage, totalUsage: TokenUsage) => void
@@ -310,6 +310,7 @@ export async function agentLoop(
     let stepStart = 0
     let firstTokenAt = 0
     let requestMessageCount = messages.length
+    let lastRequestMessages: ModelMessage[] = messages
     let requestToolSchemaTokens = registry.countTokenEstimate().active
     let outputTokenLimit = maxOutputTokens
     let didEscalateOutput = false
@@ -327,11 +328,11 @@ export async function agentLoop(
         stepMessages = []
         stepUsage = undefined
         stepFinishReason = undefined
-        const requestMessages =
+        lastRequestMessages =
           options.transientMessages && options.transientMessages.length > 0
             ? [...messages, ...options.transientMessages]
             : messages
-        requestMessageCount = requestMessages.length
+        requestMessageCount = lastRequestMessages.length
         requestToolSchemaTokens = registry.countTokenEstimate().active
         const stepAbortController = new AbortController()
         const abortSignal = mergeAbortSignals(options.abortSignal, stepAbortController.signal)
@@ -362,7 +363,7 @@ export async function agentLoop(
               },
               { resultEnvelope: true }
             ),
-            messages: requestMessages,
+            messages: lastRequestMessages,
             maxOutputTokens: outputTokenLimit,
             maxRetries: 0,
             ...(options.providerOptions ? { providerOptions: options.providerOptions } : {}),
@@ -666,12 +667,15 @@ export async function agentLoop(
       outputTokens: totalUsage.outputTokens + turnUsage.outputTokens,
       totalTokens: totalUsage.totalTokens + turnUsage.totalTokens
     }
-    usageAnchor = buildUsageAnchor({
-      requestMessageCount,
-      usage: anchorUsage,
-      systemPrompt: system,
-      activeToolSchemaTokens: requestToolSchemaTokens
-    })
+    usageAnchor =
+      options.transientMessages && options.transientMessages.length > 0
+        ? undefined
+        : buildUsageAnchor({
+            requestMessageCount,
+            usage: anchorUsage,
+            systemPrompt: system,
+            activeToolSchemaTokens: requestToolSchemaTokens
+          })
     options.onUsage?.(turnUsage, totalUsage)
     getAuditLogger().emit(
       'agent.step.end',
@@ -692,7 +696,7 @@ export async function agentLoop(
     }
 
     if (options.contextUsage) {
-      const context = options.contextUsage(messages, { usageAnchor })
+      const context = options.contextUsage(messages, { usageAnchor, requestMessages: lastRequestMessages })
       if (!quiet) console.log(fmtContextUsage(context.used, context.limit, context.state))
     }
     if (stopAfterStepReason) {

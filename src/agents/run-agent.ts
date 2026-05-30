@@ -13,7 +13,9 @@ import {
   agentMdInstructions,
   PromptBuilder,
   runtimeEnvironment,
-  toolGuide,
+  skillDiscipline,
+  toolDiscipline,
+  toolRuntimeSummary,
   type PromptContext
 } from '../context/prompt-builder'
 import type { TokenUsage } from '../context/token-budget'
@@ -139,7 +141,7 @@ export async function runChildAgent(params: RunChildAgentParams): Promise<AgentR
     { sessionId, cwd, agent: agentContext }
   )
 
-  const system = buildChildSystemPrompt({
+  const childPrompt = buildChildPrompt({
     definition: params.agentDefinition,
     registry,
     runtimeContext: params.runtimeContext,
@@ -158,9 +160,10 @@ export async function runChildAgent(params: RunChildAgentParams): Promise<AgentR
         agent: agentContext
       },
       async (langfuseTurn) =>
-        agentLoop(params.model, registry, messages, system, {
+        agentLoop(params.model, registry, messages, childPrompt.systemPrompt, {
           maxOutputTokens: params.maxOutputTokens,
           escalatedMaxOutputTokens: params.escalatedMaxOutputTokens,
+          transientMessages: childPrompt.transientMessages,
           providerOptions: params.providerOptions,
           modelWaitHeartbeatMs: params.modelWaitHeartbeatMs,
           modelSlowRequestWarnMs: params.modelSlowRequestWarnMs,
@@ -334,14 +337,14 @@ function buildChildRegistry(
   return registry
 }
 
-/** 组装子 Agent / 队友的 system prompt（含角色块与共享 prompt 管道）。 */
-function buildChildSystemPrompt(params: {
+/** 组装子 Agent / 队友 prompt：稳定 system prompt + 每轮动态 transient context。 */
+function buildChildPrompt(params: {
   definition: AgentDefinition
   registry: ToolRegistry
   runtimeContext?: string
   agentMdContext?: string
   teammateIdentity?: TeammateIdentity
-}): string {
+}): { systemPrompt: string; transientMessages: ModelMessage[] } {
   const subAgentBlock = params.teammateIdentity
     ? [
         '[Teammate]',
@@ -364,12 +367,12 @@ function buildChildSystemPrompt(params: {
       ].join('\n')
 
   const builder = new PromptBuilder()
-    .pipe('coreRules', coreRules())
-    .pipe('subAgentInstructions', () => subAgentBlock)
-    .pipe('toolGuide', toolGuide())
-    .pipe('deferredTools', deferredTools())
-    .pipe('runtimeEnvironment', runtimeEnvironment())
-    .pipe('agentMdInstructions', agentMdInstructions())
+    .pipe({ name: 'coreRules', stability: 'stable', category: 'core', cacheCritical: true }, coreRules())
+    .pipe({ name: 'agentMdInstructions', stability: 'stable', category: 'project', cacheCritical: true }, agentMdInstructions())
+    .pipe({ name: 'subAgentInstructions', stability: 'stable', category: 'agents', cacheCritical: true }, () => subAgentBlock)
+    .pipe({ name: 'toolDiscipline', stability: 'stable', category: 'tools', cacheCritical: true }, toolDiscipline())
+    .pipe({ name: 'skillDiscipline', stability: 'stable', category: 'skills', cacheCritical: true }, skillDiscipline())
+    .pipe({ name: 'deferredToolDiscipline', stability: 'stable', category: 'tools' }, () => '若当前工具列表中存在 `tool_search`，并且你需要的工具不在当前列表中，使用 `tool_search` 搜索。')
 
   const ctx: PromptContext = {
     toolCount: params.registry.getActiveTools().length,
@@ -382,7 +385,37 @@ function buildChildSystemPrompt(params: {
     agentMdContext: params.agentMdContext
   }
 
-  return builder.build(ctx)
+  const systemPrompt = builder.build(ctx)
+  const transientContext = [
+    formatTransientSection('工具运行摘要', toolRuntimeSummary()(ctx)),
+    formatTransientSection('延迟工具列表', deferredTools()(ctx)),
+    formatTransientSection('运行环境', runtimeEnvironment()(ctx))
+  ]
+    .filter((section): section is string => Boolean(section))
+    .join('\n\n')
+
+  return {
+    systemPrompt,
+    transientMessages: transientContext
+      ? [
+          {
+            role: 'user',
+            content: [
+              '[q_code_turn_context]',
+              '',
+              '以下是 q-code 为本轮子 Agent 请求追加的运行上下文。它不是新的用户需求；请在完成委托任务时按需参考。',
+              '',
+              transientContext
+            ].join('\n')
+          }
+        ]
+      : []
+  }
+}
+
+function formatTransientSection(title: string, text: string | null | undefined): string | null {
+  if (!text?.trim()) return null
+  return `## ${title}\n${text}`
 }
 
 /** 从后往前取第一条含非空文本的 assistant 消息作为 `finalText`。 */

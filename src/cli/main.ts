@@ -42,19 +42,21 @@ import {
   deferredTools,
   agentsContext,
   agentMdInstructions,
-  modeContext,
   PromptBuilder,
-  PromptContext,
+  modeContext,
   projectMemory,
   runtimeEnvironment,
   sessionContext,
+  skillDiscipline,
   skillsContext,
   taskContext,
   taskGuide,
   teamsContext,
   todoContext,
   todoGuide,
-  toolGuide,
+  toolDiscipline,
+  toolRuntimeSummary,
+  type PromptContext,
 } from '../context/prompt-builder';
 import {
   buildThemedDuckPersonaPrompt,
@@ -104,6 +106,7 @@ import {
 } from '../context/context-report';
 import {
   CachePrefixTracker,
+  annotateCachePrefixSnapshot,
   UsageTracker,
   createCachePrefixSnapshot,
   parseCacheModeArg,
@@ -456,13 +459,13 @@ function safeEndpointLabel(raw: string | undefined): string {
   }
 }
 
-function appendLongReportStreamingHint(systemPrompt: string, userQuery?: string): string {
-  if (!isLongReportRequest(userQuery)) return systemPrompt;
-  return `${systemPrompt}
-
-## 长报告流式输出策略
-
-如果用户要求报告、调研、评审、总结或长篇分析，先输出 3-6 条核心结论或提纲，让用户尽快看到首段结果；随后按「核心结论 → 证据/依据 → 风险/边界 → 下一步」分段展开。避免长时间沉默后一次性输出大段报告。`;
+function getLongReportStreamingHint(userQuery?: string): string | undefined {
+  if (!isLongReportRequest(userQuery)) return undefined;
+  return [
+    '## 长报告流式输出策略',
+    '',
+    '如果用户要求报告、调研、评审、总结或长篇分析，先输出 3-6 条核心结论或提纲，让用户尽快看到首段结果；随后按「核心结论 → 证据/依据 → 风险/边界 → 下一步」分段展开。避免长时间沉默后一次性输出大段报告。'
+  ].join('\n');
 }
 
 function isLongReportRequest(userQuery: string | undefined): boolean {
@@ -1121,21 +1124,12 @@ export async function runMain(options: {
 
   function createSystemPromptBuilder(): PromptBuilder {
     return new PromptBuilder()
-      .pipe('coreRules', coreRules())
-      .pipe('modeContext', modeContext())
-      .pipe('toolGuide', toolGuide())
-      .pipe('taskGuide', taskGuide())
-      .pipe('taskContext', taskContext())
-      .pipe('todoGuide', todoGuide())
-      .pipe('todoContext', todoContext())
-      .pipe('skillsContext', skillsContext())
-      .pipe('agentsContext', agentsContext())
-      .pipe('teamsContext', teamsContext())
-      .pipe('deferredTools', deferredTools())
-      .pipe('runtimeEnvironment', runtimeEnvironment())
-      .pipe('agentMdInstructions', agentMdInstructions())
-      .pipe('projectMemory', projectMemory())
-      .pipe('sessionContext', sessionContext());
+      .pipe({ name: 'coreRules', stability: 'stable', category: 'core', cacheCritical: true }, coreRules())
+      .pipe({ name: 'agentMdInstructions', stability: 'stable', category: 'project', cacheCritical: true }, agentMdInstructions())
+      .pipe({ name: 'toolDiscipline', stability: 'stable', category: 'tools', cacheCritical: true }, toolDiscipline())
+      .pipe({ name: 'skillDiscipline', stability: 'stable', category: 'skills', cacheCritical: true }, skillDiscipline())
+      .pipe({ name: 'agentsContext', stability: 'stable', category: 'agents', cacheCritical: true }, agentsContext())
+      .pipe({ name: 'deferredToolDiscipline', stability: 'stable', category: 'tools' }, () => '若当前工具列表中存在 `tool_search`，并且你需要的工具不在当前列表中，使用 `tool_search` 搜索。');
   }
 
   function setAgentMode(mode: ToolVisibilityMode): void {
@@ -1286,13 +1280,71 @@ export async function runMain(options: {
   );
 
   async function buildSystemPrompt(userQuery?: string): Promise<string> {
+    return buildSystemPromptWithInspection(userQuery).then((result) => result.systemPrompt);
+  }
+
+  async function buildSystemPromptWithInspection(userQuery?: string): Promise<{
+    systemPrompt: string;
+    sections: ReturnType<PromptBuilder['inspect']>;
+    transientMessages: ModelMessage[];
+  }> {
     const promptCtx = await buildPromptContext({
       sessionMessageCount: messages.length,
       userQuery,
       taskContext: await getCurrentTaskContext(),
       todoContext: getCurrentTodoContext(),
     });
-    return appendLongReportStreamingHint(builder.build(promptCtx), userQuery);
+    const sections = builder.inspect(promptCtx);
+    const basePrompt = sections
+      .filter((section) => section.enabled)
+      .map((section) => section.text)
+      .join('\n\n');
+    return {
+      systemPrompt: basePrompt,
+      sections,
+      transientMessages: buildTurnContextTransientMessages(promptCtx, userQuery),
+    };
+  }
+
+  function buildTurnContextTransientMessages(
+    promptCtx: PromptContext,
+    userQuery?: string,
+  ): ModelMessage[] {
+    const sections = [
+      formatTransientSection('工具运行摘要', toolRuntimeSummary()(promptCtx)),
+      formatTransientSection('延迟工具列表', deferredTools()(promptCtx)),
+      formatTransientSection('当前 Skills', skillsContext()(promptCtx)),
+      formatTransientSection('Agent Teams 状态', teamsContext()(promptCtx)),
+      formatTransientSection('运行模式', modeContext()(promptCtx)),
+      formatTransientSection('Task 使用指引', taskGuide()(promptCtx)),
+      formatTransientSection('当前 Task 状态', taskContext()(promptCtx)),
+      formatTransientSection('Todo 使用指引', todoGuide()(promptCtx)),
+      formatTransientSection('当前 Todo 状态', todoContext()(promptCtx)),
+      formatTransientSection('运行环境', runtimeEnvironment()(promptCtx)),
+      formatTransientSection('项目记忆', projectMemory()(promptCtx)),
+      formatTransientSection('会话信息', sessionContext()(promptCtx)),
+      formatTransientSection('长报告流式输出策略', getLongReportStreamingHint(userQuery)),
+    ].filter((section): section is string => Boolean(section));
+
+    if (sections.length === 0) return [];
+
+    return [
+      {
+        role: 'user',
+        content: [
+          '[q_code_turn_context]',
+          '',
+          '以下是 q-code 为本轮请求追加的运行上下文。它不是新的用户需求；请在满足用户请求时按需参考。',
+          '',
+          ...sections,
+        ].join('\n'),
+      },
+    ];
+  }
+
+  function formatTransientSection(title: string, text: string | null | undefined): string | null {
+    if (!text?.trim()) return null;
+    return `## ${title}\n${text}`;
   }
 
   registry.setCwd(activeStore.cwd);
@@ -1314,6 +1366,19 @@ export async function runMain(options: {
     });
   }
 
+  function snapshotRequestContext(
+    currentMessages: ModelMessage[],
+    systemPrompt: string,
+    transientMessages: ModelMessage[],
+    usageAnchor?: UsageAnchor,
+  ) {
+    return snapshotContext(
+      transientMessages.length > 0 ? [...currentMessages, ...transientMessages] : currentMessages,
+      systemPrompt,
+      usageAnchor,
+    );
+  }
+
   async function compactIfNeeded(
     currentMessages: ModelMessage[],
     systemPrompt: string,
@@ -1322,10 +1387,16 @@ export async function runMain(options: {
     usageAnchor?: UsageAnchor,
     force = false,
     focus?: string,
+    transientMessages: ModelMessage[] = [],
   ): Promise<AgentLoopPreflightResult> {
-    const before = snapshotContext(currentMessages, systemPrompt, usageAnchor);
+    const before = snapshotRequestContext(
+      currentMessages,
+      systemPrompt,
+      transientMessages,
+      usageAnchor,
+    );
     const beforeForReduction = usageAnchor
-      ? snapshotContext(currentMessages, systemPrompt)
+      ? snapshotRequestContext(currentMessages, systemPrompt, transientMessages)
       : before;
     if (!force && (before.state === 'normal' || before.state === 'warning')) {
       if (before.state === 'warning') {
@@ -1944,13 +2015,18 @@ export async function runMain(options: {
     messages.push(...userMessages);
     activeStore.appendAll(userMessages);
     lastUserPromptDigest = sha256ForCrashGuard(userQuery);
-    const turnSystem = await buildSystemPrompt(userQuery);
+    const turnPrompt = await buildSystemPromptWithInspection(userQuery);
+    const turnSystem = turnPrompt.systemPrompt;
     cachePrefixTracker.observe(
-      createCachePrefixSnapshot({
-        systemPrompt: turnSystem,
-        tools: registry.getActiveTools(),
-        activeToolSchemaTokens: registry.countTokenEstimate().active,
-      }),
+      annotateCachePrefixSnapshot(
+        createCachePrefixSnapshot({
+          systemPrompt: turnSystem,
+          tools: registry.getActiveTools(),
+          activeToolSchemaTokens: registry.countTokenEstimate().active,
+          systemSections: turnPrompt.sections,
+        }),
+        cachePrefixTracker.status().current,
+      ),
     );
     const jitSummary = registry.getJitToolSummary();
     if (jitSummary) {
@@ -1964,6 +2040,10 @@ export async function runMain(options: {
     const turnAbortController = new AbortController();
     activeTurnAbortController = turnAbortController;
     activeTurnInFlight = true;
+    const turnTransientMessages = [
+      ...turnPrompt.transientMessages,
+      ...getDuckPersonaTransientMessages(),
+    ];
     try {
       const loopResult = await observeLangfuseTurn(
         {
@@ -1977,7 +2057,7 @@ export async function runMain(options: {
           const result = await agentLoop(model, registry, messages, turnSystem, {
             maxOutputTokens: defaultMaxOutputTokens,
             escalatedMaxOutputTokens,
-            transientMessages: getDuckPersonaTransientMessages(),
+            transientMessages: turnTransientMessages,
             quiet: useTui,
             modelName: currentModelName(),
             modelWaitHeartbeatMs,
@@ -2003,10 +2083,13 @@ export async function runMain(options: {
                 `Step ${step} preflight`,
                 'preflight',
                 usageAnchor,
+                false,
+                undefined,
+                turnTransientMessages,
               ),
-            contextUsage: (currentMessages, { usageAnchor }) => {
+            contextUsage: (_currentMessages, { requestMessages, usageAnchor }) => {
               const snapshot = snapshotContext(
-                currentMessages,
+                requestMessages,
                 turnSystem,
                 usageAnchor,
               );

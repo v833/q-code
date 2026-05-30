@@ -122,6 +122,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - 新测试套件或专项跑法 → `## 测试策略`
   - PR 中没改 `AGENTS.md` 的新功能，视为未完成；评审优先回退或要求补全。
 - 鸭子人格默认「小黄鸭」不进 system prompt（保持 system/tools 前缀稳定）；`/ya` 选中主题鸭时通过 Agent Loop 的 `transientMessages` 作为本轮请求尾部用户消息注入，不进入 system prompt pipe，也不写入会话历史或压缩快照。
+- System Prompt 管道保持稳定前缀优先：核心规则、项目指令、稳定工具纪律、稳定 Skill 调用纪律、SubAgents 摘要和稳定延迟工具纪律留在 system prompt；当前可见 Skill 列表、延迟工具列表、Plan/Task/Todo、Agent Teams 活跃状态、运行环境、项目记忆、会话信息、长报告提示、鸭子人格等本轮动态内容必须通过 Agent Loop `transientMessages` 追加为尾部 user context，不写入会话历史或压缩快照。新增 system pipe 必须标注 `stability` / `category`，新增动态字段不得插入 system prompt 稳定前缀。工具纪律拆成稳定的 `toolDiscipline` 与动态的 `toolRuntimeSummary`；工具数量、JIT 摘要和委派状态只能放在 transient user context。运行环境默认只注入日期粒度时间与 Git clean/dirty 摘要，完整 `git status --short` 应按需用工具查询。修改 prompt/cache 逻辑需覆盖 `tests/unit/prompt-builder.test.ts`、`tests/unit/runtime-context.test.ts`、`tests/unit/usage.test.ts`、`tests/integration/agent-loop.test.ts`。
 - 文件和会话持久化逻辑优先使用项目已有的原子写入、路径计算和存储 helper（如 `SessionStore`、`Q_CODE_HOME` 解析、`auditDir` 解析），避免临时拼接路径。
 - Prompt、工具描述、项目说明多为中文；新增用户可见文案时优先保持中文一致性。
 - 新增环境变量需同时更新：(a) `.env.example`；(b) `src/config/runtime-config.ts` 的 `SECTION_ALIASES`（让 toml 配置可用）；(c) README 配置表。
@@ -161,7 +162,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - TUI SubAgent Monitor：`vitest run tests/unit/agent-monitor.test.ts tests/unit/terminal.test.ts`
   - TUI 输入历史：`vitest run tests/unit/history-store.test.ts tests/unit/terminal.test.ts tests/integration/history-flow.test.ts`
   - 运行时配置/CLI 子命令：`vitest run tests/unit/runtime-config.test.ts tests/unit/cli-info.test.ts tests/unit/update.test.ts tests/unit/changelog.test.ts tests/unit/init-cli.test.ts`
-  - 鸭子人格 / system prompt：`vitest run tests/unit/duck-persona.test.ts tests/unit/prompt-builder.test.ts`
+  - 鸭子人格 / system prompt / prompt cache：`vitest run tests/unit/duck-persona.test.ts tests/unit/prompt-builder.test.ts tests/unit/runtime-context.test.ts tests/unit/usage.test.ts`
   - 崩溃保护：`vitest run tests/unit/crash-guard.test.ts tests/unit/mcp-bootstrap.test.ts tests/unit/audit-logger.test.ts`
   - Infra / GitLab KB：`vitest run tests/unit/infra.test.ts tests/unit/infra-candidate.test.ts tests/unit/gitlab-kb.test.ts`
   - Agent 工具/SubAgent 参数传递与只读并行调度：`vitest run tests/unit/agent-tools.test.ts tests/integration/audit-trail.test.ts`

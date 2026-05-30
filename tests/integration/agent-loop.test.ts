@@ -64,6 +64,56 @@ describe('agentLoop 集成（mock model + mock tools）', () => {
     expect(messageListContains(messages, '临时鸭子人格')).toBe(false)
   })
 
+  it('contextUsage 使用包含 transientMessages 的真实请求消息', async () => {
+    const { model } = createMockModel([{ text: '已完成。', finishReason: 'stop' }])
+    const registry = makeRegistry()
+    const seen: boolean[] = []
+
+    await agentLoop(
+      model,
+      registry,
+      [{ role: 'user', content: '你好' }],
+      'sys',
+      {
+        quiet: true,
+        transientMessages: [{ role: 'user', content: '临时运行上下文' }],
+        contextUsage: (_messages, { requestMessages }) => {
+          seen.push(messageListContains(requestMessages, '临时运行上下文'))
+          return { used: 1, limit: 100, state: 'normal' }
+        }
+      }
+    )
+
+    expect(seen).toEqual([true])
+  })
+
+  it('transientMessages 存在时 contextUsage 不复用历史 usageAnchor', async () => {
+    const { tool: probe } = makeRecordingTool('probe', 'ok')
+    const registry = makeRegistry(probe)
+    const { model } = createMockModel([
+      { tools: [{ name: 'probe', input: {} }] },
+      { text: '已完成。', finishReason: 'stop' }
+    ])
+    const anchors: unknown[] = []
+
+    await agentLoop(
+      model,
+      registry,
+      [{ role: 'user', content: '你好' }],
+      'sys',
+      {
+        quiet: true,
+        transientMessages: [{ role: 'user', content: '临时运行上下文' }],
+        contextUsage: (_messages, { usageAnchor }) => {
+          anchors.push(usageAnchor)
+          return { used: 1, limit: 100, state: 'normal' }
+        }
+      }
+    )
+
+    expect(anchors).toEqual([undefined, undefined])
+  })
+
   it('多步 ReAct：工具结果回写 messages 后模型继续', async () => {
     const { tool: probe, calls } = makeRecordingTool('probe', '工具返回值-X')
     const registry = makeRegistry(probe)

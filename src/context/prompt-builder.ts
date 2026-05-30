@@ -26,43 +26,114 @@ export interface PromptContext {
 
 type PipeFn = (ctx: PromptContext) => string | null
 
+/** Prompt pipe 的稳定性分层，用于 cache 前缀治理与诊断。 */
+export type PromptStability = 'stable' | 'session-stable' | 'dynamic'
+
+/** Prompt pipe 的功能类别，用于 `/cache status` 分组排查。 */
+export type PromptSectionCategory =
+  | 'core'
+  | 'project'
+  | 'tools'
+  | 'skills'
+  | 'agents'
+  | 'mode'
+  | 'task'
+  | 'todo'
+  | 'runtime'
+  | 'memory'
+  | 'session'
+  | 'other'
+
+/** Prompt pipe 的注册元数据。 */
+export interface PromptPipeMeta {
+  name: string
+  stability?: PromptStability
+  category?: PromptSectionCategory
+  cacheCritical?: boolean
+}
+
+/** 单个 prompt pipe 的渲染诊断信息。 */
+export interface PromptSectionInspection {
+  name: string
+  enabled: boolean
+  text: string
+  chars: number
+  stability: PromptStability
+  category: PromptSectionCategory
+  cacheCritical: boolean
+}
+
 /** 按注册顺序执行 pipe，将非 null 结果以双换行拼接为 system prompt。 */
 export class PromptBuilder {
-  private pipes: Array<{ name: string; fn: PipeFn }> = []
+  private pipes: Array<{ meta: Required<PromptPipeMeta>; fn: PipeFn }> = []
 
   /**
    * 注册一个命名 pipe。
    * @param name 调试输出用名称
    * @param fn 返回 null 表示跳过该段
    */
-  pipe(name: string, fn: PipeFn): this {
-    this.pipes.push({ name, fn })
+  pipe(nameOrMeta: string | PromptPipeMeta, fn: PipeFn): this {
+    const meta = normalizePipeMeta(nameOrMeta)
+    this.pipes.push({ meta, fn })
     return this
   }
 
   /** 执行全部 pipe 并拼接为最终 system prompt 字符串。 */
   build(ctx: PromptContext): string {
-    const sections: string[] = []
+    return this.inspect(ctx)
+      .filter((section) => section.enabled)
+      .map((section) => section.text)
+      .join('\n\n')
+  }
 
-    for (const { fn } of this.pipes) {
+  /** 渲染各 pipe 并返回分段结果，供 cache 诊断定位变化来源。 */
+  inspect(ctx: PromptContext): PromptSectionInspection[] {
+    const sections: PromptSectionInspection[] = []
+
+    for (const { meta, fn } of this.pipes) {
       const result = fn(ctx)
-      if (result !== null) {
-        sections.push(result)
-      }
+      const enabled = result !== null
+      sections.push({
+        name: meta.name,
+        enabled,
+        text: result ?? '',
+        chars: result?.length ?? 0,
+        stability: meta.stability,
+        category: meta.category,
+        cacheCritical: meta.cacheCritical
+      })
     }
 
-    return sections.join('\n\n')
+    return sections
   }
 
   /** 打印每个 pipe 的 ON/OFF 与字符数，便于调试 prompt 组成。 */
   debug(ctx: PromptContext, log: (text: string) => void = console.log): void {
     log('\n=== Prompt Pipe Debug ===')
-    for (const { name, fn } of this.pipes) {
+    for (const { meta, fn } of this.pipes) {
       const result = fn(ctx)
       const status = result !== null ? `[ON] ${result.length} chars` : '[OFF]'
-      log(`  ${name}: ${status}`)
+      log(`  ${meta.name}: ${status}`)
     }
     log('========================\n')
+  }
+}
+
+function normalizePipeMeta(nameOrMeta: string | PromptPipeMeta): Required<PromptPipeMeta> {
+  if (typeof nameOrMeta === 'string') {
+    return {
+      name: nameOrMeta,
+      stability: 'dynamic',
+      category: 'other',
+      cacheCritical: false
+    }
+  }
+
+  return {
+    name: nameOrMeta.name,
+    stability: nameOrMeta.stability ?? 'dynamic',
+    category: nameOrMeta.category ?? 'other',
+    cacheCritical: nameOrMeta.cacheCritical ?? false
   }
 }
 
@@ -77,24 +148,43 @@ export function coreRules(): PipeFn {
 - 回答要简洁直接`
 }
 
-/** 工具使用与 JIT 上下文纪律 pipe；无工具时返回 null。 */
-export function toolGuide(): PipeFn {
+/** 稳定工具使用纪律 pipe；不包含工具数量、JIT 摘要等高频动态字段。 */
+export function toolDiscipline(): PipeFn {
   return (ctx) => {
     if (ctx.toolCount === 0) return null
     return [
-      `你有 ${ctx.toolCount} 个工具可用。需要操作本地文件时使用内置工具，需要访问外部服务时使用 MCP 工具。`,
-      '',
       '[JIT Context Discipline]',
       '- 上下文应在需要时进入，不要在一开始批量读取可能无关的大文件、网页或长命令输出。',
       '- 代码/文件探索优先使用低成本到高成本阶梯：list_directory/glob → grep → read_file 的精确行段。',
-      ctx.canDelegateToAgents
-        ? '- 只把能推进当前判断的最小证据放进主上下文；宽搜索、噪音探索或可并行调查优先交给 Agent/Explore。'
-        : '- 只把能推进当前判断的最小证据放进当前上下文；不要调用当前工具列表中不存在的委派工具。',
+      '- 只把能推进当前判断的最小证据放进当前上下文；不要调用当前工具列表中不存在的委派工具。',
       '- Skill、SubAgent、MCP 工具都遵循渐进式披露：先看名称/摘要/Schema，必要时再加载正文或执行高成本工具。',
+    ]
+      .join('\n')
+  }
+}
+
+/** 动态工具运行摘要 pipe；放在稳定前缀之后，避免工具集变化切断大块 cache。 */
+export function toolRuntimeSummary(): PipeFn {
+  return (ctx) => {
+    if (ctx.toolCount === 0) return null
+    return [
+      `当前有 ${ctx.toolCount} 个工具可用。需要操作本地文件时使用内置工具，需要访问外部服务时使用 MCP 工具。`,
+      ctx.canDelegateToAgents
+        ? '当前可使用 Agent/Explore；宽搜索、噪音探索或可并行调查优先委派，主上下文只接收摘要。'
+        : '当前不可使用委派工具；不要假设或调用不可见的委派能力。',
       ctx.jitToolSummary ? ['', '当前工具成本阶梯：', ctx.jitToolSummary].join('\n') : null
     ]
       .filter((line): line is string => line !== null)
       .join('\n')
+  }
+}
+
+/** 兼容旧调用点的组合工具提示；新 system prompt 管道应拆开注册稳定/动态段。 */
+export function toolGuide(): PipeFn {
+  return (ctx) => {
+    const sections = [toolDiscipline()(ctx), toolRuntimeSummary()(ctx)]
+      .filter((section): section is string => Boolean(section))
+    return sections.length > 0 ? sections.join('\n\n') : null
   }
 }
 
@@ -106,7 +196,16 @@ export function deferredTools(): PipeFn {
   }
 }
 
-/** 注入 Skills 上下文 pipe。 */
+/** 稳定 Skill 使用纪律 pipe；当前 Skill 列表由 transient context 承载。 */
+export function skillDiscipline(): PipeFn {
+  return () => [
+    '若当前工具列表中存在 `Skill` 工具，本轮运行上下文会列出当前模型可见 Skill。',
+    '当用户请求匹配某个已列出 Skill 的描述或适用场景时，优先调用 `Skill(skill="<name>", args="<optional args>")` 获取完整工作流。',
+    '不要猜测未列出的 Skill，也不要把 Skill 正文预加载进上下文。'
+  ].join('\n')
+}
+
+/** 注入当前可见 Skills 列表 pipe。 */
 export function skillsContext(): PipeFn {
   return (ctx) => {
     if (!ctx.skillsContext) return null
@@ -215,10 +314,10 @@ export function projectMemory(): PipeFn {
   }
 }
 
-/** 注入会话 ID 与历史消息数 pipe。 */
+/** 注入稳定会话标识 pipe。 */
 export function sessionContext(): PipeFn {
   return (ctx) => {
-    if (ctx.sessionMessageCount === 0) return null
-    return `[会话信息] 当前会话 ${ctx.sessionId}，已有 ${ctx.sessionMessageCount} 条历史消息。`
+    if (!ctx.sessionId) return null
+    return `[会话信息] 当前会话 ${ctx.sessionId}。`
   }
 }

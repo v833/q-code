@@ -433,6 +433,12 @@ System Prompt 会注入固定的 JIT 纪律：
 - 宽搜索、噪音探索或可并行调查优先交给 `Agent` / `Explore`，主上下文只接收摘要
 - Skills、SubAgents、MCP 工具都按渐进式披露工作：先看名称/摘要/Schema，必要时再加载正文或执行高成本工具
 
+#### Prompt Cache 稳定前缀
+
+System Prompt 管道只保留高稳定前缀：核心规则、项目指令、稳定工具纪律、稳定 Skill 调用纪律、SubAgents 摘要和稳定延迟工具纪律。当前可见 Skill 列表、延迟工具列表、Plan/Task/Todo、Agent Teams 活跃状态、运行环境、项目记忆、会话信息和长报告提示等本轮动态内容，会通过 Agent Loop 的 `transientMessages` 追加为本轮尾部 user context，不进入 system prompt，也不写入会话历史。这样即使日期、Git 状态、条件 Skill 激活、延迟工具发现、任务图或 query-specific memory 改变，也不会切断前面的大块 provider prompt cache。
+
+运行环境默认只注入日期粒度时间和 Git 摘要：`clean` 或 `dirty (N changed files)`；如需完整文件列表，模型应通过工具按需查询。`/cache status` 会显示整体 system/tools hash、稳定前缀比例、每个 prompt pipe 的分段 hash/changed/stability/category 状态，以及逐工具 schema hash，用于定位是哪一段或哪一个工具在抖动。clean 工作区和普通多轮会话下，稳定前缀比例目标应保持在 90% 以上。
+
 #### 工具成本阶梯
 
 每个工具可以声明 JIT 元数据：
@@ -1347,21 +1353,16 @@ git commit -n -m "..."   # 等同于 --no-verify
 
 System Prompt 由 `PromptBuilder` 按管道顺序拼接，每个 Pipe 可根据上下文动态开关：
 
-| Pipe                              | 说明                               |
-| --------------------------------- | ---------------------------------- |
-| `coreRules`                       | 核心行为准则                       |
-| `modeContext`                     | 当前模式上下文                     |
-| `toolGuide`                       | 工具使用引导                       |
-| `taskGuide` / `taskContext`       | Task V2 使用引导与当前任务图       |
-| `todoGuide` / `todoContext`       | TodoWrite V1 使用引导与当前清单    |
-| `skillsContext` / `agentsContext` | Skills 与 SubAgents discovery 提醒 |
-| `deferredTools`                   | 延迟加载工具摘要                   |
-| `runtimeEnvironment`              | 运行环境信息（OS、Git 分支等）     |
-| `agentMdInstructions`             | AGENT.md 项目指令                  |
-| `projectMemory`                   | 项目记忆上下文与索引               |
-| `sessionContext`                  | 会话信息                           |
+| Pipe                              | 稳定性           | 说明                                  |
+| --------------------------------- | ---------------- | ------------------------------------- |
+| `coreRules`                       | `stable`         | 核心行为准则                          |
+| `agentMdInstructions`             | `stable`         | AGENT.md 项目指令                     |
+| `toolDiscipline`                  | `stable`         | 不含工具数量/JIT 摘要的稳定工具纪律   |
+| `skillDiscipline`                 | `stable`         | 不含当前 Skill 列表的稳定调用纪律     |
+| `agentsContext`                   | `stable`         | SubAgents discovery 提醒              |
+| `deferredToolDiscipline`          | `stable`         | 不含具体列表的稳定 `tool_search` 纪律 |
 
-每轮用户输入时，`buildSystemPrompt(userQuery)` 会根据用户查询动态重建 System Prompt，使记忆上下文可以响应当前意图（如用户要求忽略记忆时，对应内容会被清空）。
+每轮用户输入时，`buildSystemPrompt(userQuery)` 只重建稳定 system prompt；本轮动态内容由 `buildTurnContextTransientMessages(...)` 汇总到尾部 user context。该 transient context 包含 `toolRuntimeSummary`、当前延迟工具列表、当前可见 Skill 列表、`teamsContext`、`modeContext`、Task/Todo 上下文、`runtimeEnvironment`、`projectMemory`、`sessionContext` 和长报告流式提示。它参与本轮模型请求和上下文预算估算，但不会写入会话历史或压缩快照。
 
 ## 数据存储结构
 

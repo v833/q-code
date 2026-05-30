@@ -14,6 +14,7 @@ export interface RuntimeEnvironmentContext {
   os: string
   gitBranch?: string
   gitStatus?: string
+  gitChangedFiles?: number
   gitRecentCommit?: string
 }
 
@@ -26,7 +27,7 @@ export async function getRuntimeEnvironmentContext(
 ): Promise<RuntimeEnvironmentContext> {
   return {
     cwd,
-    date: new Date().toISOString(),
+    date: new Date().toISOString().slice(0, 10),
     os: `${os.platform()} ${os.release()} (${os.arch()})`,
     ...(await getGitContext(cwd))
   }
@@ -45,7 +46,13 @@ export function formatRuntimeEnvironmentContext(context: RuntimeEnvironmentConte
   ]
 
   if (context.gitBranch) lines.push(`- Git 分支: ${context.gitBranch}`)
-  if (context.gitStatus) lines.push(`- Git 状态:\n${context.gitStatus}`)
+  if (context.gitStatus) {
+    lines.push(
+      context.gitChangedFiles && context.gitChangedFiles > 0
+        ? `- Git 状态: ${context.gitStatus} (${context.gitChangedFiles} changed files)`
+        : `- Git 状态: ${context.gitStatus}`
+    )
+  }
   if (context.gitRecentCommit) lines.push(`- 最近提交: ${context.gitRecentCommit}`)
 
   return lines.join('\n')
@@ -53,7 +60,7 @@ export function formatRuntimeEnvironmentContext(context: RuntimeEnvironmentConte
 
 async function getGitContext(
   cwd: string
-): Promise<Pick<RuntimeEnvironmentContext, 'gitBranch' | 'gitStatus' | 'gitRecentCommit'>> {
+): Promise<Pick<RuntimeEnvironmentContext, 'gitBranch' | 'gitStatus' | 'gitChangedFiles' | 'gitRecentCommit'>> {
   try {
     const [branchResult, statusResult, logResult] = await Promise.all([
       execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, maxBuffer: 32 * 1024 }),
@@ -61,9 +68,15 @@ async function getGitContext(
       execFileAsync('git', ['log', '-1', '--pretty=format:%h %s'], { cwd, maxBuffer: 32 * 1024 })
     ])
 
+    const changedFiles = statusResult.stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean).length
+
     return {
       gitBranch: branchResult.stdout.trim(),
-      gitStatus: statusResult.stdout.trim() || 'clean',
+      gitStatus: changedFiles > 0 ? 'dirty' : 'clean',
+      gitChangedFiles: changedFiles,
       gitRecentCommit: logResult.stdout.trim() || undefined
     }
   } catch {
