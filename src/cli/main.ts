@@ -38,23 +38,19 @@ import {
 } from '../tools';
 import { agentLoop, type AgentLoopPreflightResult } from '../agent/loop';
 import {
-  coreRules,
   deferredTools,
-  agentsContext,
-  agentMdInstructions,
-  PromptBuilder,
+  createSystemPromptBuilder,
   modeContext,
   projectMemory,
+  type PromptBuilder,
   runtimeEnvironment,
   sessionContext,
-  skillDiscipline,
   skillsContext,
   taskContext,
   taskGuide,
   teamsContext,
   todoContext,
   todoGuide,
-  toolDiscipline,
   toolRuntimeSummary,
   type PromptContext,
 } from '../context/prompt-builder';
@@ -97,6 +93,7 @@ import {
 } from '../context/runtime-context';
 import {
   buildTokenBudgetSnapshot,
+  usageFromLanguageModelUsage,
   type TokenUsage,
   type UsageAnchor,
 } from '../context/token-budget';
@@ -110,9 +107,11 @@ import {
   UsageTracker,
   createCachePrefixSnapshot,
   parseCacheModeArg,
+  readCacheKeepaliveIntervalMs,
   renderCacheStatus,
   renderNoUsage,
   renderUsageSummary,
+  normalizeUsage,
 } from '../usage';
 import { buildMemorySystemContext } from '../context/memory/memdir';
 import {
@@ -301,6 +300,7 @@ const modelStalledRequestWarnMs = getOptionalMillisecondsEnv(
 const modelRequestTimeoutMs = getOptionalMillisecondsEnv(
   'Q_CODE_MODEL_REQUEST_TIMEOUT_MS',
 );
+const DEFAULT_CACHE_KEEPALIVE_TIMEOUT_MS = 30_000;
 const planIntentMode = readPlanIntentMode();
 const planIntentModelTimeoutMs = readPlanIntentModelTimeoutMs();
 const compactTriggerTokens = Math.floor(
@@ -674,6 +674,7 @@ export async function runMain(options: {
       cleanupHandlers: [
         () => closeMcpSubsystem(),
         () => shutdownLangfuse(),
+        () => stopCacheKeepalive(),
         () => {
           for (const agent of getAllAsyncAgents()) {
             if (agent.status === 'running') killAsyncAgent(agent.agentId);
@@ -760,6 +761,11 @@ export async function runMain(options: {
     });
   }
   let cachePrefixTracker = new CachePrefixTracker();
+  const cacheKeepaliveIntervalMs = readCacheKeepaliveIntervalMs();
+  let cacheKeepaliveTimer: NodeJS.Timeout | undefined;
+  let cacheKeepaliveInFlight = false;
+  let cacheKeepaliveAbortController: AbortController | undefined;
+  let latestCacheKeepaliveSystemPrompt = '';
   let modelState = createModel(defaultModelName);
   let model = modelState.model;
   let modelProviderKind = modelState.providerKind;
@@ -790,6 +796,98 @@ export async function runMain(options: {
 
   function emitSessionInfoIfReady(): void {
     if (canEmitSessionInfo) emitSessionInfo();
+  }
+
+  function stopCacheKeepalive(): void {
+    if (cacheKeepaliveTimer) {
+      clearInterval(cacheKeepaliveTimer);
+      cacheKeepaliveTimer = undefined;
+    }
+    abortCacheKeepalive('prompt cache keepalive stopped');
+  }
+
+  function resetCacheKeepalivePrompt(): void {
+    latestCacheKeepaliveSystemPrompt = '';
+    abortCacheKeepalive('prompt cache keepalive reset');
+  }
+
+  function abortCacheKeepalive(reason: string): void {
+    if (!cacheKeepaliveAbortController || cacheKeepaliveAbortController.signal.aborted) return;
+    cacheKeepaliveAbortController.abort(new Error(reason));
+  }
+
+  function startCacheKeepaliveIfEnabled(): void {
+    if (cacheKeepaliveIntervalMs <= 0 || cacheKeepaliveTimer || dumpSystemPrompt) return;
+    cacheKeepaliveTimer = setInterval(() => {
+      void runCacheKeepalive();
+    }, cacheKeepaliveIntervalMs);
+    cacheKeepaliveTimer.unref?.();
+  }
+
+  async function runCacheKeepalive(): Promise<void> {
+    if (cacheKeepaliveInFlight || activeTurnInFlight || !latestCacheKeepaliveSystemPrompt) return;
+    if (usageTracker.getCacheMode() === 'off') return;
+    cacheKeepaliveInFlight = true;
+    const keepaliveSystemPrompt = latestCacheKeepaliveSystemPrompt;
+    const keepaliveSessionId = sessionId;
+    const keepaliveCwd = activeStore.cwd;
+    const keepaliveStore = activeStore;
+    const keepaliveUsageTracker = usageTracker;
+    const keepaliveModelName = currentModelName();
+    const keepaliveAbortController = new AbortController();
+    cacheKeepaliveAbortController = keepaliveAbortController;
+    const timeoutMs = Math.min(
+      modelRequestTimeoutMs ?? DEFAULT_CACHE_KEEPALIVE_TIMEOUT_MS,
+      DEFAULT_CACHE_KEEPALIVE_TIMEOUT_MS,
+    );
+    const timeout = setTimeout(() => {
+      keepaliveAbortController.abort(new Error('prompt cache keepalive timeout'));
+    }, timeoutMs);
+    timeout.unref();
+    try {
+      const providerOptions = createReasoningProviderOptions(
+        modelProviderKind,
+        { thinkingType: 'disabled', reasoningEffort: 'none' },
+        { modelName: keepaliveModelName },
+      );
+      const response = await generateText({
+        model,
+        system: keepaliveSystemPrompt,
+        prompt: '保持 prompt cache 预热。只回复 OK。',
+        maxOutputTokens: 4,
+        maxRetries: 0,
+        abortSignal: keepaliveAbortController.signal,
+        ...(providerOptions ? { providerOptions } : {}),
+      });
+      const usage = normalizeUsage(response.usage);
+      if (usage.totalTokens > 0 || usage.cacheReadTokens > 0 || usage.cacheWriteTokens > 0) {
+        const record = keepaliveUsageTracker.record(keepaliveModelName, usage);
+        keepaliveStore.appendUsageV2(record, keepaliveUsageTracker.totals());
+      }
+      getAuditLogger().emit(
+        'cache.keepalive',
+        {
+          model: keepaliveModelName,
+          usage: usageFromLanguageModelUsage(response.usage),
+        },
+        { sessionId: keepaliveSessionId, cwd: keepaliveCwd, agent: { kind: 'main' } },
+      );
+    } catch (error) {
+      getAuditLogger().emit(
+        'cache.keepalive',
+        {
+          model: keepaliveModelName,
+          error: formatErrorMessage(error),
+        },
+        { sessionId: keepaliveSessionId, cwd: keepaliveCwd, agent: { kind: 'main' } },
+      );
+    } finally {
+      clearTimeout(timeout);
+      if (cacheKeepaliveAbortController === keepaliveAbortController) {
+        cacheKeepaliveAbortController = undefined;
+      }
+      cacheKeepaliveInFlight = false;
+    }
   }
 
   interface SlashRuntimeContext {}
@@ -1121,16 +1219,6 @@ export async function runMain(options: {
 
   const startupWarmupPromise = startStartupWarmup();
   const builder = createSystemPromptBuilder();
-
-  function createSystemPromptBuilder(): PromptBuilder {
-    return new PromptBuilder()
-      .pipe({ name: 'coreRules', stability: 'stable', category: 'core', cacheCritical: true }, coreRules())
-      .pipe({ name: 'agentMdInstructions', stability: 'stable', category: 'project', cacheCritical: true }, agentMdInstructions())
-      .pipe({ name: 'toolDiscipline', stability: 'stable', category: 'tools', cacheCritical: true }, toolDiscipline())
-      .pipe({ name: 'skillDiscipline', stability: 'stable', category: 'skills', cacheCritical: true }, skillDiscipline())
-      .pipe({ name: 'agentsContext', stability: 'stable', category: 'agents', cacheCritical: true }, agentsContext())
-      .pipe({ name: 'deferredToolDiscipline', stability: 'stable', category: 'tools' }, () => '若当前工具列表中存在 `tool_search`，并且你需要的工具不在当前列表中，使用 `tool_search` 搜索。');
-  }
 
   function setAgentMode(mode: ToolVisibilityMode): void {
     const previous = agentMode;
@@ -1623,6 +1711,7 @@ export async function runMain(options: {
   async function closeCli(): Promise<void> {
     if (closed) return;
     closed = true;
+    stopCacheKeepalive();
     unsubscribeTodos();
     unsubscribeAsyncAgents();
     await emitHook(
@@ -2017,6 +2106,8 @@ export async function runMain(options: {
     lastUserPromptDigest = sha256ForCrashGuard(userQuery);
     const turnPrompt = await buildSystemPromptWithInspection(userQuery);
     const turnSystem = turnPrompt.systemPrompt;
+    latestCacheKeepaliveSystemPrompt = turnSystem;
+    startCacheKeepaliveIfEnabled();
     cachePrefixTracker.observe(
       annotateCachePrefixSnapshot(
         createCachePrefixSnapshot({
@@ -2608,6 +2699,7 @@ export async function runMain(options: {
       modelState = createModel(defaultModelName);
       model = modelState.model;
       modelProviderKind = modelState.providerKind;
+      resetCacheKeepalivePrompt();
       emitSessionInfo();
       print(`\n  [Model] 已恢复默认模型: ${defaultModelName}`);
       return;
@@ -2617,6 +2709,7 @@ export async function runMain(options: {
     modelState = createModel(requested);
     model = modelState.model;
     modelProviderKind = modelState.providerKind;
+    resetCacheKeepalivePrompt();
     emitSessionInfo();
     print(`\n  [Model] 本会话模型已切换为: ${requested}`);
   }
@@ -2793,6 +2886,7 @@ export async function runMain(options: {
       records: usageRecords,
     });
     cachePrefixTracker = new CachePrefixTracker();
+    resetCacheKeepalivePrompt();
     lastUserPromptDigest = findLastUserPromptDigest(nextMessages);
 
     registry.setCwd(nextStore.cwd);
@@ -4017,6 +4111,7 @@ export async function runMain(options: {
         mode: usageTracker.getCacheMode(),
         totals: usageTracker.totals(),
         prefix: cachePrefixTracker.status(),
+        keepaliveIntervalMs: cacheKeepaliveIntervalMs,
       })}`,
     );
   }

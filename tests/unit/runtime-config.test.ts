@@ -29,6 +29,10 @@ const ENV_KEYS = [
   'Q_CODE_MODEL_PROVIDER',
   'Q_CODE_THINKING_TYPE',
   'Q_CODE_REASONING_EFFORT',
+  'Q_CODE_CACHE_STABLE_PREFIX_TARGET',
+  'Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS',
+  'Q_CODE_AGENT_MD_FULL_CHAR_LIMIT',
+  'Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT',
   'Q_CODE_HISTORY_SCOPE',
   'Q_CODE_HISTORY_DISABLED',
   'Q_CODE_HISTORY_REDACT',
@@ -193,6 +197,8 @@ describe('runtime config', () => {
         'tui_cursor = "inline"',
         'thinking_type = "enabled"',
         'reasoning_effort = "high"',
+        'cache_stable_prefix_target = 0.95',
+        'cache_keepalive_interval_ms = 300000',
         'token_budget = 999999',
         'max_steps = 3',
         '[q_code]',
@@ -228,6 +234,11 @@ describe('runtime config', () => {
         'allow_abs = false',
         '[file_index]',
         'ignore = "build,out"',
+        '[cache]',
+        'stable_prefix_target = 0.92',
+        'keepalive_interval_ms = 600000',
+        'agent_md_full_char_limit = 12000',
+        'agent_md_section_char_limit = 1000',
         '[gitlab_kb]',
         'url = "https://gitlab.example.com/group/project"',
         'token = "glpat-test"',
@@ -261,6 +272,10 @@ describe('runtime config', () => {
     expect(process.env.Q_CODE_MODEL_PROVIDER).toBe('deepseek-compatible')
     expect(process.env.Q_CODE_THINKING_TYPE).toBe('adaptive')
     expect(process.env.Q_CODE_REASONING_EFFORT).toBe('xhigh')
+    expect(process.env.Q_CODE_CACHE_STABLE_PREFIX_TARGET).toBe('0.92')
+    expect(process.env.Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS).toBe('600000')
+    expect(process.env.Q_CODE_AGENT_MD_FULL_CHAR_LIMIT).toBe('12000')
+    expect(process.env.Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT).toBe('1000')
     expect(process.env.TOKEN_BUDGET).toBeUndefined()
     expect(process.env.MAX_STEPS).toBeUndefined()
     expect(process.env.Q_CODE_DEBUG).toBe('true')

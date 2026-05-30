@@ -74,7 +74,72 @@ describe('startup main', () => {
       rmSync(root, { recursive: true, force: true })
     }
   })
+
+  itIfSubprocessAvailable('dumped system prompt is stable across consecutive runs', () => {
+    const root = mkdtempSync(join(tmpdir(), 'q-code-dump-system-prompt-stable-'))
+    const cwd = join(root, 'project')
+    const home = join(root, 'home')
+    const qcodeHome = join(root, 'qcode-home')
+    mkdirSync(cwd, { recursive: true })
+    mkdirSync(home, { recursive: true })
+    mkdirSync(qcodeHome, { recursive: true })
+
+    try {
+      const first = dumpSystemPrompt({ cwd, home, qcodeHome })
+      const second = dumpSystemPrompt({ cwd, home, qcodeHome })
+
+      expect(first).toBe(second)
+      expect(first).not.toMatch(/当前日期: \d{4}-\d{2}-\d{2}T/u)
+      expect(first).toContain('你是 q-code')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })
+
+function dumpSystemPrompt(options: { cwd: string; home: string; qcodeHome: string }): string {
+  const repoRoot = process.cwd()
+  return execFileSync(
+    process.execPath,
+    [
+      join(repoRoot, 'node_modules/tsx/dist/cli.mjs'),
+      join(repoRoot, 'src/index.ts'),
+      '--dump-system-prompt',
+    ],
+    {
+      cwd: options.cwd,
+      encoding: 'utf-8',
+      env: {
+        PATH: process.env.PATH,
+        TMPDIR: process.env.TMPDIR,
+        TEMP: process.env.TEMP,
+        TMP: process.env.TMP,
+        SystemRoot: process.env.SystemRoot,
+        HOME: options.home,
+        USERPROFILE: options.home,
+        NO_COLOR: '1',
+        CI: '1',
+        OPENAI_API_KEY: 'dummy',
+        OPENAI_BASE_URL: 'http://127.0.0.1:9/v1',
+        OPENAI_MODEL: 'test-model',
+        SUMMARY_API_KEY: 'dummy',
+        SUMMARY_BASE_URL: 'http://127.0.0.1:9/v1',
+        SUMMARY_MODEL: 'test-model',
+        Q_CODE_HOME: options.qcodeHome,
+        Q_CODE_SESSION_DIR: '.sessions',
+        Q_CODE_AUDIT_ENABLED: 'false',
+        Q_CODE_CRASH_GUARD: 'false',
+        Q_CODE_HISTORY_DISABLED: 'true',
+        Q_CODE_INFRA_ENABLED: 'false',
+        Q_CODE_INFRA_SYNC: 'false',
+        Q_CODE_LANGFUSE_ENABLED: 'false',
+        Q_CODE_GITLAB_KB_ENABLED: 'false',
+        Q_CODE_CHANGELOG: '0',
+        MCP_CONNECT_TIMEOUT_MS: '100',
+      },
+    },
+  )
+}
 
 function canExecNodeSubprocesses(): boolean {
   try {

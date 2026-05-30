@@ -53,6 +53,7 @@
     "test:skills": "tsx src/scripts/test-skills.ts",
     "test:agents": "tsx src/scripts/test-agents.ts && tsx src/scripts/test-async-agents.ts",
     "test:teams": "tsx src/scripts/test-teams.ts",
+    "prompt:cache:verify": "tsx src/scripts/verify-prompt-cache.ts",
     "typecheck": "tsc --noEmit",
     "precommit": "pnpm typecheck && pnpm test:unit",
     "prepublishOnly": "npm run typecheck && npm test",

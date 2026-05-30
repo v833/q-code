@@ -7,6 +7,8 @@ import {
   createCachePrefixSnapshot,
   normalizeUsage,
   parseCacheModeArg,
+  readCacheKeepaliveIntervalMs,
+  readCacheStablePrefixTarget,
   renderCacheStatus,
   renderNoUsage,
   renderUsageSummary,
@@ -174,6 +176,18 @@ describe('usage pricing and totals', () => {
 })
 
 describe('cache status', () => {
+  it('reads cache stability and keepalive env settings conservatively', () => {
+    expect(readCacheStablePrefixTarget({})).toBe(0.9)
+    expect(readCacheStablePrefixTarget({ Q_CODE_CACHE_STABLE_PREFIX_TARGET: '0.95' })).toBe(0.95)
+    expect(readCacheStablePrefixTarget({ Q_CODE_CACHE_STABLE_PREFIX_TARGET: '1.5' })).toBe(0.9)
+    expect(readCacheStablePrefixTarget({ Q_CODE_CACHE_STABLE_PREFIX_TARGET: 'nope' })).toBe(0.9)
+
+    expect(readCacheKeepaliveIntervalMs({})).toBe(0)
+    expect(readCacheKeepaliveIntervalMs({ Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS: '1' })).toBe(60000)
+    expect(readCacheKeepaliveIntervalMs({ Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS: '300000' })).toBe(300000)
+    expect(readCacheKeepaliveIntervalMs({ Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS: '-1' })).toBe(0)
+  })
+
   it('parses supported cache modes only', () => {
     expect(parseCacheModeArg('auto')).toBe('auto')
     expect(parseCacheModeArg('ON')).toBe('on')
@@ -239,10 +253,12 @@ describe('cache status', () => {
         previous: first,
         stable: false,
         changes: 1
-      }
+      },
+      keepaliveIntervalMs: 300000
     })
     expect(status).toContain('dynamicC')
     expect(status).toContain('runtime')
+    expect(status).toContain('Keepalive: 每 5m')
   })
 
   it('treats inserted prompt sections as a prefix break', () => {

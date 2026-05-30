@@ -27,6 +27,7 @@ export type AuditEventName =
   | "session.switch"
   | "user.prompt"
   | "user.mention"
+  | "cache.keepalive"
   | "mode.change"
   | "agent.step.start"
   | "agent.step.end"

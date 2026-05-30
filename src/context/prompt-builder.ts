@@ -119,6 +119,17 @@ export class PromptBuilder {
   }
 }
 
+/** 创建主 CLI 的稳定 system prompt 管道；CLI 与 cache 验证脚本共用，避免实现漂移。 */
+export function createSystemPromptBuilder(): PromptBuilder {
+  return new PromptBuilder()
+    .pipe({ name: 'coreRules', stability: 'stable', category: 'core', cacheCritical: true }, coreRules())
+    .pipe({ name: 'agentMdInstructions', stability: 'stable', category: 'project', cacheCritical: true }, agentMdInstructions())
+    .pipe({ name: 'toolDiscipline', stability: 'stable', category: 'tools', cacheCritical: true }, toolDiscipline())
+    .pipe({ name: 'skillDiscipline', stability: 'stable', category: 'skills', cacheCritical: true }, skillDiscipline())
+    .pipe({ name: 'agentsContext', stability: 'stable', category: 'agents', cacheCritical: true }, agentsContext())
+    .pipe({ name: 'deferredToolDiscipline', stability: 'stable', category: 'tools' }, () => '若当前工具列表中存在 `tool_search`，并且你需要的工具不在当前列表中，使用 `tool_search` 搜索。')
+}
+
 function normalizePipeMeta(nameOrMeta: string | PromptPipeMeta): Required<PromptPipeMeta> {
   if (typeof nameOrMeta === 'string') {
     return {

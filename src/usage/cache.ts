@@ -6,6 +6,10 @@ import type { PromptSectionCategory, PromptStability } from '../context/prompt-b
 import type { ToolDefinition } from '../tools/registry'
 import type { CacheMode, UsageTotals } from './types'
 
+export const DEFAULT_CACHE_STABLE_PREFIX_TARGET = 0.9
+export const MIN_CACHE_KEEPALIVE_INTERVAL_MS = 60_000
+const DEFAULT_CACHE_KEEPALIVE_INTERVAL_MS = 0
+
 /** 单次请求前 system prompt 与工具 schema 的前缀指纹。 */
 export interface CachePrefixSnapshot {
   systemHash: string
@@ -91,6 +95,29 @@ export function parseCacheModeArg(value: string): CacheMode | undefined {
   const normalized = value.trim().toLowerCase()
   if (normalized === 'auto' || normalized === 'on' || normalized === 'off') return normalized
   return undefined
+}
+
+/** 读取 prompt cache 稳定前缀目标，非法值回退 0.9。 */
+export function readCacheStablePrefixTarget(
+  env: { Q_CODE_CACHE_STABLE_PREFIX_TARGET?: string | undefined } = process.env
+): number {
+  const raw = env.Q_CODE_CACHE_STABLE_PREFIX_TARGET?.trim()
+  if (!raw) return DEFAULT_CACHE_STABLE_PREFIX_TARGET
+  const parsed = Number.parseFloat(raw)
+  return Number.isFinite(parsed) && parsed > 0 && parsed <= 1
+    ? parsed
+    : DEFAULT_CACHE_STABLE_PREFIX_TARGET
+}
+
+/** prompt cache keepalive 配置；默认关闭，避免无意触发额外模型调用。 */
+export function readCacheKeepaliveIntervalMs(
+  env: { Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS?: string | undefined } = process.env
+): number {
+  const raw = env.Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS?.trim()
+  if (!raw) return DEFAULT_CACHE_KEEPALIVE_INTERVAL_MS
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_CACHE_KEEPALIVE_INTERVAL_MS
+  return Math.max(MIN_CACHE_KEEPALIVE_INTERVAL_MS, parsed)
 }
 
 /**
@@ -196,6 +223,7 @@ export function renderCacheStatus(params: {
   mode: CacheMode
   totals: UsageTotals
   prefix: CachePrefixStatus
+  keepaliveIntervalMs?: number
 }): string {
   const lines = ['Cache Status', '', `模式: ${params.mode}`]
   if (params.mode === 'off') {
@@ -224,6 +252,11 @@ export function renderCacheStatus(params: {
     }
     lines.push(`Prefix 状态: ${params.prefix.stable ? '稳定' : '刚发生变化'}`)
     lines.push(`Prefix 变化次数: ${params.prefix.changes}`)
+    if (params.keepaliveIntervalMs && params.keepaliveIntervalMs > 0) {
+      lines.push(`Keepalive: 每 ${formatDuration(params.keepaliveIntervalMs)} 保持 cache 热度（实验性）`)
+    } else {
+      lines.push('Keepalive: 关闭')
+    }
     if (params.prefix.current.systemSections) {
       lines.push('')
       lines.push('System sections:')
@@ -355,4 +388,10 @@ function renderBar(value: number, width: number): string {
   const clamped = Math.max(0, Math.min(1, value))
   const filled = Math.round(clamped * width)
   return `${'█'.repeat(filled)}${'░'.repeat(width - filled)}`
+}
+
+function formatDuration(ms: number): string {
+  if (ms >= 60_000 && ms % 60_000 === 0) return `${ms / 60_000}m`
+  if (ms >= 1000 && ms % 1000 === 0) return `${ms / 1000}s`
+  return `${ms}ms`
 }

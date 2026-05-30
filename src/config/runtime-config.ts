@@ -59,7 +59,9 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     tui_cursor_blink_ms: 'Q_CODE_TUI_CURSOR_BLINK_MS',
     model_provider: 'Q_CODE_MODEL_PROVIDER',
     thinking_type: 'Q_CODE_THINKING_TYPE',
-    reasoning_effort: 'Q_CODE_REASONING_EFFORT'
+    reasoning_effort: 'Q_CODE_REASONING_EFFORT',
+    cache_stable_prefix_target: 'Q_CODE_CACHE_STABLE_PREFIX_TARGET',
+    cache_keepalive_interval_ms: 'Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS'
   },
   q_code: {
     session_dir: 'Q_CODE_SESSION_DIR',
@@ -102,7 +104,11 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     tui_cursor_blink_ms: 'Q_CODE_TUI_CURSOR_BLINK_MS',
     model_provider: 'Q_CODE_MODEL_PROVIDER',
     thinking_type: 'Q_CODE_THINKING_TYPE',
-    reasoning_effort: 'Q_CODE_REASONING_EFFORT'
+    reasoning_effort: 'Q_CODE_REASONING_EFFORT',
+    cache_stable_prefix_target: 'Q_CODE_CACHE_STABLE_PREFIX_TARGET',
+    cache_keepalive_interval_ms: 'Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS',
+    agent_md_full_char_limit: 'Q_CODE_AGENT_MD_FULL_CHAR_LIMIT',
+    agent_md_section_char_limit: 'Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT'
   },
   reasoning: {
     model_provider: 'Q_CODE_MODEL_PROVIDER',
@@ -150,6 +156,12 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
   },
   file_index: {
     ignore: 'Q_CODE_FILE_INDEX_IGNORE'
+  },
+  cache: {
+    stable_prefix_target: 'Q_CODE_CACHE_STABLE_PREFIX_TARGET',
+    keepalive_interval_ms: 'Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS',
+    agent_md_full_char_limit: 'Q_CODE_AGENT_MD_FULL_CHAR_LIMIT',
+    agent_md_section_char_limit: 'Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT'
   },
   audit: {
     enabled: 'Q_CODE_AUDIT_ENABLED',

@@ -130,6 +130,10 @@ cp .env.example .env
 | `Q_CODE_CHANGELOG`             | ❌   | 启动时展示版本更新说明，默认开启；设为 0/false/off/no 可关闭 |
 | `Q_CODE_STARTUP_TRACE`         | ❌   | 设为 1/true/yes/on 输出轻量启动阶段耗时；`--debug` 会自动启用 |
 | `Q_CODE_THEME`                 | ❌   | TUI Markdown / 代码块高亮主题，`dark` / `light` / `auto`，默认 `auto` |
+| `Q_CODE_CACHE_STABLE_PREFIX_TARGET` | ❌ | `pnpm prompt:cache:verify` 的稳定前缀目标，默认 0.9 |
+| `Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS` | ❌ | 实验性 prompt cache keepalive 间隔毫秒，默认 0 关闭；小于 60000ms 会按 60000ms 执行 |
+| `Q_CODE_AGENT_MD_FULL_CHAR_LIMIT` | ❌ | 单个 AGENT/AGENTS 文件超过该字符数时进入稳定摘要，默认 16000 |
+| `Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT` | ❌ | AGENT/AGENTS 摘要中单个关键章节保留字符数；非关键章节保留较短摘录，默认 1800 |
 | `Q_CODE_AUDIT_ENABLED`         | ❌   | 审计日志开关，默认开启；设为 false/0/off/no 可关闭            |
 | `Q_CODE_AUDIT_DIR`             | ❌   | 审计日志目录，默认 `<Q_CODE_HOME>/logs`                       |
 | `Q_CODE_AUDIT_RETENTION_DAYS`  | ❌   | 审计日志保留天数，默认 30                                    |
@@ -437,7 +441,11 @@ System Prompt 会注入固定的 JIT 纪律：
 
 System Prompt 管道只保留高稳定前缀：核心规则、项目指令、稳定工具纪律、稳定 Skill 调用纪律、SubAgents 摘要和稳定延迟工具纪律。当前可见 Skill 列表、延迟工具列表、Plan/Task/Todo、Agent Teams 活跃状态、运行环境、项目记忆、会话信息和长报告提示等本轮动态内容，会通过 Agent Loop 的 `transientMessages` 追加为本轮尾部 user context，不进入 system prompt，也不写入会话历史。这样即使日期、Git 状态、条件 Skill 激活、延迟工具发现、任务图或 query-specific memory 改变，也不会切断前面的大块 provider prompt cache。
 
-运行环境默认只注入日期粒度时间和 Git 摘要：`clean` 或 `dirty (N changed files)`；如需完整文件列表，模型应通过工具按需查询。`/cache status` 会显示整体 system/tools hash、稳定前缀比例、每个 prompt pipe 的分段 hash/changed/stability/category 状态，以及逐工具 schema hash，用于定位是哪一段或哪一个工具在抖动。clean 工作区和普通多轮会话下，稳定前缀比例目标应保持在 90% 以上。
+AGENT.md / AGENTS.md 超过 `Q_CODE_AGENT_MD_FULL_CHAR_LIMIT` 时会以稳定摘要进入 system prompt：所有章节都会保留标题与确定性摘录，项目概览、环境、常用命令、CLI、目录边界、实现约定、测试策略、Git 注意事项、Security、Testing、Repository Guidelines 等关键章节会获得更长预算；完整内容仍可按需 `read_file` 读取。这样项目级协作说明仍在稳定前缀中，但不会因为超长文档拖低 cache 复用率。
+
+运行环境默认只注入日期粒度时间和 Git 摘要：`clean` 或 `dirty (N changed files)`；如需完整文件列表，模型应通过工具按需查询。`/cache status` 会显示整体 system/tools hash、稳定前缀比例、每个 prompt pipe 的分段 hash/changed/stability/category 状态、逐工具 schema hash，以及实验性 keepalive 是否开启，用于定位是哪一段或哪一个工具在抖动。clean 工作区和普通多轮会话下，稳定前缀比例目标应保持在 90% 以上；可运行 `pnpm prompt:cache:verify` 在本地构建两次稳定 prompt 并检查 `Q_CODE_CACHE_STABLE_PREFIX_TARGET`。
+
+`Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS` 默认关闭。开启后，q-code 只会在空闲、已有本轮稳定 system prompt、且 `/cache` 模式不是 `off` 时发送极短后台请求，尝试维持供应商侧 cache 热度；小于 60000ms 的配置会自动按 60000ms 执行，并且单次后台请求会在超时、切换模型/会话或退出时取消。这会产生额外模型调用和少量 usage 记录，真实命中率仍受供应商 TTL、模型、tool schema 与 tokenization 影响。
 
 #### 工具成本阶梯
 
@@ -1254,6 +1262,7 @@ src/evals/                    # q-code eval 本地评测框架
 | `pnpm eval:nightly`     | 运行定期 deterministic 回归并生成趋势看板       |
 | `pnpm eval:trend`       | 从历史 eval runs 生成本地趋势看板               |
 | `pnpm eval:compare`     | 对比两个 eval run                              |
+| `pnpm prompt:cache:verify` | 本地验证稳定 system prompt hash 与 90%+ 前缀目标 |
 
 ### 关键覆盖点
 

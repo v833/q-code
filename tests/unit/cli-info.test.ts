@@ -169,6 +169,14 @@ describe('cli info', () => {
     expect(main).toContain("startupTrace.mark('startup-ready')")
   })
 
+  it('keeps prompt cache verification available as an npm script', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf-8')) as {
+      scripts?: Record<string, string>
+    }
+
+    expect(pkg.scripts?.['prompt:cache:verify']).toBe('tsx src/scripts/verify-prompt-cache.ts')
+  })
+
   it('formats version output', () => {
     expect(formatCliVersion('1.2.3')).toBe('q-code 1.2.3')
   })
