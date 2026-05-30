@@ -23,6 +23,10 @@ export interface AsyncAgentEntry {
   abortController: AbortController
   /** JSONL 任务输出文件路径（见 `task-output.ts`）。 */
   outputFile: string
+  /** 原始工作区 cwd，用于恢复 artifact 存储根。 */
+  cwd: string
+  /** 所属主会话 id，用于 artifact/output 归档路径。 */
+  sessionId: string
   isolated: boolean
   worktreePath?: string
   worktreeBranch?: string
@@ -45,6 +49,8 @@ export interface RegisterAsyncAgentInit {
   description: string
   prompt: string
   outputFile: string
+  cwd?: string
+  sessionId?: string
   execution?: AsyncAgentExecution
   isolated?: boolean
   worktreePath?: string
@@ -75,6 +81,8 @@ export function registerAsyncAgent(init: RegisterAsyncAgentInit): AsyncAgentEntr
     execution: init.execution ?? 'background',
     abortController: new AbortController(),
     outputFile: init.outputFile,
+    cwd: init.cwd ?? process.cwd(),
+    sessionId: init.sessionId ?? 'default',
     isolated: init.isolated === true,
     ...(init.worktreePath ? { worktreePath: init.worktreePath } : {}),
     ...(init.worktreeBranch ? { worktreeBranch: init.worktreeBranch } : {}),

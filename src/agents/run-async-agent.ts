@@ -10,6 +10,7 @@ import {
   updateAsyncAgentProgress,
   type AsyncAgentEntry
 } from './async-agent-store'
+import { createBoundedText, createFinalOutputReference } from './final-output-artifact'
 import { enqueuePendingNotification, formatTaskNotification } from './notification-store'
 import { runChildAgent } from './run-agent'
 import { setMemberActive } from './team-helpers'
@@ -67,6 +68,7 @@ export async function runAsyncAgentLifecycle(params: RunAsyncAgentLifecycleParam
   try {
     const result = await runChildAgent({
       agentDefinition: params.agentDefinition,
+      agentId: entry.agentId,
       prompt: params.prompt,
       availableTools: params.availableTools,
       model: params.model,
@@ -84,6 +86,8 @@ export async function runAsyncAgentLifecycle(params: RunAsyncAgentLifecycleParam
       sessionId: params.sessionId,
       hooks: params.hooks,
       ...(params.worktreeInfo ? { cwdOverride: params.worktreeInfo.worktreePath } : {}),
+      artifactCwd: entry.cwd,
+      finalOutputFallbackFile: entry.outputFile,
       ...(params.teammateIdentity ? { teammateIdentity: params.teammateIdentity } : {}),
       abortSignal: entry.abortController.signal,
       quiet: true,
@@ -149,19 +153,20 @@ export async function runAsyncAgentLifecycle(params: RunAsyncAgentLifecycleParam
     const wasKilled =
       getAsyncAgent(entry.agentId)?.status === 'killed' || entry.abortController.signal.aborted
     if (wasKilled) {
+      const error = createBoundedText('Background agent was killed')
       await appendTaskOutput(entry.outputFile, {
         type: 'failed',
-        error: 'Background agent was killed',
+        error: error.text,
         durationMs
       })
-      markAsyncAgentKilled(entry.agentId, durationMs, 'Background agent was killed', worktreeFinal)
+      markAsyncAgentKilled(entry.agentId, durationMs, error.text, worktreeFinal)
       getAuditLogger().emit(
         'subagent.kill',
         {
           agentId: entry.agentId,
           agentType: entry.agentType,
           durationMs,
-          reason: 'Background agent was killed'
+          reason: error.text
         },
         {
           ...(params.sessionId ? { sessionId: params.sessionId } : {}),
@@ -183,7 +188,9 @@ export async function runAsyncAgentLifecycle(params: RunAsyncAgentLifecycleParam
           status: 'killed',
           description: entry.description,
           outputFile: entry.outputFile,
-          error: 'Background agent was killed',
+          error: error.text,
+          errorTruncated: error.truncated,
+          errorOriginalChars: error.originalChars,
           durationMs,
           ...worktreeFinal
         })
@@ -197,6 +204,13 @@ export async function runAsyncAgentLifecycle(params: RunAsyncAgentLifecycleParam
       durationMs,
       totalTokens: result.totalTokens,
       toolUseCount: result.totalToolUseCount
+    })
+    const finalOutput = await createFinalOutputReference({
+      cwd: entry.cwd,
+      sessionId: entry.sessionId,
+      agentId: entry.agentId,
+      finalText: result.finalText,
+      fallbackFile: entry.outputFile
     })
 
     completeAsyncAgent(entry.agentId, result, worktreeFinal)
@@ -229,7 +243,12 @@ export async function runAsyncAgentLifecycle(params: RunAsyncAgentLifecycleParam
         status: 'completed',
         description: entry.description,
         outputFile: entry.outputFile,
-        finalText: result.finalText,
+        finalText: finalOutput.inlineText,
+        resultPreview: finalOutput.inlineText ? undefined : finalOutput.preview,
+        resultTruncated: finalOutput.resultTruncated,
+        originalChars: finalOutput.originalChars,
+        artifactFile: finalOutput.artifactFile,
+        recoveryHint: finalOutput.recoveryHint,
         durationMs,
         totalTokens: result.totalTokens,
         toolUseCount: result.totalToolUseCount,
@@ -238,6 +257,7 @@ export async function runAsyncAgentLifecycle(params: RunAsyncAgentLifecycleParam
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    const boundedError = createBoundedText(message)
     const durationMs = Date.now() - startTime
     const worktreeFinal = await cleanupWorktreeIfClean(params.worktreeInfo)
     const wasKilled =
@@ -245,19 +265,19 @@ export async function runAsyncAgentLifecycle(params: RunAsyncAgentLifecycleParam
 
     await appendTaskOutput(entry.outputFile, {
       type: 'failed',
-      error: message,
+      error: boundedError.text,
       durationMs
     })
 
     if (wasKilled) {
-      markAsyncAgentKilled(entry.agentId, durationMs, message, worktreeFinal)
+      markAsyncAgentKilled(entry.agentId, durationMs, boundedError.text, worktreeFinal)
       getAuditLogger().emit(
         'subagent.kill',
         {
           agentId: entry.agentId,
           agentType: entry.agentType,
           durationMs,
-          reason: message
+          reason: boundedError.text
         },
         {
           ...(params.sessionId ? { sessionId: params.sessionId } : {}),
@@ -265,14 +285,14 @@ export async function runAsyncAgentLifecycle(params: RunAsyncAgentLifecycleParam
         }
       )
     } else {
-      failAsyncAgent(entry.agentId, message, durationMs, worktreeFinal)
+      failAsyncAgent(entry.agentId, boundedError.text, durationMs, worktreeFinal)
       getAuditLogger().emit(
         'subagent.fail',
         {
           agentId: entry.agentId,
           agentType: entry.agentType,
           durationMs,
-          message
+          message: boundedError.text
         },
         {
           ...(params.sessionId ? { sessionId: params.sessionId } : {}),
@@ -289,7 +309,9 @@ export async function runAsyncAgentLifecycle(params: RunAsyncAgentLifecycleParam
         status: wasKilled ? 'killed' : 'failed',
         description: entry.description,
         outputFile: entry.outputFile,
-        error: message,
+        error: boundedError.text,
+        errorTruncated: boundedError.truncated,
+        errorOriginalChars: boundedError.originalChars,
         durationMs,
         ...worktreeFinal
       })

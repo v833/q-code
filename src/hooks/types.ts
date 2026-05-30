@@ -98,6 +98,11 @@ export interface HookSubagentStopEvent extends HookBaseEvent {
   subagent: {
     agentType: string
     finalText?: string
+    finalTextPreview?: string
+    artifactFile?: string
+    originalChars?: number
+    resultTruncated?: boolean
+    recoveryHint?: string
     reason?: string
   }
 }

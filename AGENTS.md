@@ -4,7 +4,7 @@
 
 `q-code` 是一个基于 Vercel AI SDK 的 TypeScript 命令行 Agent 框架。核心能力包括：
 
-- **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、TUI `/agents` SubAgent Monitor（同步与后台 SubAgent，completed 默认隐藏并可清理，忙碌等待期间可用 `Ctrl+A` 查看）、只读同步 SubAgent 动态并行调度、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、项目记忆、Skills、SubAgent、Agent Teams、Worktree 隔离。
+- **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、TUI `/agents` SubAgent Monitor（同步与后台 SubAgent，completed 默认隐藏并可清理，忙碌等待期间可用 `Ctrl+A` 查看）、只读同步 SubAgent 动态并行调度、SubAgent 长 final output artifact/preview 回传、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、项目记忆、Skills、SubAgent、Agent Teams、Worktree 隔离。
 - **工具执行**：文件/搜索工具、可配置超时与 spill 的 Shell 工具（Windows 优先 PowerShell7，缺失时回退 Windows PowerShell 5.1）、后台 Shell job（`f_status` / `f_tail` / `f_kill` / `f_list`）。
 - **集成扩展**：MCP server、Hooks（pre/post tool-use 决策）、Slash 命令注册表、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
 - **可观测性**：NDJSON 审计日志（默认开启）、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警、启动时版本更新说明（对比 `~/.q-code/last-version.json` 与包内 `changelog.json`）。
@@ -83,7 +83,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `src/index.ts`：开发态兼容入口，委托给 `src/cli/bootstrap.ts`。
 - `src/cli/`：薄 CLI 入口（early commands、动态 import、启动 trace）、主交互循环（模式切换、上下文压缩调度和整体编排）与启动预热 ready gate。
 - `src/agent/`：核心 Agent Loop、重试、循环检测、模型等待心跳与单步模型请求超时。
-- `src/agents/`：SubAgent、后台 Agent、Agent Teams、worktree、mailbox、notification-store。
+- `src/agents/`：SubAgent、后台 Agent、Agent Teams、worktree、mailbox、notification-store、final output artifact。
 - `src/context/`：System Prompt 管道、鸭子人格（`duck-persona.ts`，主题鸭通过本轮 transient 用户消息注入，不进 system prompt / 会话历史）、上下文压缩与 offload、Plan Mode 附件/计划文件/意图识别、任务、Todo、记忆、运行环境和项目指令加载。
 - `src/tools/`：内置工具定义、注册表（含审计/Hooks 包装层）、自定义工具目录加载器、文件/搜索/计划/任务/团队/Memory/Skill/GitLab KB/Agent 等工具；`shell-tools.ts` 负责 `f`、后台 shell job、输出 spill、cwd 策略和危险命令/交互保护。
 - `src/mcp/`：MCP 配置、连接、工具适配和注册表。
@@ -131,6 +131,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - Plan Mode 语义入口由 `Q_CODE_PLAN_INTENT=auto|suggest|off` 控制，默认 `auto`。pending plan 的自然语言审批必须先走本地 deterministic fast-path、否定词优先、保守批准；本地 unknown 时可用当前会话模型做短超时 JSON intent judge 兜底（`Q_CODE_PLAN_INTENT_MODEL_TIMEOUT_MS`，默认 3000ms，0 关闭），模型失败、超时或低置信度必须回退 unknown。复杂执行型任务只建议进入 Plan Mode，不得静默强制切换；TUI 可显示确认面板保留原请求，Enter 进入 Plan 后继续，Esc 按普通模式执行，Ctrl+C 取消且不执行；classic readline 只提示并继续当前请求。修改相关逻辑需覆盖 `tests/unit/plan-intent.test.ts`、`tests/unit/terminal.test.ts` 并同步 README、`.env.example`、`AGENTS.md`、`src/config/runtime-config.ts`。
 - Agent Loop 必须保留 AI SDK reasoning part（如 DeepSeek thinking/reasoner 的 `reasoning_content`）并随 assistant 消息回传给后续模型请求；`Q_CODE_MODEL_PROVIDER` / `Q_CODE_THINKING_TYPE` / `Q_CODE_REASONING_EFFORT` 是通用 reasoning 配置，主 Agent、SubAgent、摘要压缩、real-agent eval 与 LLM judge 都应统一接入。OpenAI 官方 provider 通过 `providerOptions.openai.reasoningEffort` 接收；DeepSeek 命中或显式设置 `Q_CODE_MODEL_PROVIDER=deepseek-compatible` 时走官方 `@ai-sdk/openai-compatible` provider 和 `src/runtime/deepseek-compat.ts` 请求体兼容层；`Q_CODE_REASONING_EFFORT=none` 对 DeepSeek 应关闭 thinking，不能回退为高强度推理。DeepSeek V4 Pro thinking + tools 只可静默移除默认 `tool_choice=auto`，显式 `required` 或指定函数必须报清晰错误，避免吞掉调用意图。reasoning 不作为普通 `onText` 文本输出到 TUI。
 - 工具默认通过 `ToolRegistry.toAISDKFormat` 包装，会自动写 `tool.call` / `tool.result` 审计事件；新增工具入口或绕过 registry 时需自行接审计与 Hooks 管线（参考 `src/observability/audit.ts::getAuditLogger`）。
+- SubAgent 最终产物遵循控制面/数据面分离：短 `finalText` 可继续内联；长结果必须通过 `src/agents/final-output-artifact.ts` 写入 `.sessions/projects/<projectKey>/agent-artifacts/<sessionId>/<agentId>.final.md`，同步 `Agent` 工具结果、后台 `<task-notification>` 和 `subagent_stop` Hook 只回传 preview、artifact 路径、原始字符数、截断标记和恢复说明。Hook 兼容策略是短结果保留 `finalText`，长结果改用 `finalTextPreview` / `artifactFile` 等 metadata。失败和 killed 的错误文本也要做长度保护。
 - `@file` mention 默认只能引用当前工作目录内文件，并必须校验 symlink 解析后的真实路径；绝对路径必须显式设置 `Q_CODE_MENTION_ALLOW_ABS=true`，并写 `user.mention` 审计事件。单文件/总附件预算变更需同步 README 和 `src/mentions/file-mentions.ts` 常量。TUI 候选索引缓存写入 `<cwd>/.q-code/file-mention-index.json`，启动可先使用旧缓存并后台刷新；watcher/刷新失败不得阻塞输入，需保留旧索引并显示简短提示。非 git fallback walk 的额外忽略目录通过 `Q_CODE_FILE_INDEX_IGNORE` 配置。
 - 文件工具的读类入口（`read_file` / `list_directory` / `glob` / `grep`）可只读访问用户级 q-code 信任目录：`~/.q-code`、`~/.agents/skills`、`~/.agents/agents`；写入和编辑仍必须限制在当前 `cwd` 内。Windows 下路径比较必须兼容盘符大小写与分隔符差异。不要恢复全局 `Q_CODE_ALLOW_OUTSIDE_CWD` 式开关。
 - Shell 工具默认只能在当前 `cwd` 内执行；跳出目录必须显式设置 `Q_CODE_SHELL_ALLOW_ABS_CWD=true`。长命令优先使用 `timeoutMs` 或 `background=true`，超大输出通过 `<Q_CODE_HOME>/shell-spills` 恢复全文，后台 job 元数据写 `<Q_CODE_HOME>/shell-jobs`。
@@ -166,7 +167,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - 鸭子人格 / system prompt / prompt cache：`vitest run tests/unit/duck-persona.test.ts tests/unit/prompt-builder.test.ts tests/unit/runtime-context.test.ts tests/unit/usage.test.ts tests/unit/agent-md.test.ts`，必要时运行 `pnpm prompt:cache:verify`
   - 崩溃保护：`vitest run tests/unit/crash-guard.test.ts tests/unit/mcp-bootstrap.test.ts tests/unit/audit-logger.test.ts`
   - Infra / GitLab KB：`vitest run tests/unit/infra.test.ts tests/unit/infra-candidate.test.ts tests/unit/gitlab-kb.test.ts`
-  - Agent 工具/SubAgent 参数传递与只读并行调度：`vitest run tests/unit/agent-tools.test.ts tests/integration/audit-trail.test.ts`
+  - Agent 工具/SubAgent 参数传递、final output artifact 与只读并行调度：`vitest run tests/unit/agent-tools.test.ts tests/unit/final-output-artifact.test.ts tests/unit/notification-store.test.ts tests/unit/run-async-agent.test.ts tests/unit/hooks.test.ts tests/integration/audit-trail.test.ts`
   - Eval 框架：`vitest run tests/unit/evals.test.ts tests/unit/cli-info.test.ts`，必要时运行 `pnpm eval:smoke`、`pnpm eval:cli`、`pnpm eval:trend`；Langfuse 连通性可跑 `pnpm eval:smoke:langfuse`
 - 类型、接口或公共工具改动：运行 `pnpm typecheck`。
 - 涉及 Agent Loop、上下文、会话恢复、任务图、团队协作或审计端到端：运行 `pnpm test` 或相关 `tests/integration/**`（含 `agent-loop`、`session-recovery`、`task-graph`、`team-flow`、`audit-trail`）。

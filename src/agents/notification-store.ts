@@ -19,7 +19,14 @@ export interface TaskNotificationParts {
   description?: string
   outputFile: string
   finalText?: string
+  resultPreview?: string
+  resultTruncated?: boolean
+  originalChars?: number
+  artifactFile?: string
+  recoveryHint?: string
   error?: string
+  errorTruncated?: boolean
+  errorOriginalChars?: number
   durationMs?: number
   totalTokens?: number
   toolUseCount?: number
@@ -60,19 +67,35 @@ export function clearPendingNotifications(): void {
  */
 export function formatTaskNotification(parts: TaskNotificationParts): string {
   const lines = ['<task-notification>']
-  lines.push(`  <task_id>${parts.agentId}</task_id>`)
-  lines.push(`  <agent_type>${parts.agentType}</agent_type>`)
+  lines.push(`  <task_id>${escapeXmlText(parts.agentId)}</task_id>`)
+  lines.push(`  <agent_type>${escapeXmlText(parts.agentType)}</agent_type>`)
   lines.push(`  <status>${parts.status}</status>`)
-  if (parts.description) lines.push(`  <description>${parts.description}</description>`)
-  lines.push(`  <output_file>${parts.outputFile}</output_file>`)
+  if (parts.description) lines.push(`  <description>${escapeXmlText(parts.description)}</description>`)
+  lines.push(`  <output_file>${escapeXmlText(parts.outputFile)}</output_file>`)
+  if (parts.artifactFile) lines.push(`  <artifact_file>${escapeXmlText(parts.artifactFile)}</artifact_file>`)
+  if (parts.originalChars !== undefined) lines.push(`  <original_chars>${parts.originalChars}</original_chars>`)
+  if (parts.resultTruncated !== undefined) {
+    lines.push(`  <result_truncated>${parts.resultTruncated}</result_truncated>`)
+  }
+  if (parts.recoveryHint) lines.push(`  <recovery>${escapeXmlText(parts.recoveryHint)}</recovery>`)
 
   if (parts.finalText) {
     lines.push('  <result>')
-    lines.push(parts.finalText)
+    lines.push(escapeXmlText(parts.finalText))
     lines.push('  </result>')
+  } else if (parts.resultPreview) {
+    lines.push('  <result_preview>')
+    lines.push(escapeXmlText(parts.resultPreview))
+    lines.push('  </result_preview>')
   }
 
-  if (parts.error) lines.push(`  <error>${parts.error}</error>`)
+  if (parts.error) lines.push(`  <error>${escapeXmlText(parts.error)}</error>`)
+  if (parts.errorTruncated) {
+    lines.push(`  <error_truncated>true</error_truncated>`)
+    if (parts.errorOriginalChars !== undefined) {
+      lines.push(`  <error_original_chars>${parts.errorOriginalChars}</error_original_chars>`)
+    }
+  }
 
   const usage = [
     parts.totalTokens !== undefined ? `tokens=${parts.totalTokens}` : null,
@@ -82,12 +105,16 @@ export function formatTaskNotification(parts: TaskNotificationParts): string {
   if (usage.length > 0) lines.push(`  <usage>${usage.join(' ')}</usage>`)
 
   if (parts.worktreePath) {
-    lines.push(`  <worktree_path>${parts.worktreePath}</worktree_path>`)
+    lines.push(`  <worktree_path>${escapeXmlText(parts.worktreePath)}</worktree_path>`)
     if (parts.worktreeBranch) {
-      lines.push(`  <worktree_branch>${parts.worktreeBranch}</worktree_branch>`)
+      lines.push(`  <worktree_branch>${escapeXmlText(parts.worktreeBranch)}</worktree_branch>`)
     }
   }
 
   lines.push('</task-notification>')
   return lines.join('\n')
+}
+
+function escapeXmlText(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }

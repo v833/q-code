@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { clearAgents } from '../../src/agents/registry'
+import { runChildAgent } from '../../src/agents/run-agent'
 import {
   DefaultHookRunner,
   createPreToolUseEvent,
@@ -13,13 +15,18 @@ import {
 } from '../../src/hooks'
 import { runCommandHookWithDependencies } from '../../src/hooks/command-runner'
 import type { ShellInvocation } from '../../src/runtime/shell-invocation'
+import { createMockModel } from '../_helpers/mock-model'
 
 const tempDirs: string[] = []
 const originalQCodeHome = process.env.Q_CODE_HOME
+const originalSessionDir = process.env.Q_CODE_SESSION_DIR
 
 afterEach(async () => {
   if (originalQCodeHome === undefined) delete process.env.Q_CODE_HOME
   else process.env.Q_CODE_HOME = originalQCodeHome
+  if (originalSessionDir === undefined) delete process.env.Q_CODE_SESSION_DIR
+  else process.env.Q_CODE_SESSION_DIR = originalSessionDir
+  clearAgents()
   for (const dir of tempDirs.splice(0)) {
     await rm(dir, { recursive: true, force: true })
   }
@@ -121,6 +128,99 @@ describe('DefaultHookRunner', () => {
     const result = await runner.run(preTool('read_file'))
     expect(result.blocked).toBe(false)
     expect(result.warnings[0]).toContain('observer failed')
+  })
+
+  it('subagent_stop sends preview and artifact metadata for long final output', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'q-code-hooks-subagent-'))
+    tempDirs.push(cwd)
+    process.env.Q_CODE_SESSION_DIR = '.sessions'
+    const finalText = `START\n${'Z'.repeat(9000)}\nEND`
+    const { model } = createMockModel([{ text: finalText, finishReason: 'stop' }])
+    let captured: HookEvent | undefined
+    const runner = new DefaultHookRunner([
+      {
+        name: 'capture-subagent-stop',
+        type: 'handler',
+        event: 'subagent_stop',
+        scope: 'runtime',
+        handler: (event) => {
+          captured = event
+          return { action: 'continue' }
+        }
+      }
+    ])
+
+    await runChildAgent({
+      agentDefinition: {
+        agentType: 'Explore',
+        whenToUse: 'test',
+        source: 'built-in',
+        getSystemPrompt: () => 'sys'
+      },
+      agentId: 'agent-1',
+      prompt: 'run',
+      availableTools: [],
+      model,
+      sessionId: 'session-1',
+      cwdOverride: cwd,
+      quiet: true,
+      hooks: runner
+    })
+
+    expect(captured?.event).toBe('subagent_stop')
+    const stop = captured as Extract<HookEvent, { event: 'subagent_stop' }>
+    expect(stop.subagent.finalText).toBeUndefined()
+    expect(stop.subagent.finalTextPreview).toContain('START')
+    expect(stop.subagent.finalTextPreview).toContain('END')
+    expect(stop.subagent.finalTextPreview).not.toContain('Z'.repeat(8000))
+    expect(stop.subagent.resultTruncated).toBe(true)
+    expect(stop.subagent.originalChars).toBe(finalText.length)
+    expect(stop.subagent.artifactFile).toContain('agent-artifacts')
+  })
+
+  it('subagent_stop stores artifacts under artifactCwd when execution cwd differs', async () => {
+    const projectCwd = await mkdtemp(join(tmpdir(), 'q-code-hooks-project-'))
+    const executionCwd = await mkdtemp(join(tmpdir(), 'q-code-hooks-worktree-'))
+    tempDirs.push(projectCwd)
+    tempDirs.push(executionCwd)
+    process.env.Q_CODE_SESSION_DIR = '.sessions'
+    const finalText = `START\n${'Z'.repeat(9000)}\nEND`
+    const { model } = createMockModel([{ text: finalText, finishReason: 'stop' }])
+    let captured: HookEvent | undefined
+    const runner = new DefaultHookRunner([
+      {
+        name: 'capture-subagent-stop',
+        type: 'handler',
+        event: 'subagent_stop',
+        scope: 'runtime',
+        handler: (event) => {
+          captured = event
+          return { action: 'continue' }
+        }
+      }
+    ])
+
+    await runChildAgent({
+      agentDefinition: {
+        agentType: 'Explore',
+        whenToUse: 'test',
+        source: 'built-in',
+        getSystemPrompt: () => 'sys'
+      },
+      agentId: 'agent-1',
+      prompt: 'run',
+      availableTools: [],
+      model,
+      sessionId: 'session-1',
+      cwdOverride: executionCwd,
+      artifactCwd: projectCwd,
+      quiet: true,
+      hooks: runner
+    })
+
+    const stop = captured as Extract<HookEvent, { event: 'subagent_stop' }>
+    expect(stop.subagent.artifactFile).toContain(projectCwd)
+    expect(stop.subagent.artifactFile).not.toContain(executionCwd)
   })
 })
 

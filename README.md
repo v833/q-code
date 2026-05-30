@@ -866,7 +866,7 @@ Skills 用 Markdown 描述可复用工作流，适合代码审查、提交辅助
 
 ### 8. SubAgents 子任务分发
 
-SubAgent 用于把搜索重、上下文噪音大的聚焦任务交给独立子 Agent。子 Agent 从一条全新的 user message 开始，使用经过过滤的工具集运行同一套 Agent Loop，最后只把简洁摘要通过 `Agent` 工具返回给主 Agent。
+SubAgent 用于把搜索重、上下文噪音大的聚焦任务交给独立子 Agent。子 Agent 从一条全新的 user message 开始，使用经过过滤的工具集运行同一套 Agent Loop，最后只把简洁摘要通过 `Agent` 工具返回给主 Agent。短结果会保持内联；长 `finalText` 会写入 artifact 文件，主上下文、后台通知和 `subagent_stop` Hook 只接收 preview、字符数、截断标记和恢复路径。
 
 内置角色：
 
@@ -929,6 +929,7 @@ You are a focused code review sub-agent. Return findings first, then residual ri
 - `Explore` 使用 `readOnlyOnly`，会剔除写文件、shell、任务写入等非只读工具
 - 同步 SubAgent 会按解析后的实际工具集动态调度：只包含 `isReadOnly` 工具时允许并行；包含写入工具或使用 worktree 隔离时仍串行，避免并发改动同一工作区
 - 子 Agent 不继承主对话历史；传给 `Agent.prompt` 的内容必须自包含
+- 长 SubAgent 最终结果不会完整注入主上下文；需要完整内容时按返回的 `artifact_file` 或 `.output` 路径用 `read_file` 恢复
 - 新增或修改自定义 Agent 文件后需要重启 q-code
 
 #### SubAgent Monitor 与 Worktree
@@ -940,6 +941,14 @@ You are a focused code review sub-agent. Return findings first, then residual ri
 ```
 
 常见事件包括 `started`、`text`、`tool_use`、`tool_result`、`turn_usage`、`completed`、`failed`。后台任务完成、失败或被终止后，会进入 pending notification 队列；下一轮用户输入开始前，q-code 会把 `<task-notification>` 注入对话，让主 Agent 继续基于结果工作。
+
+同步和后台 SubAgent 的长最终产物会写入：
+
+```text
+.sessions/projects/<projectKey>/agent-artifacts/<sessionId>/<agentId>.final.md
+```
+
+短结果仍在 `<sub_agent_result>` 或 `<task-notification><result>` 中内联；长结果改为 `<sub_agent_result_preview>` 或 `<result_preview>`，并包含 `artifact_file`、`original_chars`、`result_truncated` 和恢复说明。`subagent_stop` Hook 对短结果继续提供 `finalText`；长结果只提供 `finalTextPreview`、`artifactFile`、`originalChars`、`resultTruncated` 和 `recoveryHint`，避免外部命令或 webhook 被大 payload 撑爆。
 
 在默认 TUI 中输入 `/agents` 会打开交互式 SubAgent Monitor，而不是只打印静态文本。列表视图展示同步/后台 SubAgent 的 ID、执行模式、状态、描述、最近工具、工具次数、token、耗时和 worktree branch；成功完成的 completed SubAgent 默认从终端列表隐藏，失败和终止条目会保留用于排障。按 `Enter` 进入详情后会 tail 对应 `.output` JSONL 并格式化工具调用、文本输出、usage、完成或失败信息。详情视图支持 `↑/↓` 上下滚动、`End` 回到底部，`Esc` 从详情返回列表、再返回主对话；打开/关闭面板不会清空底部输入内容。当前轮次忙碌且存在 running SubAgent 时，底部会提示可按 `Ctrl+A` 打开/关闭 SubAgent Monitor，方便等待输出期间直接查看子 Agent 进度。
 
@@ -1381,6 +1390,9 @@ System Prompt 由 `PromptBuilder` 按管道顺序拼接，每个 Pipe 可根据�
 ├── async-agents/
 │   └── <sessionId>/
 │       └── <agentId>.output   # SubAgent JSONL 进度输出
+├── agent-artifacts/
+│   └── <sessionId>/
+│       └── <agentId>.final.md # SubAgent 长 finalText 完整产物
 ├── plans/
 │   └── <sessionId>.md         # 计划文件
 ├── tasks/

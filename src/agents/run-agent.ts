@@ -28,6 +28,7 @@ import { createMessageSummaryPayload, getAuditLogger } from '../observability/au
 import { observeLangfuseTurn } from '../observability/langfuse'
 import { createToolSearchTool } from '../tools/tool-search-tool'
 import { ToolRegistry, type TeammateIdentity, type ToolDefinition } from '../tools/registry'
+import { createFinalOutputReference } from './final-output-artifact'
 import { resolveAgentTools } from './resolve-agent-tools'
 import { drainUnreadMessages, formatMailboxAttachment } from './teammate-mailbox'
 import type { AgentDefinition, AgentRunResult } from './types'
@@ -38,6 +39,8 @@ export const DEFAULT_AGENT_MAX_TURNS = 30
 /** `runChildAgent` 的输入参数。 */
 export interface RunChildAgentParams {
   agentDefinition: AgentDefinition
+  /** 上层 Agent 工具分配的稳定 id，用于 artifact / hook 元数据。 */
+  agentId?: string
   /** 委托给子 Agent 的任务说明（须自包含，子 Agent 看不到主对话）。 */
   prompt: string
   availableTools: ToolDefinition[]
@@ -58,6 +61,10 @@ export interface RunChildAgentParams {
   modelRequestLabel?: string
   /** 覆盖进程 cwd（worktree 隔离时使用）。 */
   cwdOverride?: string
+  /** 持久化 artifact 的项目 cwd；不传时沿用执行 cwd。 */
+  artifactCwd?: string
+  /** artifact 写入失败时可用于恢复完整结果的 `.output` 文件。 */
+  finalOutputFallbackFile?: string
   abortSignal?: AbortSignal
   sessionId?: string
   hooks?: HookRunner
@@ -248,20 +255,35 @@ export async function runChildAgent(params: RunChildAgentParams): Promise<AgentR
     throw error
   }
 
-  await params.hooks?.run(
-    createHookEvent(
-      { sessionId, cwd, agent: agentContext },
-      {
-        event: 'subagent_stop',
-        subagent: {
-          agentType: params.agentDefinition.agentType,
-          finalText: extractFinalAssistantText(loopResult.messages),
-          reason: 'completed'
+  const finalText = extractFinalAssistantText(loopResult.messages)
+  if (params.hooks) {
+    const hookFinalOutput = await createFinalOutputReference({
+      cwd: params.artifactCwd ?? cwd,
+      sessionId,
+      agentId: params.agentId ?? `hook-${params.agentDefinition.agentType}`,
+      finalText,
+      fallbackFile: params.finalOutputFallbackFile
+    })
+    await params.hooks.run(
+      createHookEvent(
+        { sessionId, cwd, agent: agentContext },
+        {
+          event: 'subagent_stop',
+          subagent: {
+            agentType: params.agentDefinition.agentType,
+            finalText: hookFinalOutput.inlineText,
+            finalTextPreview: hookFinalOutput.inlineText ? undefined : hookFinalOutput.preview,
+            artifactFile: hookFinalOutput.artifactFile,
+            originalChars: hookFinalOutput.originalChars,
+            resultTruncated: hookFinalOutput.resultTruncated,
+            recoveryHint: hookFinalOutput.recoveryHint,
+            reason: 'completed'
+          }
         }
-      }
-    ),
-    { signal: params.abortSignal }
-  )
+      ),
+      { signal: params.abortSignal }
+    )
+  }
   getAuditLogger().emit(
     'subagent.complete',
     {
@@ -282,7 +304,7 @@ export async function runChildAgent(params: RunChildAgentParams): Promise<AgentR
 
   return {
     agentType: params.agentDefinition.agentType,
-    finalText: extractFinalAssistantText(loopResult.messages),
+    finalText,
     messages: loopResult.messages,
     totalToolUseCount,
     totalDurationMs: Date.now() - startTime,

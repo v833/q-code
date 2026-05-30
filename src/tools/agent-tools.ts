@@ -8,6 +8,11 @@ import {
   registerAsyncAgent,
   updateAsyncAgentProgress
 } from '../agents/async-agent-store'
+import {
+  createBoundedText,
+  createFinalOutputReference,
+  type FinalOutputReference
+} from '../agents/final-output-artifact'
 import { findAgent, getAllAgents } from '../agents/registry'
 import { resolveAgentTools } from '../agents/resolve-agent-tools'
 import {
@@ -193,6 +198,8 @@ export function createAgentTool(
             description: input.description,
             prompt: input.prompt,
             outputFile,
+            cwd,
+            sessionId,
             execution: 'background',
             isolated: Boolean(isolationSetup.worktreeInfo),
             ...(isolationSetup.worktreeInfo
@@ -321,6 +328,8 @@ export function createAgentTool(
           description: input.description,
           prompt: input.prompt,
           outputFile: currentOutputFile,
+          cwd,
+          sessionId,
           execution: 'foreground',
           isolated: Boolean(isolationSetup.worktreeInfo),
           ...(isolationSetup.worktreeInfo
@@ -340,6 +349,7 @@ export function createAgentTool(
 
         const result = await runner({
           agentDefinition: definition,
+          agentId,
           prompt: input.prompt,
           availableTools,
           model: controller.createModel(modelName),
@@ -361,6 +371,8 @@ export function createAgentTool(
           ...(isolationSetup.worktreeInfo
             ? { cwdOverride: isolationSetup.worktreeInfo.worktreePath }
             : {}),
+          artifactCwd: cwd,
+          finalOutputFallbackFile: currentOutputFile,
           onProgress: (event) => {
             switch (event.type) {
               case 'text':
@@ -423,6 +435,13 @@ export function createAgentTool(
           totalTokens: result.totalTokens,
           toolUseCount: result.totalToolUseCount
         })
+        const finalOutput = await createFinalOutputReference({
+          cwd,
+          sessionId,
+          agentId,
+          finalText: result.finalText,
+          fallbackFile: currentOutputFile
+        })
         completeAsyncAgent(agentId, result, worktreeFinal)
 
         return formatAgentToolResult({
@@ -430,6 +449,7 @@ export function createAgentTool(
           description: input.description,
           modelName,
           result,
+          finalOutput,
           worktreeFinal,
           isolationWarning: isolationSetup.warning
         })
@@ -449,7 +469,7 @@ export function createAgentTool(
           agentType,
           description: input.description,
           modelName,
-          error: message,
+          error: createBoundedText(message),
           worktreeFinal,
           isolationWarning: isolationSetup.warning
         })
@@ -711,6 +731,7 @@ function formatAgentToolResult(args: {
   description: string
   modelName: string
   result: AgentRunResult
+  finalOutput: FinalOutputReference
   worktreeFinal?: { worktreePath?: string; worktreeBranch?: string }
   isolationWarning?: string
 }): string {
@@ -722,6 +743,10 @@ function formatAgentToolResult(args: {
     `model: ${modelName}`,
     `turns: ${result.turnCount} | tools used: ${result.totalToolUseCount} | duration: ${result.totalDurationMs}ms`,
     `tokens: ${result.totalTokens} (input ${result.inputTokens}, output ${result.outputTokens})`,
+    args.finalOutput.artifactFile ? `artifact_file: ${args.finalOutput.artifactFile}` : '',
+    `original_chars: ${args.finalOutput.originalChars}`,
+    `result_truncated: ${args.finalOutput.resultTruncated}`,
+    args.finalOutput.recoveryHint ? `recovery: ${args.finalOutput.recoveryHint}` : '',
     args.worktreeFinal?.worktreePath
       ? `worktree: ${args.worktreeFinal.worktreePath} (branch: ${args.worktreeFinal.worktreeBranch}) — changes preserved.`
       : '',
@@ -729,17 +754,17 @@ function formatAgentToolResult(args: {
       ? `warnings:\n${warnings.map((warning) => `  - ${warning}`).join('\n')}`
       : ''
   ].filter(Boolean)
+  const tag = args.finalOutput.resultTruncated ? 'sub_agent_result_preview' : 'sub_agent_result'
+  const text = args.finalOutput.inlineText ?? args.finalOutput.preview
 
-  return [lines.join('\n'), '', '<sub_agent_result>', result.finalText, '</sub_agent_result>'].join(
-    '\n'
-  )
+  return [lines.join('\n'), '', `<${tag}>`, escapeXmlText(text), `</${tag}>`].join('\n')
 }
 
 function formatAgentToolFailure(args: {
   agentType: string
   description: string
   modelName: string
-  error: string
+  error: ReturnType<typeof createBoundedText>
   worktreeFinal?: { worktreePath?: string; worktreeBranch?: string }
   isolationWarning?: string
 }): string {
@@ -747,7 +772,8 @@ function formatAgentToolFailure(args: {
     `Sub-agent '${args.agentType}' failed.`,
     `task: ${args.description}`,
     `model: ${args.modelName}`,
-    `error: ${args.error}`,
+    `error: ${args.error.text}`,
+    args.error.truncated ? `error_truncated: true (original_chars=${args.error.originalChars})` : '',
     args.worktreeFinal?.worktreePath
       ? `worktree: ${args.worktreeFinal.worktreePath} (branch: ${args.worktreeFinal.worktreeBranch}) — changes preserved.`
       : '',
@@ -759,6 +785,10 @@ function formatAgentToolFailure(args: {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function escapeXmlText(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 /**
