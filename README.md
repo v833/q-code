@@ -246,6 +246,32 @@ pnpm run continue       # 恢复上次会话
 
 发布产物使用薄入口启动：`help` / `version` 只加载颜色环境、argv 解析和帮助/版本格式化后立即退出；`update`、`audit`、`init`、`eval` 与主交互循环按需动态加载各自模块，避免互相支付依赖成本。主交互路径也只在确认进入 TUI 时动态加载 Ink/React；非 TTY、`--classic` 或 `Q_CODE_TUI=0` 会回退到传统 readline，且不会加载 TUI 运行时。TUI 会先渲染会话和输入界面，再继续完成 Custom Tools、Hooks、Skills、Agents、MCP、runtime context 与项目指令预热；如果用户在预热完成前提交会触发 Agent 或依赖预热状态的命令，ready gate 会显示“正在完成启动预热...”并在能力完整后自动继续。需要观察阶段耗时时，可设置 `Q_CODE_STARTUP_TRACE=true` 或使用 `--debug`，输出形如 `[Startup] bootstrap 12ms` 的阶段计时，不包含 API key、token 或工具输出。
 
+### Hooks
+
+Hooks 用来把安全检查、审计、质量门控和上下文注入从“提示词提醒”变成确定性的生命周期步骤。配置写在 `~/.q-code/settings.json` 或 `<项目>/.q-code/settings.json`，用户级先执行，项目级后执行。
+
+支持事件：`session_start`、`user_prompt_submit`、`pre_tool_use`、`post_tool_use`、`stop`、`session_end`、`subagent_start`、`subagent_stop`。Hook 命令通过 stdin 接收 JSON payload，stdout 可返回 `{ "action": "continue|warn|block|modify" }`；也支持退出码协议：`0` 放行、`2` 阻止、`3` 警告、`4` 要求 stdout 返回 `modify` JSON，其它非零按 `blocking` 配置处理。`user_prompt_submit` 的 prompt 改写会先于 `@file` 展开生效，`stop` 被 block 时本轮会保持 blocked 状态。
+
+最小配置：
+
+```json
+{
+  "hooks": {
+    "pre_tool_use": [
+      {
+        "name": "deny-dangerous-git",
+        "matcher": { "tool": "f" },
+        "command": "node .q-code/hooks/deny-dangerous-git.js",
+        "timeoutMs": 3000,
+        "blocking": true
+      }
+    ]
+  }
+}
+```
+
+完整协议、退出码和示例脚本见 `docs/guide/hooks.md`。
+
 默认在交互式 TTY 中启动 Ink TUI。TUI 将 Agent 输出、工具调用、上下文占用、任务进度、SubAgent 状态和 token 用量统一渲染为事件流，支持 `Ctrl+J` 多行输入、`Ctrl+R` 历史搜索、`Esc` 清空/恢复输入、忙时 `Ctrl+C` 中断当前任务和 Markdown 代码块/列表/表格展示。多工具任务中，Agent 会在关键工具调用前后输出简短的公开进度说明；TUI 会按时间线把这些说明和工具调用交错展示，避免执行过程中只剩工具流水账。Markdown 行内内容会保留语义高亮：`**重点**`、inline code、URL、issue ref、文件路径和 `src/foo.ts:123` 行号会使用不同视觉通道，便于在长回复中快速定位关键信息。代码块使用 24-bit ANSI 主题 palette，TypeScript / TSX、diff 等内容在明暗终端中都保持较高对比；可通过 `Q_CODE_THEME=dark|light|auto` 控制配色，终端无法暴露背景色或 auto 判断不准时建议手动指定 `light` / `dark`，也可使用 `--no-color` / `NO_COLOR=1` 关闭全部颜色。输入区默认通过 `Q_CODE_TUI_CURSOR=auto` 选择光标策略：VSCode/Cursor/Windsurf/Trae/JetBrains 等 IDE 集成终端使用静态 inline 光标，避免 ANSI 光标追帧导致错位、闪烁和软换行抖动；普通终端保留真实 ANSI 光标以继续锚定输入法候选窗。
 
 TUI cursor mode 的 auto 策略由终端能力画像驱动，而不是只看单个产品名。调试时用 `--debug` 可看到类似 `TUI cursor mode: inline (...)` 的选择原因；排障时可临时设置 `Q_CODE_TUI_CURSOR=ansi|inline|off` 强制对比。

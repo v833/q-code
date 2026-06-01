@@ -6,7 +6,7 @@
 
 - **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、TUI `/agents` SubAgent Monitor（同步与后台 SubAgent，completed 默认隐藏并可清理，忙碌等待期间可用 `Ctrl+A` 查看）、只读同步 SubAgent 动态并行调度、SubAgent 长 final output artifact/preview 回传、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、项目记忆、Skills、SubAgent、Agent Teams、Worktree 隔离。
 - **工具执行**：文件/搜索工具、可配置超时与 spill 的 Shell 工具（Windows 优先 PowerShell7，缺失时回退 Windows PowerShell 5.1）、后台 Shell job（`f_status` / `f_tail` / `f_kill` / `f_list`）。
-- **集成扩展**：MCP server、Hooks（pre/post tool-use 决策）、Slash 命令注册表、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
+- **集成扩展**：MCP server、Hooks（生命周期事件、pre/post tool-use 决策、prompt/context 注入、退出码协议）、Slash 命令注册表、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
 - **可观测性**：NDJSON 审计日志（默认开启）、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警、启动时版本更新说明（对比 `~/.q-code/last-version.json` 与包内 `changelog.json`）。
 - **评测**：`q-code eval` 本地优先 Agent 质量平台，覆盖固定任务集、mock/cli/真实模型 runner、LLM judge（opt-in）、工具轨迹、预算/成本、进度、文件副作用、策略安全、JSONL trace、Markdown/JUnit 报告、baseline 对比、趋势看板、定期回归与可选 Langfuse evaluator trace / dataset / scores 导出。
 - **TUI**：基于 Ink 的交互式 TUI（默认）、`--classic` 经典 readline、可经管道/CI 自动降级；主 Agent 默认人格为「小黄鸭」，可用 `/ya` 主动切换到主题鸭「降压鸭」「屁老鸭」。
@@ -93,7 +93,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `src/mcp/`：MCP 配置、连接、工具适配和注册表。
 - `src/skills/`：Skills 加载、预算、条件激活和斜杠命令展开。
 - `src/slash/`：斜杠命令注册表、解析、suggestions、formatHelp（`/help` 输出由此驱动）。
-- `src/hooks/`：Pre/Post tool-use Hooks 的配置加载、matcher、command-runner 与 DefaultHookRunner。
+- `src/hooks/`：生命周期 Hooks 的类型、事件工厂、配置加载、matcher、command-runner 与 DefaultHookRunner；支持 command/handler 两类 Hook、JSON 决策、退出码协议、input/output/prompt/context modify。
 - `src/observability/`：NDJSON 审计日志（`audit.ts`）、可选 Langfuse/OpenTelemetry 导出（`langfuse.ts`，含 Agent step TTFT/吞吐/等待状态 attributes）与 `q-code audit verify|tail` 子命令实现（`audit-cli.ts`）。
 - `src/evals/`：Agent eval 子系统，包含 case loader、mock/cli-subprocess/real-agent runner、trace recorder、deterministic scorers、LLM judge、报告、Langfuse eval trace/dataset/scores 导出、趋势看板与 `q-code eval` CLI。
 - `src/runtime/`：早期 CLI 子命令识别/帮助文案、`init-cli` 交互式配置向导、通用 reasoning 配置与 DeepSeek reasoning 兼容层、Shell 启动参数与 Windows PowerShell fallback、颜色环境 bootstrap、启动耗时 trace、`getPackageVersion`、`runCliUpdate`、启动更新说明（`changelog.ts`）、`installCrashGuard` 与崩溃报告生成。
@@ -148,7 +148,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - Skills 目录支持 `~/.q-code/skills/<name>/SKILL.md`、`~/.agents/skills/<name>/SKILL.md`、`<cwd>/.q-code/skills/<name>/SKILL.md` 与 `<cwd>/.agents/skills/<name>/SKILL.md`；同名优先级为项目级 `.agents/skills` > 项目级 `.q-code/skills` > 用户级 `.agents/skills` > 用户级 `.q-code/skills`。
 - 启动性能路径由 `src/cli/bootstrap.ts` 保持薄入口：`help` / `version` 不得静态加载 Ink/React、AI SDK、MCP SDK、Langfuse 或 eval 主模块；TUI 运行时必须通过动态 import 加载，`--classic` / 非 TTY 不应加载 Ink/React。新增启动阶段可用 `Q_CODE_STARTUP_TRACE=true` 或 `--debug` 输出耗时，输出不得包含密钥、token 或工具结果原文。
 - 新增 Slash 命令通过 `createSlashCommandRegistry` + `command(...)` 注册（见 `src/cli/main.ts::createBuiltinSlashCommands`），并填好 `category`、`aliases`、`usage`，以便 `/help` 输出友好。
-- 新增 Hook 事件类型时同步更新 `src/hooks/events.ts` 与 `src/hooks/types.ts` 的导出，并在 `tests/unit/hooks.test.ts` 加覆盖。
+- Hooks 配置写 `~/.q-code/settings.json` 与 `<cwd>/.q-code/settings.json`，用户级先执行、项目级后执行；command Hook 通过 stdin 接收事件 JSON，stdout 可返回 `continue|warn|block|modify` 决策，也支持退出码 `0` 放行、`2` block、`3` warn、`4` modify。新增 Hook 事件、决策字段或退出码语义时同步更新 `src/hooks/events.ts`、`src/hooks/types.ts`、README、`docs/guide/hooks.md` 与 `tests/unit/hooks.test.ts`，涉及工具结果时同步覆盖 `tests/unit/tool-registry.test.ts`。
 - 新增企业/外部观测相关能力（Infra / GitLab KB / 审计 PII 模式 / Langfuse）必须保持可禁用：环境变量缺省值不能让首次启动失败。Langfuse 默认关闭，且 `Q_CODE_LANGFUSE_RECORD_IO` 默认不得上传 prompt、文件内容、shell 输出或工具结果原文。
 - 崩溃保护默认开启，新增崩溃处理逻辑必须避免依赖 Ink 输出；用户提示走裸 `stderr.write`，报告默认写 `<Q_CODE_HOME>/crashes`，测试里使用 `register: false` 和 mock `exit`。
 - TypeScript 严格模式 + `moduleResolution: bundler` + `target: ES2022`；优先使用 `import type`、避免 `any`，公共边界用具名 interface。
@@ -158,7 +158,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 
 - 小型纯逻辑改动：至少运行 `pnpm test:unit`，必要时指定相关测试文件，例如：
   - 审计日志改动：`vitest run tests/unit/audit-logger.test.ts tests/integration/audit-trail.test.ts`
-  - Hooks 改动：`vitest run tests/unit/hooks.test.ts`
+  - Hooks 改动：`vitest run tests/unit/hooks.test.ts tests/unit/tool-registry.test.ts`
   - Slash 改动：`vitest run tests/unit/slash.test.ts`
   - Tool registry 改动：`vitest run tests/unit/tool-registry.test.ts`
   - 文件/读写工具改动：`vitest run tests/unit/file-tools.test.ts tests/unit/tool-registry.test.ts`

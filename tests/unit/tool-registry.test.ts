@@ -272,6 +272,25 @@ describe('ToolRegistry 工具注册表与并发控制', () => {
       expect(result).toContain('policy denied')
     })
 
+    it('post_tool_use hook 可以改写工具输出', async () => {
+      const registry = new ToolRegistry({ cwd: '/tmp', quiet: true })
+      registry.register(makeMockTool('probe', () => 'raw output'))
+      const hooks = new DefaultHookRunner([
+        {
+          name: 'rewrite-output',
+          type: 'handler',
+          event: 'post_tool_use',
+          scope: 'runtime',
+          handler: () => ({ action: 'modify', output: 'rewritten output' })
+        }
+      ])
+
+      const tools = registry.toAISDKFormat({ sessionId: 's1', hooks })
+      const result = await tools.probe.execute({}, { toolCallId: 'tc1', messages: [] })
+
+      expect(result).toBe('rewritten output')
+    })
+
     it('默认把结构化工具错误渲染为兼容文本', async () => {
       const registry = new ToolRegistry({ cwd: '/tmp', quiet: true })
       registry.register(makeMockTool('danger', () => errorToolResult('policy denied', { code: 'denied' })))

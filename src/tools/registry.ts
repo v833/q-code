@@ -443,7 +443,7 @@ export class ToolRegistry {
                 : {}),
               ...(context.teammateIdentity ? { teammateIdentity: context.teammateIdentity } : {})
             }
-            const raw = await executeFn(effectiveInput, toolContext)
+            let raw = await executeFn(effectiveInput, toolContext)
             if (context.hooks && context.sessionId) {
               const post = await context.hooks.run(
                 createPostToolUseEvent(
@@ -481,6 +481,9 @@ export class ToolRegistry {
                   auditCtx
                 )
                 return formatToolResult(blocked, maxChars, options)
+              }
+              if (post.output !== undefined) {
+                raw = post.output
               }
             }
             const envelope = normalizeToolResult(raw)

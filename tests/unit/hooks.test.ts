@@ -111,6 +111,44 @@ describe('DefaultHookRunner', () => {
     expect(result.input).toEqual({ value: 'rewritten' })
   })
 
+  it('allows user_prompt_submit hooks to rewrite prompt and append context', async () => {
+    const runner = new DefaultHookRunner([
+      {
+        name: 'inject',
+        type: 'handler',
+        event: 'user_prompt_submit',
+        scope: 'runtime',
+        handler: () => ({
+          action: 'modify',
+          prompt: 'rewritten prompt',
+          appendContext: 'git: dirty',
+          message: 'context injected'
+        })
+      },
+      {
+        name: 'append-more',
+        type: 'handler',
+        event: 'user_prompt_submit',
+        scope: 'runtime',
+        handler: () => ({ action: 'modify', appendContext: 'branch: main' })
+      }
+    ])
+
+    const result = await runner.run({
+      event: 'user_prompt_submit',
+      sessionId: 's1',
+      cwd: process.cwd(),
+      timestamp: new Date().toISOString(),
+      agent: { kind: 'main' },
+      prompt: 'raw prompt'
+    })
+
+    expect(result.blocked).toBe(false)
+    expect(result.prompt).toBe('rewritten prompt')
+    expect(result.appendContext).toBe('git: dirty\n\nbranch: main')
+    expect(result.warnings).toContain('context injected')
+  })
+
   it('treats non-blocking hook errors as warnings', async () => {
     const runner = new DefaultHookRunner([
       {
@@ -327,6 +365,94 @@ describe('command hook shell fallback', () => {
 
     expect(spawnMock).toHaveBeenCalledTimes(1)
     expect(firstSpawnCommand(spawnMock)).toBe('pwsh')
+  })
+
+  it('maps exit code 2 to block decision', async () => {
+    const result = await runCommandHookWithDependencies(
+      commandHook('hook-command'),
+      preTool('f'),
+      {},
+      {
+        spawn: () =>
+          createHookSpawnStub({
+            stderr: 'dangerous command',
+            closeCode: 2
+          }),
+        resolveShell: () => shells
+      }
+    )
+
+    expect(result).toEqual({ action: 'block', reason: 'dangerous command' })
+  })
+
+  it('maps exit code 3 to warn decision', async () => {
+    const result = await runCommandHookWithDependencies(
+      commandHook('hook-command'),
+      preTool('f'),
+      {},
+      {
+        spawn: () =>
+          createHookSpawnStub({
+            stdout: 'audit only',
+            closeCode: 3
+          }),
+        resolveShell: () => shells
+      }
+    )
+
+    expect(result).toEqual({ action: 'warn', message: 'audit only' })
+  })
+
+  it('requires exit code 4 stdout to be a modify decision', async () => {
+    const result = await runCommandHookWithDependencies(
+      commandHook('hook-command'),
+      preTool('f'),
+      {},
+      {
+        spawn: () =>
+          createHookSpawnStub({
+            stdout: '{"action":"modify","input":{"command":"pnpm test:unit"}}',
+            closeCode: 4
+          }),
+        resolveShell: () => shells
+      }
+    )
+
+    expect(result).toEqual({ action: 'modify', input: { command: 'pnpm test:unit' } })
+  })
+
+  it('rejects malformed command hook decisions', async () => {
+    await expect(
+      runCommandHookWithDependencies(commandHook('hook-command'), preTool('f'), {}, {
+        spawn: () =>
+          createHookSpawnStub({
+            stdout: '{"action":"warn"}'
+          }),
+        resolveShell: () => shells
+      })
+    ).rejects.toThrow("hook stdout 'message' must be a string for warn")
+
+    await expect(
+      runCommandHookWithDependencies(commandHook('hook-command'), preTool('f'), {}, {
+        spawn: () =>
+          createHookSpawnStub({
+            stdout: '{"action":"modify","prompt":123}'
+          }),
+        resolveShell: () => shells
+      })
+    ).rejects.toThrow("hook stdout 'prompt' must be a string for modify")
+  })
+
+  it('fails command hooks that exceed the output buffer', async () => {
+    await expect(
+      runCommandHookWithDependencies(commandHook('hook-command'), preTool('f'), {}, {
+        spawn: () =>
+          createHookSpawnStub({
+            stdout: 'x'.repeat(300_000)
+          }),
+        resolveShell: () => shells
+      })
+    ).rejects.toThrow("hook 'command-hook' exceeded output buffer")
   })
 
   it('does not include the hook command text when shell spawning fails', async () => {

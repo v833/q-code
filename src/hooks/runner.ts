@@ -51,6 +51,8 @@ export class DefaultHookRunner implements HookRunner {
     const warnings: string[] = []
     let nextInput: unknown = 'tool' in event ? event.tool.input : undefined
     let nextOutput: unknown = event.event === 'post_tool_use' ? event.tool.output : undefined
+    let nextPrompt: string | undefined = event.event === 'user_prompt_submit' ? event.prompt : undefined
+    let appendedContext: string | undefined
 
     for (const definition of this.definitions) {
       const matched = matchesHook(definition, event)
@@ -103,6 +105,8 @@ export class DefaultHookRunner implements HookRunner {
             reason: result.reason,
             input: nextInput,
             output: nextOutput,
+            prompt: nextPrompt,
+            appendContext: appendedContext,
             warnings,
             records
           }
@@ -110,6 +114,10 @@ export class DefaultHookRunner implements HookRunner {
         if (result.action === 'modify') {
           if ('input' in result) nextInput = result.input
           if ('output' in result) nextOutput = result.output
+          if ('prompt' in result) nextPrompt = result.prompt
+          if ('appendContext' in result) {
+            appendedContext = appendHookContext(appendedContext, result.appendContext)
+          }
           if (result.message) warnings.push(result.message)
         }
       } catch (error) {
@@ -148,6 +156,8 @@ export class DefaultHookRunner implements HookRunner {
           reason: `[hook:${definition.name}] ${message}`,
           input: nextInput,
           output: nextOutput,
+          prompt: nextPrompt,
+          appendContext: appendedContext,
           warnings,
           records
         }
@@ -158,6 +168,8 @@ export class DefaultHookRunner implements HookRunner {
       blocked: false,
       input: nextInput,
       output: nextOutput,
+      prompt: nextPrompt,
+      appendContext: appendedContext,
       warnings,
       records
     }
@@ -178,4 +190,10 @@ async function executeDefinition(
 function normalizeResult(result: HookHandlerResult | void): HookHandlerResult {
   if (!result) return CONTINUE
   return result
+}
+
+function appendHookContext(existing: string | undefined, next: string | undefined): string | undefined {
+  if (!next) return existing
+  if (!existing) return next
+  return `${existing}\n\n${next}`
 }

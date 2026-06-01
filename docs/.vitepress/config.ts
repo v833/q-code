@@ -24,7 +24,8 @@ export default defineConfig({
         items: [
           { text: '快速开始', link: '/guide/getting-started' },
           { text: '配置', link: '/guide/configuration' },
-          { text: '命令行与 TUI', link: '/guide/cli-and-tui' }
+          { text: '命令行与 TUI', link: '/guide/cli-and-tui' },
+          { text: 'Hooks', link: '/guide/hooks' }
         ]
       },
       {

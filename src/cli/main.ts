@@ -1458,6 +1458,22 @@ export async function runMain(options: {
     ];
   }
 
+  function getHookContextTransientMessages(appendContext: string | undefined): ModelMessage[] {
+    if (!appendContext?.trim()) return [];
+    return [
+      {
+        role: 'user',
+        content: [
+          '[q_code_hook_context]',
+          '',
+          '以下内容由 user_prompt_submit Hook 为本轮请求追加。它不是新的用户需求；请在满足用户请求时按需参考。',
+          '',
+          appendContext,
+        ].join('\n'),
+      },
+    ];
+  }
+
   function formatTransientSection(title: string, text: string | null | undefined): string | null {
     if (!text?.trim()) return null;
     return `## ${title}\n${text}`;
@@ -1804,7 +1820,17 @@ export async function runMain(options: {
         const skillExpansion = expandSkillSlashCommand(trimmed, sessionId);
         if (skillExpansion) {
           print(`\n  [Skill] /${skillExpansion.skill.name}`);
-          await runAgentTurnWithMessages(skillExpansion.messages, trimmed);
+          const promptHook = await runUserPromptSubmitHook(trimmed);
+          if (promptHook.blocked) return;
+          if (typeof promptHook.prompt === 'string' && promptHook.prompt !== trimmed) {
+            await runExpandedAgentTurn(promptHook.prompt, promptHook.appendContext);
+            return;
+          }
+          await runAgentTurnWithMessages(
+            skillExpansion.messages,
+            trimmed,
+            promptHook.appendContext,
+          );
           return;
         }
 
@@ -1849,6 +1875,17 @@ export async function runMain(options: {
   }
 
   async function runAgentTurn(userContent: string): Promise<void> {
+    const promptHook = await runUserPromptSubmitHook(userContent);
+    if (promptHook.blocked) return;
+    const effectiveUserContent =
+      typeof promptHook.prompt === 'string' ? promptHook.prompt : userContent;
+    await runExpandedAgentTurn(effectiveUserContent, promptHook.appendContext);
+  }
+
+  async function runExpandedAgentTurn(
+    userContent: string,
+    hookAppendContext?: string,
+  ): Promise<void> {
     const mentionExpansion = expandFileMentions(userContent, {
       cwd: activeStore.cwd,
     });
@@ -1885,7 +1922,7 @@ export async function runMain(options: {
       role: 'user',
       content: mentionExpansion.prompt,
     };
-    await runAgentTurnWithMessages([userMsg], userContent);
+    await runAgentTurnWithMessages([userMsg], userContent, hookAppendContext);
   }
 
   async function handlePendingPlanInput(input: string): Promise<boolean> {
@@ -2106,31 +2143,11 @@ export async function runMain(options: {
   async function runAgentTurnWithMessages(
     userMessages: ModelMessage[],
     userQuery: string,
+    hookAppendContext?: string,
   ): Promise<void> {
     await waitForStartupReady();
     injectPendingTaskNotifications();
     await injectPlanModeMessages();
-
-    const promptHook = await hooks.run(
-      createHookEvent(
-        { sessionId, cwd: activeStore.cwd },
-        {
-          event: 'user_prompt_submit',
-          prompt: userQuery,
-        },
-      ),
-    );
-    getAuditLogger().emit('user.prompt', createUserPromptPayload(userQuery), {
-      sessionId,
-      cwd: activeStore.cwd,
-      agent: { kind: 'main' },
-    });
-    reportHookWarnings(promptHook.warnings);
-    if (promptHook.blocked) {
-      print(`\n  [Hooks] 输入已被阻止: ${promptHook.reason ?? '未提供原因'}`);
-      setStatus('Ready');
-      return;
-    }
 
     messages.push(...userMessages);
     activeStore.appendAll(userMessages);
@@ -2164,6 +2181,7 @@ export async function runMain(options: {
     activeTurnInFlight = true;
     const turnTransientMessages = [
       ...turnPrompt.transientMessages,
+      ...getHookContextTransientMessages(hookAppendContext),
       ...getDuckPersonaTransientMessages(),
     ];
     try {
@@ -2338,7 +2356,7 @@ export async function runMain(options: {
       );
       messages = postTurn.messages;
       if (postTurn.stopReason) print(fmtStop(postTurn.stopReason));
-      await emitHook(
+      const stopHook = await emitHook(
         createHookEvent(
           { sessionId, cwd: activeStore.cwd },
           {
@@ -2347,6 +2365,10 @@ export async function runMain(options: {
           },
         ),
       );
+      if (stopHook.blocked) {
+        setStatus('Blocked by hook', 'error');
+        return;
+      }
       if (pendingPlanApproval) await printPlanApprovalHint();
       setStatus('Ready');
     } finally {
@@ -2357,9 +2379,45 @@ export async function runMain(options: {
     }
   }
 
+  async function runUserPromptSubmitHook(userQuery: string): Promise<{
+    blocked: boolean;
+    reason?: string;
+    prompt?: string;
+    appendContext?: string;
+  }> {
+    const promptHook = await hooks.run(
+      createHookEvent(
+        { sessionId, cwd: activeStore.cwd },
+        {
+          event: 'user_prompt_submit',
+          prompt: userQuery,
+        },
+      ),
+    );
+    getAuditLogger().emit('user.prompt', createUserPromptPayload(userQuery), {
+      sessionId,
+      cwd: activeStore.cwd,
+      agent: { kind: 'main' },
+    });
+    reportHookWarnings(promptHook.warnings);
+    if (promptHook.blocked) {
+      print(`\n  [Hooks] 输入已被阻止: ${promptHook.reason ?? '未提供原因'}`);
+      setStatus('Ready');
+      return {
+        blocked: true,
+        ...(promptHook.reason ? { reason: promptHook.reason } : {}),
+      };
+    }
+    return {
+      blocked: false,
+      ...(typeof promptHook.prompt === 'string' ? { prompt: promptHook.prompt } : {}),
+      ...(promptHook.appendContext ? { appendContext: promptHook.appendContext } : {}),
+    };
+  }
+
   async function emitHook(
     event: Parameters<HookRunner['run']>[0],
-  ): Promise<void> {
+  ): Promise<Awaited<ReturnType<HookRunner['run']>>> {
     const result = await hooks.run(event);
     reportHookWarnings(result.warnings);
     if (result.blocked) {
@@ -2367,6 +2425,7 @@ export async function runMain(options: {
         `\n  [Hooks] ${event.event} 被阻止: ${result.reason ?? '未提供原因'}`,
       );
     }
+    return result;
   }
 
   function reportHookWarnings(warnings: string[]): void {

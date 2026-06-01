@@ -131,7 +131,14 @@ export type HookDecision =
   | { action: 'continue' }
   | { action: 'warn'; message: string }
   | { action: 'block'; reason: string }
-  | { action: 'modify'; input?: unknown; output?: unknown; message?: string }
+  | {
+      action: 'modify'
+      input?: unknown
+      output?: unknown
+      prompt?: string
+      appendContext?: string
+      message?: string
+    }
 
 /** Hook 处理器返回值，可附带 metadata。 */
 export type HookHandlerResult = HookDecision & {
@@ -196,6 +203,8 @@ export interface HookRunResult {
   reason?: string
   input?: unknown
   output?: unknown
+  prompt?: string
+  appendContext?: string
   warnings: string[]
   records: HookExecutionRecord[]
 }

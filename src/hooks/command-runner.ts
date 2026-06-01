@@ -11,6 +11,7 @@ import {
 import type { HookCommandDefinition, HookEvent, HookHandlerResult } from './types'
 
 const DEFAULT_TIMEOUT_MS = 5000
+const HOOK_MAX_BUFFER = 256 * 1024
 
 type HookSpawn = (
   command: string,
@@ -134,6 +135,7 @@ function runHookWithShellCandidates(
       let stdout = ''
       let stderr = ''
       let attemptClosed = false
+      let killedByMaxBuffer = false
 
       const closeAttempt = (): boolean => {
         if (attemptClosed || settled) return false
@@ -144,10 +146,20 @@ function runHookWithShellCandidates(
       child.stdout.setEncoding('utf-8')
       child.stderr.setEncoding('utf-8')
       child.stdout.on('data', (chunk) => {
-        stdout += chunk
+        if (killedByMaxBuffer) return
+        stdout += String(chunk)
+        if (stdout.length + stderr.length > HOOK_MAX_BUFFER) {
+          killedByMaxBuffer = true
+          timeoutController.abort()
+        }
       })
       child.stderr.on('data', (chunk) => {
-        stderr += chunk
+        if (killedByMaxBuffer) return
+        stderr += String(chunk)
+        if (stdout.length + stderr.length > HOOK_MAX_BUFFER) {
+          killedByMaxBuffer = true
+          timeoutController.abort()
+        }
       })
       child.on('error', (error: Error) => {
         if (!closeAttempt()) return
@@ -162,18 +174,15 @@ function runHookWithShellCandidates(
       })
       child.on('close', (code: number | null) => {
         if (!closeAttempt()) return
-        if (code !== 0) {
+        if (killedByMaxBuffer) {
           settle(() =>
-            reject(
-              new Error(
-                `hook '${definition.name}' exited with ${code}: ${stderr.trim() || stdout.trim()}`
-              )
-            )
+            reject(new Error(`hook '${definition.name}' exceeded output buffer ${HOOK_MAX_BUFFER} bytes`))
           )
           return
         }
         try {
-          settle(() => resolve(parseHookStdout(stdout)))
+          const result = parseHookExit(definition, code, stdout, stderr)
+          settle(() => resolve(result))
         } catch (error) {
           settle(() => reject(error))
         }
@@ -202,6 +211,26 @@ function resolveHookShellInvocations(command: string): ShellInvocation[] {
   return shellResolution.candidates.slice(Math.max(0, selectedIndex))
 }
 
+function parseHookExit(
+  definition: HookCommandDefinition,
+  code: number | null,
+  stdout: string,
+  stderr: string
+): HookHandlerResult | void {
+  const exitCode = code ?? 1
+  if (exitCode === 0) return parseHookStdout(stdout)
+  if (exitCode === 2) return { action: 'block', reason: hookTextReason(stdout, stderr) }
+  if (exitCode === 3) return { action: 'warn', message: hookTextReason(stdout, stderr) }
+  if (exitCode === 4) {
+    const parsed = parseHookStdout(stdout)
+    if (!parsed || parsed.action !== 'modify') {
+      throw new Error(`hook '${definition.name}' exited with 4 but stdout is not a modify decision`)
+    }
+    return parsed
+  }
+  throw new Error(`hook '${definition.name}' exited with ${exitCode}: ${hookTextReason(stdout, stderr)}`)
+}
+
 function parseHookStdout(stdout: string): HookHandlerResult | void {
   const text = stdout.trim()
   if (!text) return undefined
@@ -211,7 +240,59 @@ function parseHookStdout(stdout: string): HookHandlerResult | void {
   if (action !== 'continue' && action !== 'warn' && action !== 'block' && action !== 'modify') {
     throw new Error("hook stdout 'action' must be continue, warn, block, or modify")
   }
-  return parsed as HookHandlerResult
+  return validateHookDecision(parsed)
+}
+
+function hookTextReason(stdout: string, stderr: string): string {
+  return stderr.trim() || stdout.trim() || '未提供原因'
+}
+
+function validateHookDecision(parsed: Record<string, unknown>): HookHandlerResult {
+  if (parsed.action === 'continue') return { action: 'continue' }
+  if (parsed.action === 'warn') {
+    if (typeof parsed.message !== 'string') {
+      throw new Error("hook stdout 'message' must be a string for warn")
+    }
+    return {
+      action: 'warn',
+      message: parsed.message,
+      ...(isRecord(parsed.metadata) ? { metadata: parsed.metadata } : {})
+    }
+  }
+  if (parsed.action === 'block') {
+    if (typeof parsed.reason !== 'string') {
+      throw new Error("hook stdout 'reason' must be a string for block")
+    }
+    return {
+      action: 'block',
+      reason: parsed.reason,
+      ...(isRecord(parsed.metadata) ? { metadata: parsed.metadata } : {})
+    }
+  }
+
+  const result: HookHandlerResult = { action: 'modify' }
+  if ('input' in parsed) result.input = parsed.input
+  if ('output' in parsed) result.output = parsed.output
+  if ('prompt' in parsed) {
+    if (typeof parsed.prompt !== 'string') {
+      throw new Error("hook stdout 'prompt' must be a string for modify")
+    }
+    result.prompt = parsed.prompt
+  }
+  if ('appendContext' in parsed) {
+    if (typeof parsed.appendContext !== 'string') {
+      throw new Error("hook stdout 'appendContext' must be a string for modify")
+    }
+    result.appendContext = parsed.appendContext
+  }
+  if ('message' in parsed) {
+    if (typeof parsed.message !== 'string') {
+      throw new Error("hook stdout 'message' must be a string for modify")
+    }
+    result.message = parsed.message
+  }
+  if (isRecord(parsed.metadata)) result.metadata = parsed.metadata
+  return result
 }
 
 function mergeAbortSignals(
