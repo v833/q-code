@@ -81,6 +81,7 @@ import {
   type SessionSearchMatch,
   type SessionSummary,
 } from '../session/store';
+import { createSessionModelBoundaryNotice } from '../session/model-boundary';
 import { microcompact, summarize } from '../context/compressor';
 import {
   injectOffloadManifest,
@@ -662,6 +663,7 @@ export async function runMain(options: {
   let statusDetailsVisible = false;
   let defaultModelName: string | undefined;
   let sessionModelOverride: string | undefined;
+  const shownSessionModelBoundaryNotices = new Set<string>();
   const currentModelName = (): string => {
     if (!defaultModelName) throw new Error('Model has not been initialized');
     return sessionModelOverride ?? defaultModelName;
@@ -731,7 +733,9 @@ export async function runMain(options: {
     return inputHistoryStore;
   };
   let messages: ModelMessage[] = [];
-  if (initialStore && isContinue && activeStore.exists()) {
+  const shouldRestoreInitialSession =
+    initialStore !== undefined && activeStore.exists() && (isContinue || requestedSessionId !== undefined);
+  if (initialStore && shouldRestoreInitialSession) {
     messages = activeStore.load();
     const restored = activeStore.getSummary();
     if (!dumpSystemPrompt) {
@@ -750,6 +754,9 @@ export async function runMain(options: {
   let summary = '';
   const compactionBreaker = new CompactionCircuitBreaker();
   defaultModelName = getRequiredEnv('OPENAI_MODEL');
+  if (initialStore && shouldRestoreInitialSession && !dumpSystemPrompt) {
+    maybePrintSessionModelBoundaryNotice(activeStore.getSummary());
+  }
   let latestTotalUsage: TokenUsage | undefined;
   let usageTracker = new UsageTracker();
   if (initialStore) {
@@ -800,6 +807,22 @@ export async function runMain(options: {
 
   function emitSessionInfoIfReady(): void {
     if (canEmitSessionInfo) emitSessionInfo();
+  }
+
+  function maybePrintSessionModelBoundaryNotice(session: SessionSummary): void {
+    const notice = createSessionModelBoundaryNotice({
+      historicalModel: session.model,
+      currentModel: currentModelName()
+    });
+    if (!notice) return;
+    if (shownSessionModelBoundaryNotices.has(session.sessionId)) return;
+    shownSessionModelBoundaryNotices.add(session.sessionId);
+    print(
+      [
+        '',
+        ...notice.text.split('\n').map((line) => `  [Session] ${line}`)
+      ].join('\n')
+    );
   }
 
   function stopCacheKeepalive(): void {
@@ -2900,6 +2923,7 @@ export async function runMain(options: {
     registry.setCwd(nextStore.cwd);
     if (options.clearTranscript) emitTerminal({ type: 'clear' });
     emitSessionInfo();
+    maybePrintSessionModelBoundaryNotice(nextStore.getSummary());
     void emitTaskProgress();
     getAuditLogger().emit(
       'session.switch',

@@ -1,5 +1,9 @@
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { createServer, type Server } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { SessionStore } from '../../src/session/store'
 import { setupTempHome, type TempHome } from '../_helpers/temp-home'
 
@@ -183,3 +187,242 @@ describe('SessionStore JSONL 损坏与恢复', () => {
     expect(reopened.getLatestCacheMode()).toBe('on')
   })
 })
+
+describe('CLI session model boundary', () => {
+  it('restores --session history while sending the current runtime model', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'q-code-session-model-boundary-'))
+    const cwd = join(root, 'project')
+    const home = join(root, 'home')
+    const qcodeHome = join(root, 'qcode-home')
+    const sessionDir = join(root, 'sessions')
+    mkdirSync(cwd, { recursive: true })
+    mkdirSync(home, { recursive: true })
+    mkdirSync(qcodeHome, { recursive: true })
+    const cliCwd = realpathSync(cwd)
+
+    const seeded = new SessionStore({ cwd: cliCwd, sessionDir, sessionId: 'old-session' })
+    seeded.append({ role: 'user', content: 'old prompt' })
+    seeded.appendUsageV2(
+      {
+        timestamp: '2026-06-01T00:00:00.000Z',
+        model: 'old-model',
+        cacheMode: 'auto',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 15
+        },
+        pricingModel: 'old-model',
+        cost: { cost: 0, baselineCost: 0, savedCost: 0 }
+      },
+      {
+        steps: 1,
+        cacheMode: 'auto',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 15
+        },
+        cost: { cost: 0, baselineCost: 0, savedCost: 0 },
+        unknownCostSteps: 0,
+        cacheHitRate: 0
+      }
+    )
+
+    const serverState: { models: string[]; prompts: string[] } = { models: [], prompts: [] }
+    const server = await startMockOpenAiServer(serverState)
+
+    try {
+      const child = spawn(
+        process.execPath,
+        [
+          join(process.cwd(), 'node_modules/tsx/dist/cli.mjs'),
+          join(process.cwd(), 'src/index.ts'),
+          '--classic',
+          '--session',
+          'old-session'
+        ],
+        {
+          cwd: cliCwd,
+          env: {
+            ...baseCliEnv({ home, qcodeHome }),
+            OPENAI_BASE_URL: server.baseUrl,
+            OPENAI_MODEL: 'new-model',
+            SUMMARY_BASE_URL: server.baseUrl,
+            SUMMARY_MODEL: 'summary-model',
+            Q_CODE_SESSION_DIR: sessionDir
+          },
+          stdio: ['pipe', 'pipe', 'pipe'],
+          shell: process.platform === 'win32'
+        }
+      )
+      const output = collectOutput(child)
+
+      await waitForOutput(output, 'You:')
+      let promptCount = countPromptOccurrences(output)
+      child.stdin.write('new prompt\n')
+      await waitForOutput(output, 'ok')
+      promptCount = await waitForNextPrompt(output, promptCount)
+      child.stdin.write('exit\n')
+      await waitForExit(child, output)
+
+      expect(output.text).toContain('恢复会话 "old-session"')
+      expect(output.text).toContain('历史模型: old-model')
+      expect(output.text).toContain('当前模型: new-model')
+      expect(serverState.models).toContain('new-model')
+      expect(serverState.models).not.toContain('old-model')
+      expect(serverState.prompts.join('\n')).toContain('old prompt')
+      expect(serverState.prompts.join('\n')).toContain('new prompt')
+      expect(new SessionStore({ cwd: cliCwd, sessionDir, sessionId: 'old-session' }).getSummary().model).toBe(
+        'old-model'
+      )
+    } finally {
+      await closeServer(server.server)
+      rmSync(root, { recursive: true, force: true })
+    }
+  }, 30000)
+})
+
+function collectOutput(child: ChildProcessWithoutNullStreams): { text: string } {
+  const output = { text: '' }
+  child.stdout.setEncoding('utf-8')
+  child.stderr.setEncoding('utf-8')
+  child.stdout.on('data', (chunk) => {
+    output.text += String(chunk)
+  })
+  child.stderr.on('data', (chunk) => {
+    output.text += String(chunk)
+  })
+  return output
+}
+
+async function waitForOutput(output: { text: string }, needle: string, timeoutMs = 10000): Promise<void> {
+  const started = Date.now()
+  while (!output.text.includes(needle)) {
+    if (Date.now() - started > timeoutMs) {
+      throw new Error(`Timed out waiting for ${JSON.stringify(needle)}.\nOutput:\n${output.text}`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+}
+
+async function waitForNextPrompt(
+  output: { text: string },
+  previousCount: number,
+  timeoutMs = 10000
+): Promise<number> {
+  const started = Date.now()
+  while (countPromptOccurrences(output) <= previousCount) {
+    if (Date.now() - started > timeoutMs) {
+      throw new Error(`Timed out waiting for next prompt.\nOutput:\n${output.text}`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  return countPromptOccurrences(output)
+}
+
+function countPromptOccurrences(output: { text: string }): number {
+  return output.text.match(/\nYou: /g)?.length ?? 0
+}
+
+async function waitForExit(
+  child: ChildProcessWithoutNullStreams,
+  output: { text: string },
+  timeoutMs = 20000
+): Promise<void> {
+  if (child.exitCode !== null) return
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM')
+      reject(new Error(`Timed out waiting for q-code process to exit.\nOutput:\n${output.text}`))
+    }, timeoutMs)
+    child.once('exit', (code) => {
+      clearTimeout(timer)
+      if (code === 0) resolve()
+      else reject(new Error(`q-code exited with code ${code}.\nOutput:\n${output.text}`))
+    })
+  })
+}
+
+function baseCliEnv(options: { home: string; qcodeHome: string }): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH,
+    TMPDIR: process.env.TMPDIR,
+    TEMP: process.env.TEMP,
+    TMP: process.env.TMP,
+    SystemRoot: process.env.SystemRoot,
+    HOME: options.home,
+    USERPROFILE: options.home,
+    NO_COLOR: '1',
+    CI: '1',
+    OPENAI_API_KEY: 'dummy',
+    SUMMARY_API_KEY: 'dummy',
+    Q_CODE_HOME: options.qcodeHome,
+    Q_CODE_TUI: '0',
+    Q_CODE_AUDIT_ENABLED: 'false',
+    Q_CODE_CRASH_GUARD: 'false',
+    Q_CODE_HISTORY_DISABLED: 'true',
+    Q_CODE_INFRA_ENABLED: 'false',
+    Q_CODE_INFRA_SYNC: 'false',
+    Q_CODE_LANGFUSE_ENABLED: 'false',
+    Q_CODE_GITLAB_KB_ENABLED: 'false',
+    Q_CODE_CHANGELOG: '0',
+    MCP_CONNECT_TIMEOUT_MS: '100'
+  }
+}
+
+async function startMockOpenAiServer(
+  state: { models: string[]; prompts: string[] }
+): Promise<{ server: Server; baseUrl: string }> {
+  const server = createServer((req, res) => {
+    if (req.method !== 'POST' || req.url !== '/v1/chat/completions') {
+      res.writeHead(404).end()
+      return
+    }
+
+    let body = ''
+    req.setEncoding('utf-8')
+    req.on('data', (chunk) => {
+      body += chunk
+    })
+    req.on('end', () => {
+      const payload = JSON.parse(body) as { model?: string; messages?: unknown[] }
+      if (payload.model) state.models.push(payload.model)
+      state.prompts.push(JSON.stringify(payload.messages ?? []))
+      res.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive'
+      })
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'ok' }, index: 0 }] })}\n\n`)
+      res.write(
+        `data: ${JSON.stringify({
+          choices: [{ delta: {}, finish_reason: 'stop', index: 0 }],
+          usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 }
+        })}\n\n`
+      )
+      res.write('data: [DONE]\n\n')
+      res.end()
+    })
+  })
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('Mock OpenAI server did not bind to a TCP port')
+  return { server, baseUrl: `http://127.0.0.1:${address.port}/v1` }
+}
+
+async function closeServer(server: Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) reject(error)
+      else resolve()
+    })
+  })
+}

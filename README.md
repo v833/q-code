@@ -216,7 +216,7 @@ pnpm run continue       # 恢复上次会话
 | `eval promote <run> --as <name>` | 保存命名 baseline，供后续 compare 使用           |
 | `eval trend`           | 汇总 `.q-code/evals/runs` 历史 run，生成趋势看板          |
 | `--continue`           | 恢复上次会话                                             |
-| `--session=<id>`       | 指定会话 ID                                              |
+| `--session=<id>`       | 指定并恢复已有会话，若不存在则创建                       |
 | `--dump-system-prompt` | 输出完整 System Prompt 后退出                            |
 | `--plan`               | 启动时直接进入 Plan Mode                                 |
 | `--agent-teams`        | 启用 Agent Teams 多智能体协作（也可设 `Q_CODE_TEAMS=1`） |
@@ -1150,11 +1150,13 @@ prefix = "q-code-kb"
 采用 JSONL append-only 格式存储在 `.sessions/projects/<projectKey>/<sessionId>.jsonl`，支持：
 
 - `--continue` 恢复最近一次会话
-- `--session=<id>` 指定会话 ID
+- `--session=<id>` 指定并恢复已有会话；若不存在则用该 ID 创建新会话
 - 崩溃恢复：逐行解析，损坏行跳过
 - 压缩快照全量写入，恢复时从最后快照后加载
 
 每个会话会同步维护 `.sessions/projects/<projectKey>/<sessionId>.meta.json`，记录展示名、创建/更新时间、消息数、tokens、首条用户输入摘要、模型和 tags。老会话没有 meta 时，`/sessions` 首次列表会从 JSONL 自动回填。
+
+Session/history 只负责恢复上下文，不决定后续模型。`--continue`、`--session=<id>` 和 TUI `/sessions switch` 之后的新请求都会使用当前 runtime 解析出的模型（或本进程内 `/model` 覆盖值）；历史 metadata 中的模型只用于展示、审计、usage 和排障。如果历史模型与当前模型不同，q-code 会对该会话最多提示一次，并说明后续新请求将使用当前模型。
 
 TUI 内可直接使用 `/sessions` 管理会话，不需要重启进程：
 

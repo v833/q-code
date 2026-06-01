@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createSessionModelBoundaryNotice } from '../../src/session/model-boundary'
 import {
   deleteSession,
   exportSession,
@@ -50,6 +51,67 @@ describe('session management', () => {
     const [summary] = listProjectSessions({ cwd: home.cwd, sessionDir: '.sessions' })
     expect(summary?.sessionId).toBe('oauth-debug')
     expect(summary?.lastUserPromptDigest).toContain('OAuth callback')
+  })
+
+  it('keeps historical model metadata as diagnostic data only', () => {
+    const store = makeStore('historical-model')
+    store.appendUsageV2(
+      {
+        timestamp: '2026-06-01T00:00:00.000Z',
+        model: 'old-model',
+        cacheMode: 'auto',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 15
+        },
+        pricingModel: 'old-model',
+        cost: {
+          cost: 0,
+          baselineCost: 0,
+          savedCost: 0
+        }
+      },
+      {
+        steps: 1,
+        cacheMode: 'auto',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 15
+        },
+        cost: {
+          cost: 0,
+          baselineCost: 0,
+          savedCost: 0
+        },
+        unknownCostSteps: 0,
+        cacheHitRate: 0
+      }
+    )
+
+    const reopened = makeStore('historical-model')
+
+    expect(reopened.getSummary().model).toBe('old-model')
+    expect(
+      createSessionModelBoundaryNotice({
+        historicalModel: reopened.getSummary().model,
+        currentModel: 'new-model'
+      })
+    ).toMatchObject({
+      historicalModel: 'old-model',
+      currentModel: 'new-model'
+    })
+    expect(
+      createSessionModelBoundaryNotice({
+        historicalModel: 'old-model',
+        currentModel: 'old-model'
+      })
+    ).toBeUndefined()
   })
 
   it('uses fresh metadata as the list fast path', () => {
