@@ -4,6 +4,7 @@
 import {
   loadMemoryDocumentBodies,
   loadMemoryHeaders,
+  sha256MemoryText,
   shouldIgnoreMemory,
   touchMemoryAccessedAt,
   type MemoryDocument,
@@ -11,12 +12,18 @@ import {
   type MemoryOptions
 } from './memdir'
 
-/** 单文件正文注入字符预算。 */
-export const MEMORY_INJECT_MAX_FILE_CHARS = 4 * 1024
-/** 单轮主题记忆正文总字符预算。 */
-export const MEMORY_INJECT_MAX_TURN_CHARS = 20 * 1024
-/** 单会话主题记忆正文累计字符预算。 */
-export const MEMORY_INJECT_MAX_SESSION_CHARS = 60 * 1024
+/** 单文件正文注入字节预算。 */
+export const MEMORY_INJECT_MAX_FILE_BYTES = 4 * 1024
+/** 单轮主题记忆正文总字节预算。 */
+export const MEMORY_INJECT_MAX_TURN_BYTES = 20 * 1024
+/** 单会话主题记忆正文累计字节预算。 */
+export const MEMORY_INJECT_MAX_SESSION_BYTES = 60 * 1024
+/** @deprecated 使用 MEMORY_INJECT_MAX_FILE_BYTES。 */
+export const MEMORY_INJECT_MAX_FILE_CHARS = MEMORY_INJECT_MAX_FILE_BYTES
+/** @deprecated 使用 MEMORY_INJECT_MAX_TURN_BYTES。 */
+export const MEMORY_INJECT_MAX_TURN_CHARS = MEMORY_INJECT_MAX_TURN_BYTES
+/** @deprecated 使用 MEMORY_INJECT_MAX_SESSION_BYTES。 */
+export const MEMORY_INJECT_MAX_SESSION_CHARS = MEMORY_INJECT_MAX_SESSION_BYTES
 /** 单轮最多精选主题数。 */
 export const MEMORY_SELECTION_MAX_FILES = 5
 
@@ -45,6 +52,7 @@ export interface InjectedMemoryItem {
   truncated: boolean
   updatedAt?: string
   ageDays?: number
+  bodyHash?: string
 }
 
 /** 正文注入结果。 */
@@ -59,7 +67,19 @@ export interface MemoryInjectionResult {
 
 /** 简单的会话级记忆正文预算计数器。 */
 export interface MemorySessionBudget {
-  injectedChars: number
+  injectedBytes: number
+}
+
+/** 等待 selector 在短窗口内完成；超时返回 undefined，保持主请求可继续。 */
+export function waitForMemorySelectionResult(
+  selection: { result?: MemorySelectionResult; promise: Promise<MemorySelectionResult> },
+  timeoutMs: number
+): Promise<MemorySelectionResult | undefined> {
+  if (selection.result) return Promise.resolve(selection.result)
+  return Promise.race([
+    selection.promise,
+    new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), Math.max(0, timeoutMs))),
+  ])
 }
 
 /** 后台启动记忆精选。 */
@@ -117,7 +137,7 @@ export async function buildSelectedMemoryContext(options: MemoryOptions & {
     return emptyInjection(false)
   }
 
-  const remainingSession = MEMORY_INJECT_MAX_SESSION_CHARS - options.sessionBudget.injectedChars
+  const remainingSession = MEMORY_INJECT_MAX_SESSION_BYTES - options.sessionBudget.injectedBytes
   if (remainingSession <= 0) {
     return emptyInjection(true)
   }
@@ -134,15 +154,16 @@ export async function buildSelectedMemoryContext(options: MemoryOptions & {
   let used = 0
   let truncated = false
   for (const doc of docs) {
-    const remainingTurn = MEMORY_INJECT_MAX_TURN_CHARS - used
-    const remaining = Math.min(MEMORY_INJECT_MAX_FILE_CHARS, remainingTurn, remainingSession - used)
+    const remainingTurn = MEMORY_INJECT_MAX_TURN_BYTES - used
+    const remaining = Math.min(MEMORY_INJECT_MAX_FILE_BYTES, remainingTurn, remainingSession - used)
     if (remaining <= 0) {
       truncated = true
       break
     }
 
     const clipped = clipText(doc.body, remaining)
-    used += clipped.text.length
+    const clippedBytes = Buffer.byteLength(clipped.text, 'utf-8')
+    used += clippedBytes
     truncated = truncated || clipped.truncated
     const updatedAt = getMemoryUpdatedAt(doc)
     const ageDays = updatedAt ? diffDays(now, new Date(updatedAt)) : undefined
@@ -151,8 +172,9 @@ export async function buildSelectedMemoryContext(options: MemoryOptions & {
       relativePath: doc.relativePath,
       title: doc.frontmatter.name,
       type: doc.frontmatter.type,
-      bytes: Buffer.byteLength(clipped.text, 'utf-8'),
+      bytes: clippedBytes,
       truncated: clipped.truncated,
+      bodyHash: sha256MemoryText(doc.body),
       ...(updatedAt ? { updatedAt } : {}),
       ...(ageDays !== undefined ? { ageDays } : {})
     })
@@ -163,8 +185,10 @@ export async function buildSelectedMemoryContext(options: MemoryOptions & {
     return emptyInjection(remainingSession <= 0)
   }
 
-  options.sessionBudget.injectedChars += used
-  void Promise.allSettled(items.map((item) => touchMemoryAccessedAt(options, item.relativePath)))
+  options.sessionBudget.injectedBytes += used
+  void Promise.allSettled(
+    items.map((item) => touchMemoryAccessedAt(options, item.relativePath, item.updatedAt, item.bodyHash))
+  )
 
   return {
     context: sections.join('\n\n'),
@@ -219,13 +243,29 @@ function tokenize(value: string): string[] {
     .filter((token) => token.length >= 2)
 }
 
-function clipText(text: string, maxChars: number): { text: string; truncated: boolean } {
-  if (text.length <= maxChars) return { text, truncated: false }
+function clipText(text: string, maxBytes: number): { text: string; truncated: boolean } {
+  if (Buffer.byteLength(text, 'utf-8') <= maxBytes) return { text, truncated: false }
   const marker = '\n\n... [memory truncated] ...'
+  const markerBytes = Buffer.byteLength(marker, 'utf-8')
+  const bodyBudget = Math.max(0, maxBytes - markerBytes)
+  const clipped = clipUtf8(text, bodyBudget)
   return {
-    text: text.slice(0, Math.max(0, maxChars - marker.length)).trimEnd() + marker,
+    text: clipped.trimEnd() + marker,
     truncated: true
   }
+}
+
+function clipUtf8(text: string, maxBytes: number): string {
+  if (maxBytes <= 0) return ''
+  let used = 0
+  let result = ''
+  for (const char of text) {
+    const next = Buffer.byteLength(char, 'utf-8')
+    if (used + next > maxBytes) break
+    used += next
+    result += char
+  }
+  return result
 }
 
 function formatMemorySection(

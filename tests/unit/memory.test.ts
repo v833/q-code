@@ -5,7 +5,9 @@ import {
   buildMemorySystemContext,
   getProjectMemoryDir,
   listMemoryFiles,
+  sha256MemoryText,
   shouldIgnoreMemory,
+  touchMemoryAccessedAt,
   writeProjectMemory
 } from '../../src/context/memory/memdir'
 import { setupTempHome, type TempHome } from '../_helpers/temp-home'
@@ -74,5 +76,38 @@ describe('project memory memdir', () => {
     expect(shouldIgnoreMemory('please ignore memory for this')).toBe(true)
     expect(ignored).toContain('本轮用户要求忽略记忆')
     expect(ignored).not.toContain('Legacy')
+  })
+
+  it('does not update lastAccessedAt when the memory was changed after injection', async () => {
+    home = setupTempHome('memory-touch-')
+    const first = await writeProjectMemory({
+      cwd: home.cwd,
+      name: '并发记忆',
+      description: '防止旧 touch 覆盖新内容',
+      type: 'project',
+      content: 'old content',
+      fileName: 'race.md'
+    })
+    await writeProjectMemory({
+      cwd: home.cwd,
+      name: '并发记忆',
+      description: '防止旧 touch 覆盖新内容',
+      type: 'project',
+      content: 'new content',
+      fileName: 'race.md'
+    })
+
+    const touched = await touchMemoryAccessedAt(
+      { cwd: home.cwd },
+      'race.md',
+      first.metadata.updatedAt,
+      sha256MemoryText('old content'),
+      '2026-06-02T00:00:00.000Z'
+    )
+    const docs = await listMemoryFiles({ cwd: home.cwd })
+
+    expect(touched).toBe(false)
+    expect(docs[0]?.body).toContain('new content')
+    expect(docs[0]?.frontmatter.lastAccessedAt).toBeUndefined()
   })
 })

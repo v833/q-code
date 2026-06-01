@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   buildSelectedMemoryContext,
-  MEMORY_INJECT_MAX_FILE_CHARS,
-  MEMORY_INJECT_MAX_SESSION_CHARS,
+  MEMORY_INJECT_MAX_FILE_BYTES,
+  MEMORY_INJECT_MAX_SESSION_BYTES,
   selectRelevantMemories,
+  waitForMemorySelectionResult,
+  type MemorySelectionResult,
   type MemorySessionBudget
 } from '../../src/context/memory/selection'
 import { writeProjectMemory } from '../../src/context/memory/memdir'
@@ -52,10 +54,10 @@ describe('memory selection and injection', () => {
       name: '项目规范',
       description: '包管理和测试约定',
       type: 'feedback',
-      content: 'a'.repeat(MEMORY_INJECT_MAX_FILE_CHARS + 500),
+      content: 'a'.repeat(MEMORY_INJECT_MAX_FILE_BYTES + 500),
       fileName: 'project-rules.md'
     })
-    const budget: MemorySessionBudget = { injectedChars: 0 }
+    const budget: MemorySessionBudget = { injectedBytes: 0 }
 
     const injected = await buildSelectedMemoryContext({
       cwd: home.cwd,
@@ -68,15 +70,36 @@ describe('memory selection and injection', () => {
     expect(injected.context).toContain('Selected because: 当前请求涉及测试')
     expect(injected.context).toContain('Note: 这是 3 天前的快照')
     expect(injected.truncated).toBe(true)
-    expect(budget.injectedChars).toBeLessThanOrEqual(MEMORY_INJECT_MAX_FILE_CHARS)
+    expect(budget.injectedBytes).toBeLessThanOrEqual(MEMORY_INJECT_MAX_FILE_BYTES)
 
     const exhausted = await buildSelectedMemoryContext({
       cwd: home.cwd,
       selected: [{ relativePath: 'project-rules.md', reason: 'again', confidence: 0.9 }],
-      sessionBudget: { injectedChars: MEMORY_INJECT_MAX_SESSION_CHARS }
+      sessionBudget: { injectedBytes: MEMORY_INJECT_MAX_SESSION_BYTES }
     })
     expect(exhausted.context).toBeNull()
     expect(exhausted.skippedBySessionBudget).toBe(true)
+  })
+
+  it('enforces UTF-8 byte budgets for multibyte memory bodies', async () => {
+    home = setupTempHome('memory-byte-budget-')
+    await writeProjectMemory({
+      cwd: home.cwd,
+      name: '中文预算',
+      description: '多字节正文',
+      type: 'project',
+      content: '汉'.repeat(MEMORY_INJECT_MAX_FILE_BYTES),
+      fileName: 'unicode.md'
+    })
+
+    const injected = await buildSelectedMemoryContext({
+      cwd: home.cwd,
+      selected: [{ relativePath: 'unicode.md', reason: '预算测试', confidence: 0.9 }],
+      sessionBudget: { injectedBytes: 0 }
+    })
+
+    expect(injected.items[0]?.bytes).toBeLessThanOrEqual(MEMORY_INJECT_MAX_FILE_BYTES)
+    expect(injected.truncated).toBe(true)
   })
 
   it('skips selection when user asks to ignore memory', async () => {
@@ -94,5 +117,21 @@ describe('memory selection and injection', () => {
 
     expect(result.ignored).toBe(true)
     expect(result.selected).toEqual([])
+  })
+
+  it('waits briefly for async selector results instead of dropping them immediately', async () => {
+    const resultPromise = new Promise<MemorySelectionResult>((resolve) => {
+      setTimeout(() => resolve({
+        ignored: false,
+        candidateCount: 1,
+        selected: [{ relativePath: 'testing.md', reason: 'match', confidence: 0.8 }],
+        elapsedMs: 10
+      }), 10)
+    })
+
+    await expect(waitForMemorySelectionResult({ promise: resultPromise }, 50)).resolves.toMatchObject({
+      candidateCount: 1,
+      selected: [{ relativePath: 'testing.md' }]
+    })
   })
 })

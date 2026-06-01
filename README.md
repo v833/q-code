@@ -152,8 +152,8 @@ cp .env.example .env
 | `Q_CODE_THEME`                 | ❌   | TUI Markdown / 代码块高亮主题，`dark` / `light` / `auto`，默认 `auto` |
 | `Q_CODE_CACHE_STABLE_PREFIX_TARGET` | ❌ | `pnpm prompt:cache:verify` 的稳定前缀目标，默认 0.9 |
 | `Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS` | ❌ | 实验性 prompt cache keepalive 间隔毫秒，默认 0 关闭；小于 60000ms 会按 60000ms 执行 |
-| `Q_CODE_MEMORY_AUTO_EXTRACT`   | ❌   | 自动提取长期记忆开关，默认 false；当前为保守审计骨架，不会自动写入记忆 |
-| `Q_CODE_MEMORY_FLUSH`          | ❌   | 压缩前 Memory Flush 开关，默认 false；当前为保守审计骨架，不会自动写入记忆 |
+| `Q_CODE_MEMORY_AUTO_EXTRACT`   | ❌   | 自动提取长期记忆开关，默认 false；开启后仅保存用户显式“记住 / remember”的长期信息 |
+| `Q_CODE_MEMORY_FLUSH`          | ❌   | 压缩前 Memory Flush 开关，默认 false；开启后复用显式记忆提取逻辑 |
 | `Q_CODE_AGENT_MD_FULL_CHAR_LIMIT` | ❌ | 单个 AGENT/AGENTS 文件超过该字符数时进入稳定摘要，默认 16000 |
 | `Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT` | ❌ | AGENT/AGENTS 摘要中单个关键章节保留字符数；非关键章节保留较短摘录，默认 1800 |
 | `Q_CODE_AUDIT_ENABLED`         | ❌   | 审计日志开关，默认开启；设为 false/0/off/no 可关闭            |

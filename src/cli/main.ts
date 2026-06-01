@@ -119,6 +119,7 @@ import { buildMemorySystemContext, shouldIgnoreMemory, writeProjectMemory } from
 import {
   buildSelectedMemoryContext,
   startMemorySelection,
+  waitForMemorySelectionResult,
   type MemorySelectionResult,
   type MemorySessionBudget,
 } from '../context/memory/selection';
@@ -582,7 +583,7 @@ export async function runMain(options: {
   let activeTurnInFlight = false;
   let lastUserPromptDigest: string | undefined;
   let lastToolCall: { name: string; toolCallId?: string } | undefined;
-  const memorySessionBudget: MemorySessionBudget = { injectedChars: 0 };
+  const memorySessionBudget: MemorySessionBudget = { injectedBytes: 0 };
   let activeMemorySelection:
     | { query: string; promise: Promise<MemorySelectionResult>; result?: MemorySelectionResult }
     | undefined;
@@ -1591,10 +1592,7 @@ export async function runMain(options: {
   async function consumeSelectedMemoryContext(userQuery: string): Promise<string | null> {
     const selection = activeMemorySelection;
     if (!selection || selection.query !== userQuery) return null;
-    const result = selection.result ?? await Promise.race([
-      selection.promise,
-      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 0)),
-    ]);
+    const result = await waitForMemorySelectionResult(selection, 50);
     if (!result || result.ignored) return null;
     const injected = await buildSelectedMemoryContext({
       cwd: activeStore.cwd,
@@ -1627,6 +1625,14 @@ export async function runMain(options: {
 
   async function maybeAutoExtractMemory(source: 'post-turn' | 'flush' = 'post-turn'): Promise<void> {
     if (process.env.Q_CODE_MEMORY_AUTO_EXTRACT !== 'true') return;
+    if (agentMode === 'plan') {
+      getAuditLogger().emit(
+        'memory.auto_extract.end',
+        { source, saved: 0, skipped: 'plan_mode' },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+      return;
+    }
     const candidate = memoryWrittenThisTurn ? null : extractExplicitMemoryCandidate(messages);
     getAuditLogger().emit(
       'memory.auto_extract.start',
@@ -1671,6 +1677,14 @@ export async function runMain(options: {
 
   async function maybeFlushMemoryBeforeCompaction(trigger: 'preflight' | 'post-turn' | 'manual'): Promise<void> {
     if (process.env.Q_CODE_MEMORY_FLUSH !== 'true') return;
+    if (agentMode === 'plan') {
+      getAuditLogger().emit(
+        'memory.flush.end',
+        { trigger, saved: 0, skipped: 'plan_mode' },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+      return;
+    }
     const candidate = memoryWrittenThisTurn ? null : extractExplicitMemoryCandidate(messages);
     getAuditLogger().emit(
       'memory.flush.start',

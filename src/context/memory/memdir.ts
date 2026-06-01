@@ -65,6 +65,11 @@ function sanitizeSlug(input: string): string {
   )
 }
 
+/** 返回文本的 SHA256 摘要，用于 memory 写入冲突检测。 */
+export function sha256MemoryText(text: string): string {
+  return createHash('sha256').update(text).digest('hex')
+}
+
 /** 返回 `<projectDir>/memory` 绝对路径。 */
 export function getProjectMemoryDir(options: MemoryOptions = {}): string {
   const storage = getProjectStorageInfo(options.cwd ?? process.cwd(), options.storageDir)
@@ -269,6 +274,8 @@ export async function writeProjectMemory(input: {
 export async function touchMemoryAccessedAt(
   options: MemoryOptions,
   relativePath: string,
+  expectedUpdatedAt?: string,
+  expectedBodyHash?: string,
   accessedAt: string = new Date().toISOString()
 ): Promise<boolean> {
   const memoryDir = await ensureMemoryDirExists(options)
@@ -278,8 +285,10 @@ export async function touchMemoryAccessedAt(
   const raw = await fs.readFile(safePath, 'utf-8')
   const frontmatter = parseFrontmatter(raw)
   if (!frontmatter) return false
+  if (expectedUpdatedAt && frontmatter.updatedAt !== expectedUpdatedAt) return false
 
   const body = stripFrontmatter(raw)
+  if (expectedBodyHash && sha256MemoryText(body) !== expectedBodyHash) return false
   const next = renderMemoryDocument(frontmatter, body, { lastAccessedAt: accessedAt })
   await fs.writeFile(safePath, next, 'utf-8')
   return true
