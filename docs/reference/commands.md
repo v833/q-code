@@ -34,6 +34,21 @@ q-code audit tail
 q-code eval run evals/smoke --no-langfuse
 ```
 
+## 交互内置 Slash
+
+```bash
+/output-style
+/output-style Explanatory
+/output-style default
+/commands
+/commands doctor
+/hooks
+/skills
+/sessions
+/model
+/usage
+```
+
 ## 测试
 
 ```bash

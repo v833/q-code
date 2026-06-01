@@ -25,6 +25,9 @@ export function StatusBar({
     state.sessionInfo?.cacheMode ? `cache ${state.sessionInfo.cacheMode}` : '',
     state.sessionInfo?.taskMode ? `tasks ${state.sessionInfo.taskMode}` : '',
     state.sessionInfo?.duckPersona ? `ya ${state.sessionInfo.duckPersona}` : '',
+    state.sessionInfo?.outputStyle && state.sessionInfo.outputStyle !== 'default'
+      ? `style ${state.sessionInfo.outputStyle}`
+      : '',
     state.usage ? `tokens ${formatCompactNumber(state.usage.totalTokens)}` : '',
     runningAgents ? `bg ${runningAgents}` : '',
     state.sessionInfo?.sessionId ? `session ${shortSessionId(state.sessionInfo.sessionId)}` : ''

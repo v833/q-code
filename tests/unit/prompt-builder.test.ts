@@ -21,6 +21,7 @@ import {
   type PromptContext
 } from '../../src/context/prompt-builder'
 import { EXPLORE_AGENT } from '../../src/agents/built-in/explore'
+import { formatOutputStylePrompt, type OutputStyleConfig } from '../../src/output-styles'
 
 function baseCtx(extra: Partial<PromptContext> = {}): PromptContext {
   return {
@@ -253,6 +254,27 @@ describe('PromptBuilder System Prompt 管道', () => {
 
       expect(firstDynamicIndex).toBeGreaterThan(0)
       expect(stableAfterDynamic).toEqual([])
+    })
+
+    it('output style is dynamic turn context and does not change stable system prompt', () => {
+      const style: OutputStyleConfig = {
+        name: 'Explanatory',
+        description: 'Explain',
+        prompt: 'Use Insight blocks.',
+        keepCodingInstructions: true,
+        source: 'built-in'
+      }
+      const builder = new PromptBuilder()
+        .pipe({ name: 'coreRules', stability: 'stable', category: 'core' }, coreRules())
+        .pipe({ name: 'toolDiscipline', stability: 'stable', category: 'tools' }, toolDiscipline())
+
+      const systemA = builder.build(baseCtx())
+      const systemB = builder.build(baseCtx())
+      const dynamicStyle = formatOutputStylePrompt(style)
+
+      expect(systemA).toBe(systemB)
+      expect(systemA).not.toContain('Use Insight blocks')
+      expect(dynamicStyle).toContain('Use Insight blocks')
     })
   })
 })

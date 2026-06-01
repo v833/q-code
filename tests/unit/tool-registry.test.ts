@@ -131,6 +131,22 @@ describe('ToolRegistry 工具注册表与并发控制', () => {
     })
   })
 
+  describe('本轮工具过滤', () => {
+    it('allowedToolNames 同步收窄 active tools、token estimate 和 AI SDK schema', () => {
+      const registry = new ToolRegistry()
+      registry.register(
+        makeMockTool('read_file', () => 'ok'),
+        makeMockTool('write_file', () => 'ok')
+      )
+      const allowedToolNames = new Set(['read_file'])
+
+      expect(registry.getActiveTools({ allowedToolNames }).map((tool) => tool.name)).toEqual(['read_file'])
+      expect(registry.countTokenEstimate({ allowedToolNames }).active)
+        .toBeLessThan(registry.countTokenEstimate().active)
+      expect(Object.keys(registry.toAISDKFormat({}, { allowedToolNames }))).toEqual(['read_file'])
+    })
+  })
+
   describe('toAISDKFormat — 并发锁', () => {
     it('非并发安全工具独占执行（同时仅 1 个）', async () => {
       const registry = new ToolRegistry({ cwd: '/tmp', quiet: true })

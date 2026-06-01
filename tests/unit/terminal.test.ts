@@ -267,7 +267,8 @@ describe('terminal state reducer', () => {
       modelName: 'gpt-5.5',
       agentMode: 'normal',
       taskMode: 'task',
-      cacheMode: 'auto'
+      cacheMode: 'auto',
+      outputStyle: 'Explanatory'
     })
 
     expect(state.sessionInfo).toEqual({
@@ -276,7 +277,8 @@ describe('terminal state reducer', () => {
       modelName: 'gpt-5.5',
       agentMode: 'normal',
       taskMode: 'task',
-      cacheMode: 'auto'
+      cacheMode: 'auto',
+      outputStyle: 'Explanatory'
     })
     expect(state.transcript).toHaveLength(0)
   })

@@ -924,7 +924,66 @@ Skills 用 Markdown 描述可复用工作流，适合代码审查、提交辅助
 | `/skills`            | 查看已加载 Skills、来源和状态 |
 | `/<skill-name> args` | 用户直接触发 Skill            |
 
-### 8. SubAgents 子任务分发
+### 8. Output Styles 与 User Commands
+
+Output Styles 用来切换回答风格，不会写入稳定 system prompt 前缀；q-code 会把当前风格作为本轮动态上下文追加，避免频繁切换破坏 prompt cache。内置风格包括 `default`、`Explanatory` 和 `Learning`。
+
+```bash
+/output-style          # 查看当前风格和可用风格
+/output-style list
+/output-style Explanatory
+/output-style default
+```
+
+自定义风格放在：
+
+```text
+~/.q-code/output-styles/<name>.md
+<cwd>/.q-code/output-styles/<name>.md
+```
+
+项目级同名覆盖用户级，用户级覆盖内置同名。示例：
+
+```markdown
+---
+name: Concise
+description: 极简风格，只说结论
+keepCodingInstructions: true
+---
+回答尽量短，先给结论，再给必要命令或文件引用。
+```
+
+当前风格写在 `settings.json`：
+
+```json
+{
+  "outputStyle": "Explanatory"
+}
+```
+
+User Commands 用 Markdown 把常用 prompt 变成显式 `/命令`。它适合“我手动触发的快捷模板”；Skills 更适合模型根据场景主动调用。
+
+```text
+~/.q-code/commands/review.md       -> /review
+~/.q-code/commands/git/sync.md     -> /git:sync
+<cwd>/.q-code/commands/deploy.md   -> /deploy
+```
+
+命令名只允许字母、数字、下划线、短横线和冒号；项目级命令覆盖用户级，同名内置 Slash 命令优先。可用 `/commands` 查看列表，`/commands doctor` 查看加载 warning。
+
+```markdown
+---
+description: Review 代码文件
+argument-hint: <文件路径>
+model: gpt-4.1-mini
+allowed-tools: [read_file, grep, glob]
+---
+请帮我 review $ARGUMENTS 这个文件，重点关注边界条件、错误处理、安全和性能。
+```
+
+支持占位符：`$ARGUMENTS`、`$1`、`$2`、`$ARGUMENTS[0]`。参数支持简单引号解析，例如 `/review "src/a b.ts"`。`model` 只影响本轮命令展开后的请求，不修改 `/model` 状态；`allowed-tools` 只会在当前已可见工具里做本轮收窄，不能绕过权限、Hooks 或危险命令保护。
+
+### 9. SubAgents 子任务分发
 
 SubAgent 用于把搜索重、上下文噪音大的聚焦任务交给独立子 Agent。子 Agent 从一条全新的 user message 开始，使用经过过滤的工具集运行同一套 Agent Loop，最后只把简洁摘要通过 `Agent` 工具返回给主 Agent。短结果会保持内联；长 `finalText` 会写入 artifact 文件，主上下文、后台通知和 `subagent_stop` Hook 只接收 preview、字符数、截断标记和恢复路径。
 
@@ -1029,7 +1088,7 @@ You are a focused code review sub-agent. Return findings first, then residual ri
 | `/agents kill <id>` | 请求终止运行中的后台 SubAgent                       |
 | `/agents clear-completed` | 清理已成功完成的 SubAgent 条目               |
 
-### 9. Agent Teams 多智能体协作
+### 10. Agent Teams 多智能体协作
 
 Agent Teams 在 SubAgent 的基础上增加了**网状通信**：teammate 之间可以直接 SendMessage 互相对齐，不必把每条消息都中转给 lead；适合需要长期并行、跨角色协作的复杂任务（如 backend + frontend + reviewer 同时推进一个特性）。
 
@@ -1097,7 +1156,7 @@ Agent({
 | `/teams clear`       | 清理当前团队（要求无活跃 teammate）          |
 | `/teams clear force` | 强制清理（建议先 `/agents kill <agent_id>`） |
 
-### 10. MCP 扩展
+### 11. MCP 扩展
 
 q-code 支持标准 `mcpServers` 配置，把外部 MCP server 适配成普通工具。配置分两级：
 
@@ -1146,7 +1205,7 @@ MCP 工具名会规范化为 `mcp__<server>__<tool>`，例如 `my.db` 的 `echo.
 | `/mcp tools <serverName>`     | 查看某个 server 暴露的工具                |
 | `/mcp reconnect <serverName>` | 清理缓存并重连某个 server                 |
 
-### 10.1 企业 AI 基建配置同步
+### 11.1 企业 AI 基建配置同步
 
 企业 AI 基建是可选集成功能，默认关闭。只有显式配置 `Q_CODE_INFRA_ENABLED=true` 后，q-code 才会读取 `Q_CODE_INFRA_BASE_URL` 和 `Q_CODE_INFRA_TOKEN`，并在启动时向企业配置中心解析当前仓库所属业务域，再把配置包增量写入本地项目：
 
@@ -1165,7 +1224,7 @@ MCP 工具名会规范化为 `mcp__<server>__<tool>`，例如 `my.db` 的 `echo.
 | `/infra status` | 查看业务域、配置包版本、本地写入路径和错误 |
 | `/infra sync`   | 手动重新拉取配置；若配置变化会刷新 MCP 连接 |
 
-### 10.2 GitLab Wiki 仓库知识库
+### 11.2 GitLab Wiki 仓库知识库
 
 GitLab Wiki 知识库是一个可选外部集成。配置 GitLab URL 和 Token 后，q-code 会把当前仓库对应的 GitLab Project Wiki 当作企业内部知识共享载体：团队成员只要拥有该项目 Wiki 的访问权限，就能共享仓库级 FAQ、排障结论、工程约定和架构决策。
 
@@ -1189,7 +1248,7 @@ prefix = "q-code-kb"
 
 配置后模型也会按需获得 `gitlab_kb_search`、`gitlab_kb_read`、`gitlab_kb_publish` 三个延迟工具；未配置时这些工具不会暴露给模型。
 
-### 11. 会话持久化与项目记忆
+### 12. 会话持久化与项目记忆
 
 #### 会话持久化
 

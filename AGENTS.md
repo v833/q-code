@@ -6,7 +6,7 @@
 
 - **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、TUI `/agents` SubAgent Monitor（同步与后台 SubAgent，completed 默认隐藏并可清理，忙碌等待期间可用 `Ctrl+A` 查看）、只读同步 SubAgent 动态并行调度、SubAgent 长 final output artifact/preview 回传、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、项目记忆、Skills、SubAgent、Agent Teams、Worktree 隔离。
 - **工具执行**：文件/搜索工具、可配置超时与 spill 的 Shell 工具（Windows 优先 PowerShell7，缺失时回退 Windows PowerShell 5.1）、后台 Shell job（`f_status` / `f_tail` / `f_kill` / `f_list`）。
-- **集成扩展**：MCP server、Hooks（生命周期事件、pre/post tool-use 决策、prompt/context 注入、退出码协议）、Slash 命令注册表、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
+- **集成扩展**：MCP server、Hooks（生命周期事件、pre/post tool-use 决策、prompt/context 注入、退出码协议）、Slash 命令注册表、Output Styles、Markdown User Commands、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
 - **可观测性**：NDJSON 审计日志（默认开启）、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警、启动时版本更新说明（对比 `~/.q-code/last-version.json` 与包内 `changelog.json`）。
 - **评测**：`q-code eval` 本地优先 Agent 质量平台，覆盖固定任务集、mock/cli/真实模型 runner、LLM judge（opt-in）、工具轨迹、预算/成本、进度、文件副作用、策略安全、JSONL trace、Markdown/JUnit 报告、baseline 对比、趋势看板、定期回归与可选 Langfuse evaluator trace / dataset / scores 导出。
 - **TUI**：基于 Ink 的交互式 TUI（默认）、`--classic` 经典 readline、可经管道/CI 自动降级；主 Agent 默认人格为「小黄鸭」，可用 `/ya` 主动切换到主题鸭「降压鸭」「屁老鸭」。
@@ -80,7 +80,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `q-code eval promote <run-dir|run.json> --as <baseline-name>`：把一次 run 保存为 `.q-code/evals/baselines/<name>/` 命名 baseline。
 - `q-code eval trend [--suite <name>] [--limit N] [--runs-dir <dir>] [--out <dir>]`：聚合历史 run，写出 `.q-code/evals/trends/trend.json` 与 `trend.md`。
 
-主交互循环还接受以下启动参数：`--continue`、`--session <id>`、`--plan`、`--agent-teams`、`--classic`、`--debug`、`--dump-system-prompt`。内置 Slash 含 `/ya [list|yellow|shanghai|heilongjiang|toggle]`（别名 `/duck`）；TUI 下 `/ya` 或 `/ya list` 打开鸭子选择器（↑/↓ + Enter），默认 `yellow`（小黄鸭）。
+主交互循环还接受以下启动参数：`--continue`、`--session <id>`、`--plan`、`--agent-teams`、`--classic`、`--debug`、`--dump-system-prompt`。内置 Slash 含 `/output-style [list|default|name]`、`/commands [doctor]`、`/ya [list|yellow|shanghai|heilongjiang|toggle]`（别名 `/duck`）；TUI 下 `/ya` 或 `/ya list` 打开鸭子选择器（↑/↓ + Enter），默认 `yellow`（小黄鸭）。
 
 ## 目录边界
 
@@ -92,6 +92,8 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `src/tools/`：内置工具定义、注册表（含审计/Hooks 包装层）、自定义工具目录加载器、文件/搜索/计划/任务/团队/Memory/Skill/GitLab KB/Agent 等工具；`shell-tools.ts` 负责 `f`、后台 shell job、输出 spill、cwd 策略和危险命令/交互保护。
 - `src/mcp/`：MCP 配置、连接、工具适配和注册表。
 - `src/skills/`：Skills 加载、预算、条件激活和斜杠命令展开。
+- `src/output-styles/`：内置/用户级/项目级 Output Styles 加载、frontmatter 解析、settings 持久化和动态 prompt 格式化。
+- `src/user-commands/`：用户/项目级 Markdown 命令加载、命名空间映射、frontmatter 解析、参数 tokenizer 与模板占位符展开。
 - `src/slash/`：斜杠命令注册表、解析、suggestions、formatHelp（`/help` 输出由此驱动）。
 - `src/hooks/`：生命周期 Hooks 的类型、事件工厂、配置加载、matcher、command-runner 与 DefaultHookRunner；支持 command/handler 两类 Hook、JSON 决策、退出码协议、input/output/prompt/context modify。
 - `src/observability/`：NDJSON 审计日志（`audit.ts`）、可选 Langfuse/OpenTelemetry 导出（`langfuse.ts`，含 Agent step TTFT/吞吐/等待状态 attributes）与 `q-code audit verify|tail` 子命令实现（`audit-cli.ts`）。
@@ -128,7 +130,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - 新测试套件或专项跑法 → `## 测试策略`
   - PR 中没改 `AGENTS.md` 的新功能，视为未完成；评审优先回退或要求补全。
 - 鸭子人格默认「小黄鸭」不进 system prompt（保持 system/tools 前缀稳定）；`/ya` 选中主题鸭时通过 Agent Loop 的 `transientMessages` 作为本轮请求尾部用户消息注入，不进入 system prompt pipe，也不写入会话历史或压缩快照。
-- System Prompt 管道保持稳定前缀优先：核心规则、项目指令、稳定工具纪律、稳定 Skill 调用纪律、SubAgents 摘要和稳定延迟工具纪律留在 system prompt；当前可见 Skill 列表、延迟工具列表、Plan/Task/Todo、Agent Teams 活跃状态、运行环境、项目记忆、会话信息、长报告提示、鸭子人格等本轮动态内容必须通过 Agent Loop `transientMessages` 追加为尾部 user context，不写入会话历史或压缩快照。新增 system pipe 必须标注 `stability` / `category`，新增动态字段不得插入 system prompt 稳定前缀。工具纪律拆成稳定的 `toolDiscipline` 与动态的 `toolRuntimeSummary`；工具数量、JIT 摘要和委派状态只能放在 transient user context。运行环境默认只注入日期粒度时间与 Git clean/dirty 摘要，完整 `git status --short` 应按需用工具查询。超长 AGENT.md / AGENTS.md 默认通过 `Q_CODE_AGENT_MD_FULL_CHAR_LIMIT` / `Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT` 保留所有章节标题与摘录，关键章节使用更长预算，完整细节按需 `read_file`。`Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS` 默认关闭；开启后只在空闲且 cache 模式非 off 时用当前稳定 system prompt 发短后台请求保温，小于 60000ms 会按 60000ms 执行，请求在超时、模型/会话切换或退出时取消，并写 `cache.keepalive` 审计事件。修改 prompt/cache 逻辑需覆盖 `tests/unit/prompt-builder.test.ts`、`tests/unit/runtime-context.test.ts`、`tests/unit/usage.test.ts`、`tests/integration/agent-loop.test.ts`，必要时运行 `pnpm prompt:cache:verify`。
+- System Prompt 管道保持稳定前缀优先：核心规则、项目指令、稳定工具纪律、稳定 Skill 调用纪律、SubAgents 摘要和稳定延迟工具纪律留在 system prompt；当前可见 Skill 列表、延迟工具列表、Plan/Task/Todo、Agent Teams 活跃状态、运行环境、项目记忆、会话信息、Output Style、长报告提示、鸭子人格等本轮动态内容必须通过 Agent Loop `transientMessages` 追加为尾部 user context，不写入会话历史或压缩快照。新增 system pipe 必须标注 `stability` / `category`，新增动态字段不得插入 system prompt 稳定前缀。工具纪律拆成稳定的 `toolDiscipline` 与动态的 `toolRuntimeSummary`；工具数量、JIT 摘要和委派状态只能放在 transient user context。运行环境默认只注入日期粒度时间与 Git clean/dirty 摘要，完整 `git status --short` 应按需用工具查询。超长 AGENT.md / AGENTS.md 默认通过 `Q_CODE_AGENT_MD_FULL_CHAR_LIMIT` / `Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT` 保留所有章节标题与摘录，关键章节使用更长预算，完整细节按需 `read_file`。`Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS` 默认关闭；开启后只在空闲且 cache 模式非 off 时用当前稳定 system prompt 发短后台请求保温，小于 60000ms 会按 60000ms 执行，请求在超时、模型/会话切换或退出时取消，并写 `cache.keepalive` 审计事件。修改 prompt/cache 逻辑需覆盖 `tests/unit/prompt-builder.test.ts`、`tests/unit/runtime-context.test.ts`、`tests/unit/usage.test.ts`、`tests/integration/agent-loop.test.ts`，必要时运行 `pnpm prompt:cache:verify`。
 - 文件和会话持久化逻辑优先使用项目已有的原子写入、路径计算和存储 helper（如 `SessionStore`、`Q_CODE_HOME` 解析、`auditDir` 解析），避免临时拼接路径。
 - Session/history 只恢复上下文，不决定后续模型；`--continue`、`--session <id>`、TUI `/sessions switch` 和输入 history 召回后的新请求必须继续使用当前 runtime effective model 或本进程 `/model` 覆盖值。历史 `SessionMetadata.model` / usage record model 仅用于展示、审计、usage 与诊断；若历史模型与当前模型不同，只能提示一次且不得暴露 API key 或完整敏感 endpoint。修改相关逻辑需覆盖 `tests/unit/session-management.test.ts`、`tests/integration/session-recovery.test.ts`、`tests/integration/session-switch.test.ts` 或等价恢复入口测试。
 - Prompt、工具描述、项目说明多为中文；新增用户可见文案时优先保持中文一致性。
@@ -146,6 +148,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - TUI 输入光标由 `Q_CODE_TUI_CURSOR=auto|ansi|inline|off` 控制；auto 先通过 `src/terminal/terminal-capabilities.ts` 生成终端能力画像，再由 `src/terminal/cursor-mode.ts` 决策。VSCode、Cursor、Windsurf、Trae、JetBrains/IntelliJ IDEA/Gateway 等 IDE 集成终端默认使用静态 inline 块光标，避免 ANSI 光标同步错位、闪烁或抖动；普通 Windows Terminal、iTerm2、macOS Terminal、WezTerm、Ghostty、Alacritty 等保留 `ansi` 真实光标；CI/非 TTY 使用 `off`。修改相关逻辑需覆盖 `tests/unit/cursor-mode.test.ts`、`tests/unit/cursor-blink.test.ts`、`tests/unit/terminal.test.ts` 并同步 README、`.env.example`、`AGENTS.md`。
 - 自定义工具目录固定为 `~/.q-code/tools/<name>/` 与 `<cwd>/.q-code/tools/<name>/`；项目级覆盖用户级，用户级覆盖内置工具。每个工具目录必须提供 `schema.json`，其结构为 `Omit<ToolDefinition, 'isEnabled' | 'execute'> & { execute: string }`，其中 `execute` 会在该工具目录下作为 shell 命令运行。
 - Skills 目录支持 `~/.q-code/skills/<name>/SKILL.md`、`~/.agents/skills/<name>/SKILL.md`、`<cwd>/.q-code/skills/<name>/SKILL.md` 与 `<cwd>/.agents/skills/<name>/SKILL.md`；同名优先级为项目级 `.agents/skills` > 项目级 `.q-code/skills` > 用户级 `.agents/skills` > 用户级 `.q-code/skills`。
+- Output Styles 固定读取 `~/.q-code/output-styles/<name>.md` 与 `<cwd>/.q-code/output-styles/<name>.md`，项目级同名覆盖用户级/内置；active style 写 `settings.json.outputStyle`。风格正文只能作为本轮动态上下文注入，不得进入稳定 system prompt。User Commands 固定读取 `~/.q-code/commands/**/*.md` 与 `<cwd>/.q-code/commands/**/*.md`，子目录映射为 `:` 命名空间；项目级同名覆盖用户级，内置 Slash 命令优先。命令模板只展开 prompt，不执行 shell；`model` 只影响本轮，`allowed-tools` 只能收窄当前可见工具，不能绕过 Hooks、权限或危险命令保护。审计事件只记录命令名、来源、model/allowed-tools 摘要，不记录完整模板正文。
 - 启动性能路径由 `src/cli/bootstrap.ts` 保持薄入口：`help` / `version` 不得静态加载 Ink/React、AI SDK、MCP SDK、Langfuse 或 eval 主模块；TUI 运行时必须通过动态 import 加载，`--classic` / 非 TTY 不应加载 Ink/React。新增启动阶段可用 `Q_CODE_STARTUP_TRACE=true` 或 `--debug` 输出耗时，输出不得包含密钥、token 或工具结果原文。
 - 新增 Slash 命令通过 `createSlashCommandRegistry` + `command(...)` 注册（见 `src/cli/main.ts::createBuiltinSlashCommands`），并填好 `category`、`aliases`、`usage`，以便 `/help` 输出友好。
 - Hooks 配置写 `~/.q-code/settings.json` 与 `<cwd>/.q-code/settings.json`，用户级先执行、项目级后执行；command Hook 通过 stdin 接收事件 JSON，stdout 可返回 `continue|warn|block|modify` 决策，也支持退出码 `0` 放行、`2` block、`3` warn、`4` modify。新增 Hook 事件、决策字段或退出码语义时同步更新 `src/hooks/events.ts`、`src/hooks/types.ts`、README、`docs/guide/hooks.md` 与 `tests/unit/hooks.test.ts`，涉及工具结果时同步覆盖 `tests/unit/tool-registry.test.ts`。
@@ -160,6 +163,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - 审计日志改动：`vitest run tests/unit/audit-logger.test.ts tests/integration/audit-trail.test.ts`
   - Hooks 改动：`vitest run tests/unit/hooks.test.ts tests/unit/tool-registry.test.ts`
   - Slash 改动：`vitest run tests/unit/slash.test.ts`
+  - Output Styles / User Commands：`vitest run tests/unit/output-styles.test.ts tests/unit/user-commands.test.ts tests/unit/prompt-builder.test.ts tests/unit/tool-registry.test.ts`
   - Tool registry 改动：`vitest run tests/unit/tool-registry.test.ts`
   - 文件/读写工具改动：`vitest run tests/unit/file-tools.test.ts tests/unit/tool-registry.test.ts`
   - Shell 工具改动：`vitest run tests/unit/shell-tools.test.ts tests/integration/shell-streaming.test.ts`

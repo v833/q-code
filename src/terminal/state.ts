@@ -68,6 +68,7 @@ export interface TerminalSessionInfo {
   taskMode: string
   cacheMode: CacheMode
   duckPersona?: string
+  outputStyle?: string
 }
 
 /** Agent Monitor 当前面板状态。 */
@@ -421,6 +422,7 @@ export function terminalReducer(state: TerminalState, event: TerminalEvent): Ter
           taskMode: event.taskMode,
           cacheMode: event.cacheMode,
           ...(event.duckPersona ? { duckPersona: event.duckPersona } : {}),
+          ...(event.outputStyle ? { outputStyle: event.outputStyle } : {}),
         }
       }
 

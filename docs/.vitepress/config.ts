@@ -25,6 +25,7 @@ export default defineConfig({
           { text: '快速开始', link: '/guide/getting-started' },
           { text: '配置', link: '/guide/configuration' },
           { text: '命令行与 TUI', link: '/guide/cli-and-tui' },
+          { text: 'Output Styles 与 Commands', link: '/guide/output-styles-and-commands' },
           { text: 'Hooks', link: '/guide/hooks' }
         ]
       },

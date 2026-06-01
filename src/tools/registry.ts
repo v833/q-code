@@ -107,6 +107,12 @@ export interface ToolRegistryOptions {
 /** toAISDKFormat 输出形态选项。 */
 export interface ToolRegistryFormatOptions {
   resultEnvelope?: boolean
+  allowedToolNames?: Set<string>
+}
+
+/** 工具可见性查询选项。 */
+export interface ToolRegistryVisibilityOptions {
+  allowedToolNames?: Set<string>
 }
 
 /** 工具可见性模式：normal 为常规；plan 仅暴露只读与显式允许的工具。 */
@@ -214,8 +220,9 @@ export class ToolRegistry {
     return this.getAll().filter((tool) => isToolVisibleInMode(tool, this.visibilityMode))
   }
 
-  getActiveTools(): ToolDefinition[] {
+  getActiveTools(options: ToolRegistryVisibilityOptions = {}): ToolDefinition[] {
     return this.getVisibleTools().filter((tool) => {
+      if (options.allowedToolNames && !options.allowedToolNames.has(tool.name)) return false
       if (tool.shouldDefer && !this.discoveredTools.has(tool.name)) {
         return false
       }
@@ -261,11 +268,12 @@ export class ToolRegistry {
     return results
   }
 
-  countTokenEstimate(): { active: number; deferred: number; total: number } {
+  countTokenEstimate(options: ToolRegistryVisibilityOptions = {}): { active: number; deferred: number; total: number } {
     let active = 0
     let deferred = 0
 
     for (const tool of this.getVisibleTools()) {
+      if (options.allowedToolNames && !options.allowedToolNames.has(tool.name)) continue
       const schemaSize = JSON.stringify({
         name: tool.name,
         description: tool.description,
@@ -283,11 +291,11 @@ export class ToolRegistry {
     return { active, deferred, total: active + deferred }
   }
 
-  getJitToolSummary(): string {
+  getJitToolSummary(options: ToolRegistryVisibilityOptions = {}): string {
     const buckets = new Map<ToolContextCost, ToolDefinition[]>()
     for (const cost of COST_ORDER) buckets.set(cost, [])
 
-    for (const tool of this.getActiveTools()) {
+    for (const tool of this.getActiveTools(options)) {
       const cost = getToolContextCost(tool)
       buckets.get(cost)?.push(tool)
     }
@@ -343,7 +351,7 @@ export class ToolRegistry {
     options: ToolRegistryFormatOptions = {}
   ): Record<string, any> {
     const result: Record<string, any> = {}
-    const activeTools = this.getActiveTools()
+    const activeTools = this.getActiveTools(options)
 
     for (const tool of activeTools) {
       const maxChars = tool.maxResultChars

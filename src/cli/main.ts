@@ -264,6 +264,19 @@ import {
   getAuditLogger,
 } from '../observability/audit';
 import {
+  findOutputStyle,
+  formatOutputStylePrompt,
+  loadOutputStyles,
+  persistOutputStyle,
+  type OutputStyleConfig,
+} from '../output-styles';
+import {
+  expandUserCommand,
+  loadUserCommands,
+  normalizeCommandName,
+  type UserCommandConfig,
+} from '../user-commands';
+import {
   initializeLangfuse,
   observeLangfuseTurn,
   shutdownLangfuse,
@@ -661,6 +674,11 @@ export async function runMain(options: {
   let pendingSessionPurge: PendingSessionPurge | undefined;
   let canEmitSessionInfo = false;
   let statusDetailsVisible = false;
+  let outputStyles: OutputStyleConfig[] = [];
+  let activeOutputStyleName = 'default';
+  let outputStyleWarnings: string[] = [];
+  let userCommands: UserCommandConfig[] = [];
+  let userCommandWarnings: string[] = [];
   let defaultModelName: string | undefined;
   let sessionModelOverride: string | undefined;
   const shownSessionModelBoundaryNotices = new Set<string>();
@@ -802,6 +820,7 @@ export async function runMain(options: {
       taskMode,
       cacheMode: usageTracker.getCacheMode(),
       duckPersona,
+      outputStyle: activeOutputStyleName,
     });
   }
 
@@ -923,6 +942,12 @@ export async function runMain(options: {
   slashRegistry.register(...createBuiltinSlashCommands());
   const buildSlashCommandSuggestions = () => [
     ...slashRegistry.getSuggestions(),
+    ...userCommands.map((command) => ({
+      name: `/${command.name}`,
+      description: command.description,
+      usage: `/${command.name}${command.argumentHint ? ` ${command.argumentHint}` : ''}`,
+      category: `Commands/${command.source}`,
+    })),
     ...getAllUserInvocableSkills().map((skill) => ({
       name: `/${skill.name}`,
       description: skill.description,
@@ -1121,6 +1146,24 @@ export async function runMain(options: {
       return result;
     })();
 
+    const outputStylesPromise = (async (): Promise<void> => {
+      startupTrace.mark('output-styles-start');
+      const result = await loadOutputStyles(runtimeCwd).catch((error) => ({
+        styles: [],
+        activeName: 'default',
+        warnings: [`[Output Style] 启动失败: ${formatErrorMessage(error)}`],
+        userSettingsPath: '',
+        projectSettingsPath: '',
+      }));
+      outputStyles = result.styles;
+      activeOutputStyleName = result.activeName;
+      outputStyleWarnings = result.warnings;
+      startupTrace.mark('output-styles');
+      if (!dumpSystemPrompt && debugMode) {
+        for (const warning of outputStyleWarnings) print(`  [Output Style] ${warning}`);
+      }
+    })();
+
     const runtimeContextPromise = (async (): Promise<{
       runtimeContext: string;
       agentMdContext: string;
@@ -1152,8 +1195,24 @@ export async function runMain(options: {
       hooksPromise,
       runtimeContextPromise,
       infraPromise,
+      outputStylesPromise,
     ]);
     registerStartupTools(customTools);
+
+    const userCommandsResult = await loadUserCommands(
+      runtimeCwd,
+      slashRegistry.getSuggestions().map((command) => command.name),
+    ).catch((error) => ({
+      commands: [],
+      warnings: [`[Commands] 启动失败: ${formatErrorMessage(error)}`],
+      userCommandsDir: '',
+      projectCommandsDir: '',
+    }));
+    userCommands = userCommandsResult.commands;
+    userCommandWarnings = userCommandsResult.warnings;
+    if (!dumpSystemPrompt && debugMode) {
+      for (const warning of userCommandWarnings) print(`  [Commands] ${warning}`);
+    }
 
     const mcpPromise = (async (): Promise<void> => {
       startupTrace.mark('mcp-start');
@@ -1439,6 +1498,7 @@ export async function runMain(options: {
       formatTransientSection('运行环境', runtimeEnvironment()(promptCtx)),
       formatTransientSection('项目记忆', projectMemory()(promptCtx)),
       formatTransientSection('会话信息', sessionContext()(promptCtx)),
+      formatTransientSection('输出风格', formatOutputStylePrompt(findOutputStyle(outputStyles, activeOutputStyleName))),
       formatTransientSection('长报告流式输出策略', getLongReportStreamingHint(userQuery)),
     ].filter((section): section is string => Boolean(section));
 
@@ -1817,6 +1877,14 @@ export async function runMain(options: {
         }
 
         await waitForStartupReady();
+        const userCommand = userCommands.find((command) =>
+          normalizeCommandName(command.name) === normalizeCommandName(dispatched.input?.name ?? ''),
+        );
+        if (userCommand && dispatched.input) {
+          await runUserCommandTurn(userCommand, dispatched.input.args);
+          return;
+        }
+
         const skillExpansion = expandSkillSlashCommand(trimmed, sessionId);
         if (skillExpansion) {
           print(`\n  [Skill] /${skillExpansion.skill.name}`);
@@ -1885,6 +1953,7 @@ export async function runMain(options: {
   async function runExpandedAgentTurn(
     userContent: string,
     hookAppendContext?: string,
+    turnOptions: { modelName?: string; allowedToolNames?: Set<string> } = {},
   ): Promise<void> {
     const mentionExpansion = expandFileMentions(userContent, {
       cwd: activeStore.cwd,
@@ -1922,7 +1991,40 @@ export async function runMain(options: {
       role: 'user',
       content: mentionExpansion.prompt,
     };
-    await runAgentTurnWithMessages([userMsg], userContent, hookAppendContext);
+    await runAgentTurnWithMessages([userMsg], userContent, hookAppendContext, turnOptions);
+  }
+
+  async function runUserCommandTurn(
+    command: UserCommandConfig,
+    rawArgs: string,
+  ): Promise<void> {
+    const expanded = expandUserCommand(command, rawArgs);
+    const promptHook = await runUserPromptSubmitHook(expanded.prompt);
+    if (promptHook.blocked) return;
+    const effectivePrompt =
+      typeof promptHook.prompt === 'string' ? promptHook.prompt : expanded.prompt;
+    const allowedToolNames = command.allowedTools
+      ? new Set(
+          registry.getActiveTools()
+            .map((tool) => tool.name)
+            .filter((name) => command.allowedTools?.includes(name)),
+        )
+      : undefined;
+    getAuditLogger().emit(
+      'user.command',
+      {
+        name: command.name,
+        source: command.source,
+        hasModelOverride: Boolean(command.model),
+        allowedToolsCount: command.allowedTools?.length ?? 0,
+      },
+      { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+    );
+    print(`\n  [Command] /${command.name}`);
+    await runExpandedAgentTurn(effectivePrompt, promptHook.appendContext, {
+      ...(command.model ? { modelName: command.model } : {}),
+      ...(allowedToolNames ? { allowedToolNames } : {}),
+    });
   }
 
   async function handlePendingPlanInput(input: string): Promise<boolean> {
@@ -2144,6 +2246,7 @@ export async function runMain(options: {
     userMessages: ModelMessage[],
     userQuery: string,
     hookAppendContext?: string,
+    turnOptions: { modelName?: string; allowedToolNames?: Set<string> } = {},
   ): Promise<void> {
     await waitForStartupReady();
     injectPendingTaskNotifications();
@@ -2154,20 +2257,22 @@ export async function runMain(options: {
     lastUserPromptDigest = sha256ForCrashGuard(userQuery);
     const turnPrompt = await buildSystemPromptWithInspection(userQuery);
     const turnSystem = turnPrompt.systemPrompt;
+    const activeTools = registry.getActiveTools(turnOptions);
+    const tokenEstimate = registry.countTokenEstimate(turnOptions);
     latestCacheKeepaliveSystemPrompt = turnSystem;
     startCacheKeepaliveIfEnabled();
     cachePrefixTracker.observe(
       annotateCachePrefixSnapshot(
         createCachePrefixSnapshot({
           systemPrompt: turnSystem,
-          tools: registry.getActiveTools(),
-          activeToolSchemaTokens: registry.countTokenEstimate().active,
+          tools: activeTools,
+          activeToolSchemaTokens: tokenEstimate.active,
           systemSections: turnPrompt.sections,
         }),
         cachePrefixTracker.status().current,
       ),
     );
-    const jitSummary = registry.getJitToolSummary();
+    const jitSummary = registry.getJitToolSummary(turnOptions);
     if (jitSummary) {
       const firstLine = jitSummary.split('\n')[0];
       emitTerminal({
@@ -2189,27 +2294,32 @@ export async function runMain(options: {
         {
           sessionId,
           cwd: activeStore.cwd,
-          modelName: currentModelName(),
+          modelName: turnOptions.modelName ?? currentModelName(),
           userQuery,
           agent: { kind: 'main' },
         },
         async (langfuseTurn) => {
-          const result = await agentLoop(model, registry, messages, turnSystem, {
+          const turnModelName = turnOptions.modelName ?? currentModelName();
+          const turnModelState = turnOptions.modelName
+            ? createModel(turnOptions.modelName)
+            : { model, providerKind: modelProviderKind };
+          const result = await agentLoop(turnModelState.model, registry, messages, turnSystem, {
             maxOutputTokens: defaultMaxOutputTokens,
             escalatedMaxOutputTokens,
             transientMessages: turnTransientMessages,
             quiet: useTui,
-            modelName: currentModelName(),
+            modelName: turnModelName,
             modelWaitHeartbeatMs,
             modelSlowRequestWarnMs,
             modelStalledRequestWarnMs,
             modelRequestTimeoutMs,
-            modelRequestLabel: formatModelRequestLabel(currentModelName()),
+            modelRequestLabel: formatModelRequestLabel(turnModelName),
             providerOptions: createReasoningProviderOptions(
-              modelProviderKind,
+              turnModelState.providerKind,
               readReasoningConfig(),
-              { modelName: currentModelName() },
+              { modelName: turnModelName },
             ),
+            ...(turnOptions.allowedToolNames ? { allowedToolNames: turnOptions.allowedToolNames } : {}),
             abortSignal: turnAbortController.signal,
             sessionId,
             hooks,
@@ -2603,6 +2713,21 @@ export async function runMain(options: {
         handleHistoryCommand,
       ),
       command(
+        '/output-style',
+        '查看或切换回答风格',
+        '/output-style [list|default|name]',
+        'Core',
+        (input) => runAfterStartupReady(() => handleOutputStyleCommand(input.args)),
+        ['/style'],
+      ),
+      command(
+        '/commands',
+        '查看用户自定义命令',
+        '/commands [doctor]',
+        'Core',
+        (input) => runAfterStartupReady(() => handleCommandsCommand(input.args)),
+      ),
+      command(
         '/sessions',
         '管理会话：列表、切换、新建、删除、恢复、导出、搜索',
         '/sessions [list|info|switch|new|rename|delete|restore|export|search|purge]',
@@ -2913,6 +3038,71 @@ export async function runMain(options: {
     }
 
     print('\n  [History] 用法: /history [clear [global|project|both]|on|off]');
+  }
+
+  async function handleOutputStyleCommand(rawArgs: string): Promise<void> {
+    const arg = rawArgs.trim();
+    if (!arg || arg === 'list') {
+      print('\n' + formatOutputStyleStatus());
+      return;
+    }
+
+    const requested = arg === 'default' ? 'default' : arg;
+    const style = findOutputStyle(outputStyles, requested);
+    if (!style) {
+      print(`\n  [Output Style] 未找到 "${requested}"。\n\n${formatOutputStyleStatus()}`);
+      return;
+    }
+
+    activeOutputStyleName = style.name;
+    const settingsPath = await persistOutputStyle(activeStore.cwd, style.name, style.source);
+    resetCacheKeepalivePrompt();
+    emitSessionInfo();
+    getAuditLogger().emit(
+      'output_style.change',
+      { name: style.name, source: style.source },
+      { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+    );
+    print(`\n  [Output Style] 已切换到 ${style.name}，并写入 ${settingsPath}`);
+  }
+
+  function handleCommandsCommand(rawArgs: string): void {
+    const arg = rawArgs.trim();
+    if (arg && arg !== 'doctor') {
+      print('\n  [Commands] 用法: /commands 或 /commands doctor');
+      return;
+    }
+    print('\n' + formatCommandsStatus(arg === 'doctor'));
+  }
+
+  function formatOutputStyleStatus(): string {
+    const lines = ['Output style status', `- Active: ${activeOutputStyleName}`, '', 'Available styles:'];
+    for (const style of outputStyles) {
+      const marker = style.name === activeOutputStyleName ? '*' : ' ';
+      lines.push(`  ${marker} ${style.name.padEnd(14)} ${style.description} [${style.source}]`);
+    }
+    if (outputStyleWarnings.length > 0) {
+      lines.push('', 'Warnings:');
+      for (const warning of outputStyleWarnings) lines.push(`  - ${warning}`);
+    }
+    return lines.join('\n');
+  }
+
+  function formatCommandsStatus(includeDoctor: boolean): string {
+    const lines = ['User commands', ''];
+    if (userCommands.length === 0) {
+      lines.push('  (none)');
+    } else {
+      for (const command of userCommands) {
+        const usage = `/${command.name}${command.argumentHint ? ` ${command.argumentHint}` : ''}`;
+        lines.push(`  ${usage.padEnd(28)} ${command.description} [${command.source}]`);
+      }
+    }
+    if (includeDoctor && userCommandWarnings.length > 0) {
+      lines.push('', 'Warnings:');
+      for (const warning of userCommandWarnings) lines.push(`  - ${warning}`);
+    }
+    return lines.join('\n');
   }
 
   function parseHistoryScopeArg(value: string | undefined): HistoryScope | undefined {

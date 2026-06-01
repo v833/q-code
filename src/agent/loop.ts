@@ -188,6 +188,8 @@ export interface AgentLoopOptions {
   modelRequestLabel?: string
   /** Agent Teams 队友身份；转发给工具执行以便 SendMessage 解析发送方 */
   teammateIdentity?: TeammateIdentity
+  /** 本轮允许暴露给模型的工具名集合；只能收窄当前 registry 已可见工具。 */
+  allowedToolNames?: Set<string>
 }
 
 interface ModelWaitMonitor {
@@ -267,7 +269,9 @@ export async function agentLoop(
       {
         step,
         messageCount: messages.length,
-        activeToolSchemaTokens: registry.countTokenEstimate().active
+        activeToolSchemaTokens: registry.countTokenEstimate({
+          ...(options.allowedToolNames ? { allowedToolNames: options.allowedToolNames } : {})
+        }).active
       },
       stepAuditCtx
     )
@@ -311,7 +315,9 @@ export async function agentLoop(
     let firstTokenAt = 0
     let requestMessageCount = messages.length
     let lastRequestMessages: ModelMessage[] = messages
-    let requestToolSchemaTokens = registry.countTokenEstimate().active
+    let requestToolSchemaTokens = registry.countTokenEstimate({
+      ...(options.allowedToolNames ? { allowedToolNames: options.allowedToolNames } : {})
+    }).active
     let outputTokenLimit = maxOutputTokens
     let didEscalateOutput = false
     // 步骤级重试：包裹整个 stream 消费过程
@@ -333,7 +339,9 @@ export async function agentLoop(
             ? [...messages, ...options.transientMessages]
             : messages
         requestMessageCount = lastRequestMessages.length
-        requestToolSchemaTokens = registry.countTokenEstimate().active
+        requestToolSchemaTokens = registry.countTokenEstimate({
+          ...(options.allowedToolNames ? { allowedToolNames: options.allowedToolNames } : {})
+        }).active
         const stepAbortController = new AbortController()
         const abortSignal = mergeAbortSignals(options.abortSignal, stepAbortController.signal)
         const requestTimeout = createModelRequestTimeout({
@@ -361,7 +369,7 @@ export async function agentLoop(
                 ...(options.onToolProgress ? { onProgress: toAgentToolProgress(options) } : {}),
                 ...(options.teammateIdentity ? { teammateIdentity: options.teammateIdentity } : {})
               },
-              { resultEnvelope: true }
+              { resultEnvelope: true, ...(options.allowedToolNames ? { allowedToolNames: options.allowedToolNames } : {}) }
             ),
             messages: lastRequestMessages,
             maxOutputTokens: outputTokenLimit,
