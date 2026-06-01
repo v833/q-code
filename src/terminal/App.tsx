@@ -45,6 +45,7 @@ import {
   filterSlashCommandSuggestions,
   type SlashCommandSuggestion
 } from '../slash'
+import { detectPromptCursorModeDecision, type PromptCursorModeDecision } from './cursor-mode'
 import {
   createEmptyFileMentionIndex,
   fileMentionIndexNotice,
@@ -100,6 +101,8 @@ export interface TerminalAppProps {
   fileMentionIndex?: FileMentionIndex
   fileMentionIndexStore?: FileMentionIndexStore
   inputHistoryStore?: HistoryStore
+  /** 输入光标模式决策；不传时根据当前环境自动检测。 */
+  cursorModeDecision?: PromptCursorModeDecision
 }
 
 function ModelsPickerPanel({
@@ -302,6 +305,10 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
   const { exit } = useApp()
   const { internal_eventEmitter } = useStdin()
   const { stdout } = useStdout()
+  const cursorModeDecision = useMemo(
+    () => props.cursorModeDecision ?? detectPromptCursorModeDecision({ isTTY: stdout.isTTY }),
+    [props.cursorModeDecision, stdout.isTTY]
+  )
   const lastRawInput = useRef<string>()
   const pendingAssistantDelta = useRef('')
   const assistantFlushTimer = useRef<ReturnType<typeof setTimeout>>()
@@ -1133,7 +1140,7 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
             state.duckPicker !== undefined ||
             state.agentMonitor !== undefined
           }
-          useRealCursor={process.env.Q_CODE_TUI_CURSOR?.trim().toLowerCase() === 'ansi'}
+          cursorMode={cursorModeDecision.mode}
           historySearchLabel={historySearchLabel}
           hasUndoClear={!input.value && input.clearedValue !== undefined}
         />

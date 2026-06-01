@@ -9,15 +9,30 @@ import {
   renderPromptInputRows
 } from '../input'
 import { animeTheme, formatPromptGlyph } from '../theme/index'
+import type { PromptCursorMode } from '../cursor-mode'
 
-export function getInlineCursorBlinkMs(env: NodeJS.ProcessEnv = process.env): number {
+export function getInlineCursorBlinkMs(env: NodeJS.ProcessEnv = process.env): number | undefined {
   const raw = env.Q_CODE_TUI_CURSOR_BLINK_MS?.trim()
-  if (!raw) return 500
+  if (!raw) return undefined
   const value = Number(raw)
-  if (!Number.isFinite(value)) return 500
+  if (!Number.isFinite(value)) return undefined
   if (value <= 0) return 0
   // 防止过小导致高频重渲染；也避免过大导致“像卡住”。
   return Math.max(100, Math.min(10_000, Math.floor(value)))
+}
+
+/** 根据 cursor mode 渲染输入文本，供组件和单测共享。 */
+export function renderInputForCursorMode(args: {
+  value: string
+  cursor: number
+  cursorMode: PromptCursorMode
+  inlineCursorVisible?: boolean
+}): string {
+  if (args.cursorMode === 'ansi') return args.value
+  if (args.cursorMode === 'off') return args.value
+  return args.inlineCursorVisible === false
+    ? args.value
+    : renderInputWithCursor(args.value, args.cursor)
 }
 
 /** 底部输入区；忙碌时隐藏。 */
@@ -27,6 +42,7 @@ export function InputPrompt({
   isBusy,
   historySearchLabel,
   hasUndoClear,
+  cursorMode,
   useRealCursor
 }: {
   value: string
@@ -34,20 +50,25 @@ export function InputPrompt({
   isBusy: boolean
   historySearchLabel?: string
   hasUndoClear?: boolean
+  cursorMode?: PromptCursorMode
+  /** @deprecated 使用 `cursorMode`；保留给旧测试/调用方过渡。 */
   useRealCursor?: boolean
 }): React.JSX.Element {
   const inputRef = useRef<DOMElement>(null)
-  const realCursorEnabled = useRealCursor ?? true
+  const effectiveCursorMode: PromptCursorMode =
+    cursorMode ?? (useRealCursor === false ? 'inline' : 'ansi')
+  const realCursorEnabled = effectiveCursorMode === 'ansi'
+  const inlineCursorEnabled = effectiveCursorMode === 'inline'
   const [inlineCursorVisible, setInlineCursorVisible] = useState(true)
 
   useEffect(() => {
-    // 仅在“假光标模式 + 非 busy”时闪烁；其它情况保持可见但不计时。
-    if (realCursorEnabled || isBusy) {
+    // inline 默认静态显示，避免 IDE 集成终端随 blink 频率重渲染而抖动。
+    if (!inlineCursorEnabled || isBusy) {
       setInlineCursorVisible(true)
       return
     }
     const blinkMs = getInlineCursorBlinkMs()
-    if (blinkMs <= 0) {
+    if (blinkMs === undefined || blinkMs <= 0) {
       setInlineCursorVisible(true)
       return
     }
@@ -55,20 +76,21 @@ export function InputPrompt({
       setInlineCursorVisible((current) => !current)
     }, blinkMs)
     return () => clearInterval(timer)
-  }, [isBusy, realCursorEnabled])
+  }, [inlineCursorEnabled, isBusy])
 
-  const renderedValue = realCursorEnabled
-    ? value
-    : inlineCursorVisible
-      ? renderInputWithCursor(value, cursor)
-      : value
+  const renderedValue = renderInputForCursorMode({
+    value,
+    cursor,
+    cursorMode: effectiveCursorMode,
+    inlineCursorVisible
+  })
 
   const rows = renderPromptInputRows(renderedValue)
   usePromptCursor({
     ref: inputRef,
     value,
     cursor,
-    isEnabled: !isBusy && realCursorEnabled
+    mode: isBusy ? 'off' : effectiveCursorMode
   })
 
   if (isBusy) return <Box />
@@ -98,19 +120,20 @@ function usePromptCursor({
   ref,
   value,
   cursor,
-  isEnabled
+  mode
 }: {
   ref: React.RefObject<DOMElement>
   value: string
   cursor: number
-  isEnabled: boolean
+  mode: PromptCursorMode
 }): void {
   const { stdout } = useStdout()
 
   useLayoutEffect(() => {
     if (!stdout.isTTY) return
 
-    if (!isEnabled) {
+    if (mode === 'inline') return
+    if (mode === 'off') {
       stdout.write(Cursor.hide)
       return
     }
@@ -178,7 +201,7 @@ function usePromptCursor({
     ]
 
     return restoreCursor
-  }, [cursor, isEnabled, stdout, value])
+  }, [cursor, mode, stdout, value])
 }
 
 function getAbsolutePosition(node: DOMElement): { x: number; y: number } {

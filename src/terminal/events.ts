@@ -6,6 +6,7 @@ import type { TokenUsage } from '../context/token-budget'
 import type { SessionSummary } from '../session/store'
 import type { SlashCommandSuggestion } from '../slash'
 import type { CacheMode } from '../usage'
+import type { PromptCursorModeDecision } from './cursor-mode'
 
 /** 启动 Ink TUI 的选项；保持在无 React/Ink 依赖的轻量模块中，供主循环类型引用。 */
 export interface TerminalRuntimeOptions {
@@ -18,6 +19,7 @@ export interface TerminalRuntimeOptions {
   fileMentionIndex?: import('../mentions').FileMentionIndex
   fileMentionIndexStore?: import('../mentions').FileMentionIndexStore
   inputHistoryStore?: import('./history-store').HistoryStore
+  cursorModeDecision?: PromptCursorModeDecision
   onSubmit: (input: string) => Promise<void> | void
   onSessionPickerSelect?: (sessionId: string) => Promise<void> | void
   onAgentKill?: (agentId: string) => Promise<boolean> | boolean

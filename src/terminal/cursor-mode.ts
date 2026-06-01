@@ -1,11 +1,25 @@
 /**
- * TUI 输入光标模式检测：IDE 集成终端默认用内联光标，避免 ANSI 光标同步错位/抖动。
+ * TUI 输入光标策略：基于终端能力画像选择真实 ANSI 光标、内联文本光标或关闭光标。
  */
+import {
+  detectTerminalCapabilities,
+  isIntegratedIdeTerminal,
+  type TerminalCapabilities
+} from './terminal-capabilities'
+
 export type PromptCursorMode = 'ansi' | 'inline' | 'off'
 
 export interface PromptCursorModeContext {
   env?: NodeJS.ProcessEnv
   platform?: NodeJS.Platform
+  isTTY?: boolean
+}
+
+export interface PromptCursorModeDecision {
+  mode: PromptCursorMode
+  source: 'override' | 'auto'
+  reason: string
+  capabilities: TerminalCapabilities
 }
 
 /** 解析用户显式配置的 TUI 输入光标模式。 */
@@ -23,48 +37,59 @@ export function parsePromptCursorMode(value: string | undefined): PromptCursorMo
 export function detectPromptCursorMode(
   context: PromptCursorModeContext = {}
 ): PromptCursorMode {
+  return detectPromptCursorModeDecision(context).mode
+}
+
+/** 返回 cursor mode 与可打印诊断原因。 */
+export function detectPromptCursorModeDecision(
+  context: PromptCursorModeContext = {}
+): PromptCursorModeDecision {
   const env = context.env ?? process.env
   const configured = parsePromptCursorMode(env.Q_CODE_TUI_CURSOR)
-  if (configured && configured !== 'auto') return configured
-  if (isIntegratedIdeTerminal(env)) return 'inline'
-  return 'ansi'
+  const capabilities = detectTerminalCapabilities(context)
+
+  if (configured && configured !== 'auto') {
+    return {
+      mode: configured,
+      source: 'override',
+      reason: `Q_CODE_TUI_CURSOR=${configured}`,
+      capabilities
+    }
+  }
+
+  if (capabilities.riskFlags.includes('non-tty') || capabilities.riskFlags.includes('ci')) {
+    return {
+      mode: 'off',
+      source: 'auto',
+      reason: `${capabilities.reason}; non-interactive terminal`,
+      capabilities
+    }
+  }
+  if (capabilities.riskFlags.includes('ide-integrated')) {
+    return {
+      mode: 'inline',
+      source: 'auto',
+      reason: `${capabilities.reason}; IDE integrated terminals avoid ANSI cursor chasing`,
+      capabilities
+    }
+  }
+  if (
+    capabilities.platformKind === 'windows-conpty' &&
+    capabilities.riskFlags.includes('cursor-sync-unstable')
+  ) {
+    return {
+      mode: 'inline',
+      source: 'auto',
+      reason: `${capabilities.reason}; Windows ConPTY risk without known stable host`,
+      capabilities
+    }
+  }
+  return {
+    mode: 'ansi',
+    source: 'auto',
+    reason: `${capabilities.reason}; plain terminal keeps native cursor`,
+    capabilities
+  }
 }
 
-/** 判断是否处于 VSCode/Cursor/Windsurf/Trae/JetBrains 等 IDE 集成终端。 */
-export function isIntegratedIdeTerminal(env: NodeJS.ProcessEnv = process.env): boolean {
-  const termProgram = normalize(env.TERM_PROGRAM)
-  const terminalEmulator = normalize(env.TERMINAL_EMULATOR)
-  const vscodeInjection = normalize(env.VSCODE_INJECTION)
-  const appName = normalize(env.TERM_PROGRAM_VERSION) + ' ' + normalize(env.__CFBundleIdentifier)
-
-  return (
-    termProgram === 'vscode' ||
-    termProgram === 'cursor' ||
-    termProgram === 'windsurf' ||
-    termProgram === 'trae' ||
-    terminalEmulator.includes('jetbrains') ||
-    terminalEmulator.includes('intellij') ||
-    vscodeInjection === '1' ||
-    hasAnyEnv(env, [
-      'VSCODE_PID',
-      'VSCODE_CWD',
-      'VSCODE_IPC_HOOK_CLI',
-      'CURSOR_TRACE_ID',
-      'WINDSURF_BIN',
-      'TRAE_IDE',
-      'TERMINAL_EMULATOR'
-    ]) && (
-      termProgram === 'vscode' ||
-      appName.includes('jetbrains') ||
-      terminalEmulator.includes('jetbrains')
-    )
-  )
-}
-
-function normalize(value: string | undefined): string {
-  return value?.trim().toLowerCase() ?? ''
-}
-
-function hasAnyEnv(env: NodeJS.ProcessEnv, names: string[]): boolean {
-  return names.some((name) => Boolean(env[name]?.trim()))
-}
+export { isIntegratedIdeTerminal }

@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { getInlineCursorBlinkMs } from '../../src/terminal/components/InputPrompt'
+import {
+  getInlineCursorBlinkMs,
+  renderInputForCursorMode
+} from '../../src/terminal/components/InputPrompt'
 
 describe('inline cursor blink ms', () => {
-  it('defaults to 500 when unset', () => {
-    expect(getInlineCursorBlinkMs({})).toBe(500)
+  it('is disabled by default to avoid IDE terminal redraw jitter', () => {
+    expect(getInlineCursorBlinkMs({})).toBeUndefined()
   })
 
   it('returns 0 to disable blinking when <= 0', () => {
@@ -18,8 +21,15 @@ describe('inline cursor blink ms', () => {
     expect(getInlineCursorBlinkMs({ Q_CODE_TUI_CURSOR_BLINK_MS: '999999' })).toBe(10_000)
   })
 
-  it('falls back to 500 on invalid value', () => {
-    expect(getInlineCursorBlinkMs({ Q_CODE_TUI_CURSOR_BLINK_MS: 'abc' })).toBe(500)
+  it('keeps blinking disabled on invalid value', () => {
+    expect(getInlineCursorBlinkMs({ Q_CODE_TUI_CURSOR_BLINK_MS: 'abc' })).toBeUndefined()
+  })
+
+  it('renders cursor text only for inline mode', () => {
+    expect(
+      renderInputForCursorMode({ value: '你a', cursor: 1, cursorMode: 'inline' })
+    ).toBe('你█a')
+    expect(renderInputForCursorMode({ value: '你a', cursor: 1, cursorMode: 'ansi' })).toBe('你a')
+    expect(renderInputForCursorMode({ value: '你a', cursor: 1, cursorMode: 'off' })).toBe('你a')
   })
 })
-

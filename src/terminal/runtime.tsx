@@ -23,6 +23,7 @@ export function startTerminalRuntime(options: TerminalRuntimeOptions): TerminalR
       fileMentionIndex={options.fileMentionIndex}
       fileMentionIndexStore={options.fileMentionIndexStore}
       inputHistoryStore={options.inputHistoryStore}
+      cursorModeDecision={options.cursorModeDecision}
       onSubmit={options.onSubmit}
       onSessionPickerSelect={options.onSessionPickerSelect}
       onAgentKill={options.onAgentKill}

@@ -738,6 +738,14 @@ describe('terminal input state', () => {
     expect(getInputCursorPosition('abcd', 4, 3)).toEqual({ row: 1, column: 1 })
   })
 
+  it('keeps cursor position stable across wrap and resize boundaries', () => {
+    expect(getInputCursorPosition('abcd', 3, 3)).toEqual({ row: 0, column: 3 })
+    expect(getInputCursorPosition('abcd', 4, 3)).toEqual({ row: 1, column: 1 })
+    expect(getInputCursorPosition('你a好', 3, 3)).toEqual({ row: 1, column: 2 })
+    expect(getInputCursorPosition('你a好', 3, 5)).toEqual({ row: 0, column: 5 })
+    expect(getInputCursorPosition('a\n🧑‍💻b', 4, 3)).toEqual({ row: 1, column: 3 })
+  })
+
   it('moves the real cursor back onto the rendered input row', () => {
     expect(getCursorRowsFromFrameEnd(2, 1)).toBe(1)
     expect(getCursorRowsFromFrameEnd(5, 2)).toBe(3)

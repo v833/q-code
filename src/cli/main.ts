@@ -9,6 +9,7 @@ import { getRequiredEnv, normalizeBaseURL } from '../utils';
 import { fmtBanner, fmtContextUsage, fmtStop } from '../utils/logger';
 import { createInterface } from 'node:readline';
 import type { TerminalRuntime } from '../terminal/events';
+import { detectPromptCursorModeDecision } from '../terminal/cursor-mode';
 import { fetchOpenAiModels } from '../runtime/init-cli';
 import {
   createHistoryStore,
@@ -551,6 +552,9 @@ export async function runMain(options: {
     process.stdout.isTTY &&
     !argv.includes('--classic') &&
     process.env.Q_CODE_TUI !== '0';
+  const cursorModeDecision = detectPromptCursorModeDecision({
+    isTTY: process.stdout.isTTY,
+  });
 
   let terminal: TerminalRuntime | undefined;
   let activeTurnAbortController: AbortController | undefined;
@@ -973,6 +977,7 @@ export async function runMain(options: {
       slashCommands: buildSlashCommandSuggestions(),
       fileMentionIndexStore,
       inputHistoryStore,
+      cursorModeDecision,
       onSubmit: handleInput,
       onSessionPickerSelect: (targetSessionId) =>
         switchSession(targetSessionId, { clearTranscript: true }),
@@ -1662,6 +1667,9 @@ export async function runMain(options: {
           `任务系统: ${taskMode} (${taskMode === 'task' ? 'Task V2 持久化任务图' : 'TodoWrite V1 会话清单'})`,
         );
         print(`鸭子人格: ${getDuckPersona(duckPersona).name}`);
+        print(
+          `TUI cursor mode: ${cursorModeDecision.mode} (${cursorModeDecision.reason})`,
+        );
         if (agentMode === 'plan') print(`Plan 文件: ${planFilePath}`);
         print(
           `Context 上限: ${contextLimitTokens} tokens，压缩阈值: ${compactTriggerTokens} tokens (${Math.round(
