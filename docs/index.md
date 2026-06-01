@@ -6,7 +6,7 @@ hero:
   text: 小黄鸭的内部说明书
   tagline: 用简洁页面说明 q-code 的用法、架构、测试和维护边界。
   image:
-    src: /q-code-duck-512.png
+    src: /q-code-duck-round-512.png
     alt: q-code 小黄鸭
   actions:
     - theme: brand

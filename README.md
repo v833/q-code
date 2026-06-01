@@ -22,7 +22,7 @@ pnpm docs:build    # 静态构建
 pnpm docs:preview  # 预览构建产物
 ```
 
-入口文件在 `docs/index.md`，小黄鸭主题资源在 `docs/public/q-code-duck.png`。
+入口文件在 `docs/index.md`，小黄鸭主题资源在 `docs/public/q-code-duck-round.png`。
 
 ## 快速开始
 

@@ -5,9 +5,9 @@ export default defineConfig({
   description: 'q-code 内部说明文档',
   cleanUrls: true,
   ignoreDeadLinks: true,
-  head: [['link', { rel: 'icon', type: 'image/png', href: '/q-code-duck-64.png' }]],
+  head: [['link', { rel: 'icon', type: 'image/png', href: '/q-code-duck-round-64.png' }]],
   themeConfig: {
-    logo: '/q-code-duck-64.png',
+    logo: '/q-code-duck-round-64.png',
     siteTitle: 'q-code',
     search: {
       provider: 'local'

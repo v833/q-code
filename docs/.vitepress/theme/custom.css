@@ -34,6 +34,7 @@
 .VPHomeHero .image-src {
   width: 190px;
   max-height: 190px;
+  background: transparent;
 }
 
 .VPFeature {
