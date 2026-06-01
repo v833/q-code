@@ -115,7 +115,14 @@ import {
   renderUsageSummary,
   normalizeUsage,
 } from '../usage';
-import { buildMemorySystemContext } from '../context/memory/memdir';
+import { buildMemorySystemContext, shouldIgnoreMemory, writeProjectMemory } from '../context/memory/memdir';
+import {
+  buildSelectedMemoryContext,
+  startMemorySelection,
+  type MemorySelectionResult,
+  type MemorySessionBudget,
+} from '../context/memory/selection';
+import { extractExplicitMemoryCandidate } from '../context/memory/auto-extract';
 import {
   getPlanFilePath,
   planExists,
@@ -575,6 +582,11 @@ export async function runMain(options: {
   let activeTurnInFlight = false;
   let lastUserPromptDigest: string | undefined;
   let lastToolCall: { name: string; toolCallId?: string } | undefined;
+  const memorySessionBudget: MemorySessionBudget = { injectedChars: 0 };
+  let activeMemorySelection:
+    | { query: string; promise: Promise<MemorySelectionResult>; result?: MemorySelectionResult }
+    | undefined;
+  let memoryWrittenThisTurn = false;
   const pendingTerminalEvents: TerminalEvent[] = [];
   let rl: ReturnType<typeof createInterface> | null = null;
   let unsubscribeTodos: () => void = () => {};
@@ -1462,6 +1474,7 @@ export async function runMain(options: {
     systemPrompt: string;
     sections: ReturnType<PromptBuilder['inspect']>;
     transientMessages: ModelMessage[];
+    promptCtx: PromptContext;
   }> {
     const promptCtx = await buildPromptContext({
       sessionMessageCount: messages.length,
@@ -1478,12 +1491,14 @@ export async function runMain(options: {
       systemPrompt: basePrompt,
       sections,
       transientMessages: buildTurnContextTransientMessages(promptCtx, userQuery),
+      promptCtx,
     };
   }
 
   function buildTurnContextTransientMessages(
     promptCtx: PromptContext,
     userQuery?: string,
+    selectedMemoryContext?: string | null,
   ): ModelMessage[] {
     const sections = [
       formatTransientSection('工具运行摘要', toolRuntimeSummary()(promptCtx)),
@@ -1497,6 +1512,7 @@ export async function runMain(options: {
       formatTransientSection('当前 Todo 状态', todoContext()(promptCtx)),
       formatTransientSection('运行环境', runtimeEnvironment()(promptCtx)),
       formatTransientSection('项目记忆', projectMemory()(promptCtx)),
+      selectedMemoryContext,
       formatTransientSection('会话信息', sessionContext()(promptCtx)),
       formatTransientSection('输出风格', formatOutputStylePrompt(findOutputStyle(outputStyles, activeOutputStyleName))),
       formatTransientSection('长报告流式输出策略', getLongReportStreamingHint(userQuery)),
@@ -1532,6 +1548,170 @@ export async function runMain(options: {
         ].join('\n'),
       },
     ];
+  }
+
+  function beginMemorySelection(userQuery: string): void {
+    if (shouldIgnoreMemory(userQuery)) {
+      activeMemorySelection = undefined;
+      getAuditLogger().emit(
+        'memory.selection.end',
+        { candidateCount: 0, selectedCount: 0, elapsedMs: 0, ignored: true },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+      return;
+    }
+    getAuditLogger().emit(
+      'memory.selection.start',
+      { query: createMessageSummaryPayload(userQuery) },
+      { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+    );
+    const promise = startMemorySelection({ cwd: activeStore.cwd, userQuery }).then((result) => {
+      getAuditLogger().emit(
+        'memory.selection.end',
+        {
+          candidateCount: result.candidateCount,
+          selectedCount: result.selected.length,
+          elapsedMs: result.elapsedMs,
+          ignored: result.ignored,
+          failed: Boolean(result.error),
+          files: result.selected.map((item) => item.relativePath),
+        },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+      return result;
+    });
+    activeMemorySelection = { query: userQuery, promise };
+    promise.then((result) => {
+      if (activeMemorySelection?.promise === promise) activeMemorySelection.result = result;
+    }).catch(() => {
+      // startMemorySelection 自身会把失败折叠为结果；这里仅防御未知 Promise reject。
+    });
+  }
+
+  async function consumeSelectedMemoryContext(userQuery: string): Promise<string | null> {
+    const selection = activeMemorySelection;
+    if (!selection || selection.query !== userQuery) return null;
+    const result = selection.result ?? await Promise.race([
+      selection.promise,
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 0)),
+    ]);
+    if (!result || result.ignored) return null;
+    const injected = await buildSelectedMemoryContext({
+      cwd: activeStore.cwd,
+      selected: result.selected,
+      sessionBudget: memorySessionBudget,
+    });
+    if (injected.selectedCount > 0 || injected.skippedBySessionBudget) {
+      getAuditLogger().emit(
+        'memory.inject',
+        {
+          candidateCount: result.candidateCount,
+          selectedCount: injected.selectedCount,
+          bytes: injected.bytes,
+          truncated: injected.truncated,
+          skippedBySessionBudget: injected.skippedBySessionBudget,
+          files: injected.items.map((item) => ({
+            fileName: item.relativePath,
+            type: item.type,
+            bytes: item.bytes,
+            truncated: item.truncated,
+            ageDays: item.ageDays,
+          })),
+        },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+    }
+    activeMemorySelection = undefined;
+    return injected.context;
+  }
+
+  async function maybeAutoExtractMemory(source: 'post-turn' | 'flush' = 'post-turn'): Promise<void> {
+    if (process.env.Q_CODE_MEMORY_AUTO_EXTRACT !== 'true') return;
+    const candidate = memoryWrittenThisTurn ? null : extractExplicitMemoryCandidate(messages);
+    getAuditLogger().emit(
+      'memory.auto_extract.start',
+      { source, skipped: memoryWrittenThisTurn ? 'memory_write_called' : candidate ? undefined : 'no_explicit_memory' },
+      { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+    );
+    if (memoryWrittenThisTurn || !candidate) {
+      getAuditLogger().emit(
+        'memory.auto_extract.end',
+        { source, saved: 0, skipped: memoryWrittenThisTurn ? 'memory_write_called' : 'no_explicit_memory' },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+      return;
+    }
+    try {
+      const result = await writeProjectMemory({
+        cwd: activeStore.cwd,
+        name: candidate.name,
+        description: candidate.description,
+        type: candidate.type,
+        content: candidate.content,
+      });
+      getAuditLogger().emit(
+        'memory.auto_extract.end',
+        {
+          source,
+          saved: 1,
+          fileName: result.fileName,
+          type: candidate.type,
+          updatedExisting: result.updatedExisting,
+        },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+    } catch (error) {
+      getAuditLogger().emit(
+        'memory.auto_extract.end',
+        { source, saved: 0, failed: true, error: formatErrorMessage(error) },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+    }
+  }
+
+  async function maybeFlushMemoryBeforeCompaction(trigger: 'preflight' | 'post-turn' | 'manual'): Promise<void> {
+    if (process.env.Q_CODE_MEMORY_FLUSH !== 'true') return;
+    const candidate = memoryWrittenThisTurn ? null : extractExplicitMemoryCandidate(messages);
+    getAuditLogger().emit(
+      'memory.flush.start',
+      { trigger, skipped: memoryWrittenThisTurn ? 'memory_write_called' : candidate ? undefined : 'no_explicit_memory' },
+      { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+    );
+    if (memoryWrittenThisTurn || !candidate) {
+      getAuditLogger().emit(
+        'memory.flush.end',
+        { trigger, saved: 0, skipped: memoryWrittenThisTurn ? 'memory_write_called' : 'no_explicit_memory' },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+      return;
+    }
+    try {
+      const result = await writeProjectMemory({
+        cwd: activeStore.cwd,
+        name: candidate.name,
+        description: candidate.description,
+        type: candidate.type,
+        content: candidate.content,
+      });
+      memoryWrittenThisTurn = true;
+      getAuditLogger().emit(
+        'memory.flush.end',
+        {
+          trigger,
+          saved: 1,
+          fileName: result.fileName,
+          type: candidate.type,
+          updatedExisting: result.updatedExisting,
+        },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+    } catch (error) {
+      getAuditLogger().emit(
+        'memory.flush.end',
+        { trigger, saved: 0, failed: true, error: formatErrorMessage(error) },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+    }
   }
 
   function formatTransientSection(title: string, text: string | null | undefined): string | null {
@@ -1603,6 +1783,7 @@ export async function runMain(options: {
       }
       return { messages: currentMessages, usageAnchor };
     }
+    await maybeFlushMemoryBeforeCompaction(trigger);
 
     if (!force && !compactionBreaker.shouldAttempt(before)) {
       const skipReason = `自动压缩已连续失败 ${compactionBreaker.failures} 次，本次跳过`;
@@ -2251,6 +2432,8 @@ export async function runMain(options: {
     await waitForStartupReady();
     injectPendingTaskNotifications();
     await injectPlanModeMessages();
+    memoryWrittenThisTurn = false;
+    beginMemorySelection(userQuery);
 
     messages.push(...userMessages);
     activeStore.appendAll(userMessages);
@@ -2284,8 +2467,9 @@ export async function runMain(options: {
     const turnAbortController = new AbortController();
     activeTurnAbortController = turnAbortController;
     activeTurnInFlight = true;
+    const selectedMemoryContext = await consumeSelectedMemoryContext(userQuery);
     const turnTransientMessages = [
-      ...turnPrompt.transientMessages,
+      ...buildTurnContextTransientMessages(turnPrompt.promptCtx, userQuery, selectedMemoryContext),
       ...getHookContextTransientMessages(hookAppendContext),
       ...getDuckPersonaTransientMessages(),
     ];
@@ -2435,6 +2619,9 @@ export async function runMain(options: {
                 if (!useTui) print(`\n${event.output}`);
                 void emitTaskProgress();
               }
+              if (event.name === 'memory_write' && event.isError !== true) {
+                memoryWrittenThisTurn = true;
+              }
               const filePaths = extractToolFilePaths(event.name, event.input);
               const activated = activateConditionalSkillsForPaths(
                 filePaths,
@@ -2455,6 +2642,7 @@ export async function runMain(options: {
       emitTerminal({ type: 'assistant_done' });
       messages = loopResult.messages;
       activeStore.appendUnpersisted(loopResult.newMessages);
+      await maybeAutoExtractMemory();
 
       const postTurnSystem = await buildSystemPrompt();
       const postTurn = await compactIfNeeded(

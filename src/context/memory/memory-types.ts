@@ -13,6 +13,9 @@ export interface MemoryFrontmatter {
   name: string
   description: string
   type: MemoryType
+  createdAt?: string
+  updatedAt?: string
+  lastAccessedAt?: string
 }
 
 /** `MEMORY.md` 索引中的一条记忆条目元数据。 */

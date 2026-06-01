@@ -152,6 +152,8 @@ cp .env.example .env
 | `Q_CODE_THEME`                 | ❌   | TUI Markdown / 代码块高亮主题，`dark` / `light` / `auto`，默认 `auto` |
 | `Q_CODE_CACHE_STABLE_PREFIX_TARGET` | ❌ | `pnpm prompt:cache:verify` 的稳定前缀目标，默认 0.9 |
 | `Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS` | ❌ | 实验性 prompt cache keepalive 间隔毫秒，默认 0 关闭；小于 60000ms 会按 60000ms 执行 |
+| `Q_CODE_MEMORY_AUTO_EXTRACT`   | ❌   | 自动提取长期记忆开关，默认 false；当前为保守审计骨架，不会自动写入记忆 |
+| `Q_CODE_MEMORY_FLUSH`          | ❌   | 压缩前 Memory Flush 开关，默认 false；当前为保守审计骨架，不会自动写入记忆 |
 | `Q_CODE_AGENT_MD_FULL_CHAR_LIMIT` | ❌ | 单个 AGENT/AGENTS 文件超过该字符数时进入稳定摘要，默认 16000 |
 | `Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT` | ❌ | AGENT/AGENTS 摘要中单个关键章节保留字符数；非关键章节保留较短摘录，默认 1800 |
 | `Q_CODE_AUDIT_ENABLED`         | ❌   | 审计日志开关，默认开启；设为 false/0/off/no 可关闭            |
@@ -356,8 +358,10 @@ src/
 │   ├── tasks.ts          # Task V2 持久化任务图
 │   ├── todos.ts          # TodoWrite V1 会话级状态
 │   └── memory/
+│       ├── auto-extract.ts# 显式“记住”请求的保守自动提取
 │       ├── memdir.ts     # 项目记忆文件读写与索引管理
-│       └── memory-types.ts# 记忆类型定义与引导指令
+│       ├── memory-types.ts# 记忆类型定义与引导指令
+│       └── selection.ts  # 记忆精选、预算注入和年龄提示
 ├── session/
 │   └── store.ts          # JSONL 会话持久化
 ├── mentions/             # @file 文件引用解析、索引缓存/刷新、fuzzy 补全和上下文注入
@@ -471,7 +475,7 @@ src/
 
 采用 ReAct（推理-行动交替）模式，主会话不再按默认步数或执行 token 预算硬停：
 
-1. **构建 System Prompt** — 根据用户输入动态构建 `buildSystemPrompt(userQuery)`，使记忆上下文响应当前意图
+1. **构建 System Prompt** — 构建稳定 system prompt，并把项目记忆索引/精选正文放入 transient context
 2. **Preflight** — 检查上下文占用，超阈值则压缩
 3. **LLM 推理** — 流式调用模型
 4. **工具执行** — 根据模型输出执行对应工具
@@ -499,7 +503,7 @@ System Prompt 会注入固定的 JIT 纪律：
 
 #### Prompt Cache 稳定前缀
 
-System Prompt 管道只保留高稳定前缀：核心规则、项目指令、稳定工具纪律、稳定 Skill 调用纪律、SubAgents 摘要和稳定延迟工具纪律。当前可见 Skill 列表、延迟工具列表、Plan/Task/Todo、Agent Teams 活跃状态、运行环境、项目记忆、会话信息和长报告提示等本轮动态内容，会通过 Agent Loop 的 `transientMessages` 追加为本轮尾部 user context，不进入 system prompt，也不写入会话历史。这样即使日期、Git 状态、条件 Skill 激活、延迟工具发现、任务图或 query-specific memory 改变，也不会切断前面的大块 provider prompt cache。
+System Prompt 管道只保留高稳定前缀：核心规则、项目指令、稳定工具纪律、稳定 Skill 调用纪律、SubAgents 摘要和稳定延迟工具纪律。当前可见 Skill 列表、延迟工具列表、Plan/Task/Todo、Agent Teams 活跃状态、运行环境、项目记忆索引/精选正文、会话信息和长报告提示等本轮动态内容，会通过 Agent Loop 的 `transientMessages` 追加为本轮尾部 user context，不进入 system prompt，也不写入会话历史。这样即使日期、Git 状态、条件 Skill 激活、延迟工具发现、任务图或 query-specific memory 改变，也不会切断前面的大块 provider prompt cache。
 
 AGENT.md / AGENTS.md 超过 `Q_CODE_AGENT_MD_FULL_CHAR_LIMIT` 时会以稳定摘要进入 system prompt：所有章节都会保留标题与确定性摘录，项目概览、环境、常用命令、CLI、目录边界、实现约定、测试策略、Git 注意事项、Security、Testing、Repository Guidelines 等关键章节会获得更长预算；完整内容仍可按需 `read_file` 读取。这样项目级协作说明仍在稳定前缀中，但不会因为超长文档拖低 cache 复用率。
 
@@ -1298,10 +1302,15 @@ q-code 内置跨对话持久化的项目记忆，让 Agent 能在多次对话间
 name: 部署规则
 description: 生产环境部署注意事项
 type: project
+createdAt: 2026-06-02T00:00:00.000Z
+updatedAt: 2026-06-02T00:00:00.000Z
+lastAccessedAt: 2026-06-02T00:00:00.000Z
 ---
 
 正文内容...
 ```
+
+`createdAt / updatedAt / lastAccessedAt` 是可选元数据；老文件缺少这些字段仍可读取。`memory_write` 新建记忆时会写入 `createdAt/updatedAt`，更新记忆时保留 `createdAt` 并刷新 `updatedAt`。当某条主题记忆被精选注入后，q-code 会尽力异步刷新 `lastAccessedAt`，失败不会影响主流程。
 
 索引文件 `MEMORY.md` 是自动维护的索引，不保存完整正文，只包含指向各主题文件的链接：
 
@@ -1325,7 +1334,18 @@ type: project
 
 **写入记忆**：Agent 通过 `memory_write` 工具写入记忆，支持新建和更新已有文件（按 name/description 匹配）。
 
-**读取记忆**：Agent 启动时，记忆索引自动注入 System Prompt。当用户提到历史约定或相关主题时，Agent 会主动 `read_file` 读取对应记忆文件。
+**读取记忆**：每轮用户输入会先读取主题记忆 headers（文件名、标题、描述、类型、更新时间），用本地 relevance selector 最多精选 5 个相关主题。若精选结果已就绪，q-code 会把正文作为 transient user context 注入本轮；失败或无相关项时只保留 `MEMORY.md` 索引和使用指引。selector 不读取完整正文参与选择，也不会跨项目读取。
+
+正文注入预算：
+
+- 单文件最多 4KB
+- 单轮最多 5 个文件、总正文最多 20KB
+- 单会话累计最多 60KB
+- 超限正文会标注 `truncated`
+
+注入正文会带 `Updated`、`Age` 和验证提示。超过 1 天的记忆会提示“这是 X 天前的快照”，涉及文件、命令、配置或外部状态时必须先验证当前状态。
+
+**自动提取 / Memory Flush**：`Q_CODE_MEMORY_AUTO_EXTRACT=false`、`Q_CODE_MEMORY_FLUSH=false` 默认关闭。开启后只处理用户显式要求长期记住的信息，例如“请记住：...”或“remember that ...”；普通聊天、代码事实、git 状态和临时计划不会自动沉淀。如果本轮已经调用 `memory_write`，自动提取会跳过，避免重复写入。Memory Flush 在压缩前执行同一套保守提取逻辑，失败或无候选时继续压缩。
 
 **记忆边界**：
 
@@ -1335,7 +1355,7 @@ type: project
 - 不保存一次性调试过程或临时计划
 - 使用记忆前应先验证当前状态，记忆与实际冲突时以验证为准
 
-**忽略记忆**：用户输入包含 "忽略记忆" / "ignore memory" 等关键词时，本轮对话不应用任何已保存记忆。
+**忽略记忆**：用户输入包含 "忽略记忆" / "ignore memory" 等关键词时，本轮不注入索引正文，不启动/消费 selector，也不注入主题正文。
 
 ## 测试体系
 
@@ -1501,7 +1521,7 @@ System Prompt 由 `PromptBuilder` 按管道顺序拼接，每个 Pipe 可根据�
 | `agentsContext`                   | `stable`         | SubAgents discovery 提醒              |
 | `deferredToolDiscipline`          | `stable`         | 不含具体列表的稳定 `tool_search` 纪律 |
 
-每轮用户输入时，`buildSystemPrompt(userQuery)` 只重建稳定 system prompt；本轮动态内容由 `buildTurnContextTransientMessages(...)` 汇总到尾部 user context。该 transient context 包含 `toolRuntimeSummary`、当前延迟工具列表、当前可见 Skill 列表、`teamsContext`、`modeContext`、Task/Todo 上下文、`runtimeEnvironment`、`projectMemory`、`sessionContext` 和长报告流式提示。它参与本轮模型请求和上下文预算估算，但不会写入会话历史或压缩快照。
+每轮用户输入时，`buildSystemPrompt(userQuery)` 只重建稳定 system prompt；本轮动态内容由 `buildTurnContextTransientMessages(...)` 汇总到尾部 user context。该 transient context 包含 `toolRuntimeSummary`、当前延迟工具列表、当前可见 Skill 列表、`teamsContext`、`modeContext`、Task/Todo 上下文、`runtimeEnvironment`、`projectMemory` 索引、精选 `q_code_memory_context`、`sessionContext` 和长报告流式提示。它参与本轮模型请求和上下文预算估算，但不会写入会话历史或压缩快照。
 
 ## 数据存储结构
 

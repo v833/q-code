@@ -276,5 +276,20 @@ describe('PromptBuilder System Prompt 管道', () => {
       expect(systemA).not.toContain('Use Insight blocks')
       expect(dynamicStyle).toContain('Use Insight blocks')
     })
+
+    it('memory context is dynamic turn context and stays out of the stable system prompt', () => {
+      const builder = new PromptBuilder()
+        .pipe({ name: 'coreRules', stability: 'stable', category: 'core' }, coreRules())
+        .pipe({ name: 'toolDiscipline', stability: 'stable', category: 'tools' }, toolDiscipline())
+
+      const systemA = builder.build(baseCtx({ memoryContext: 'MEMORY.md index A' }))
+      const systemB = builder.build(baseCtx({ memoryContext: 'different selected memory body' }))
+      const dynamicMemory = projectMemory()(baseCtx({ memoryContext: 'different selected memory body' }))
+
+      expect(systemA).toBe(systemB)
+      expect(systemA).not.toContain('MEMORY.md index A')
+      expect(systemB).not.toContain('different selected memory body')
+      expect(dynamicMemory).toContain('different selected memory body')
+    })
   })
 })

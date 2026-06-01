@@ -43,6 +43,14 @@ export interface MemoryOptions {
   storageDir?: string
 }
 
+/** 主题记忆写入/更新后的结果。 */
+export interface WriteProjectMemoryResult {
+  filePath: string
+  fileName: string
+  updatedExisting: boolean
+  metadata: Pick<MemoryFrontmatter, 'createdAt' | 'updatedAt'>
+}
+
 function normalizeLine(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
 }
@@ -210,19 +218,27 @@ export async function writeProjectMemory(input: {
   type: MemoryType
   content: string
   fileName?: string
-}): Promise<{ filePath: string; fileName: string; updatedExisting: boolean }> {
+}): Promise<WriteProjectMemoryResult> {
   const memoryDir = await ensureMemoryDirExists(input)
   const existingFileName =
     normalizeMemoryFileName(input.fileName) ??
     (await findExistingMemoryFile(input, input.name, input.description))
   const fileName = existingFileName ?? slugifyMemoryFileName(input.name)
   const filePath = path.join(memoryDir, fileName)
+  const existingFrontmatter = existingFileName ? await readExistingFrontmatter(filePath) : null
+  const updatedExisting = await memoryFileExists(filePath)
+  const now = new Date().toISOString()
+  const createdAt = existingFrontmatter?.createdAt ?? now
+  const updatedAt = now
 
   const body = [
     '---',
     `name: ${normalizeLine(input.name)}`,
     `description: ${normalizeLine(input.description)}`,
     `type: ${input.type}`,
+    `createdAt: ${createdAt}`,
+    `updatedAt: ${updatedAt}`,
+    ...(existingFrontmatter?.lastAccessedAt ? [`lastAccessedAt: ${existingFrontmatter.lastAccessedAt}`] : []),
     '---',
     '',
     input.content.trim(),
@@ -241,7 +257,32 @@ export async function writeProjectMemory(input: {
     }))
   )
 
-  return { filePath, fileName, updatedExisting: Boolean(existingFileName) }
+  return {
+    filePath,
+    fileName,
+    updatedExisting,
+    metadata: { createdAt, updatedAt }
+  }
+}
+
+/** 记忆正文被精选注入后，尽力刷新 `lastAccessedAt`；失败由调用方静默降级。 */
+export async function touchMemoryAccessedAt(
+  options: MemoryOptions,
+  relativePath: string,
+  accessedAt: string = new Date().toISOString()
+): Promise<boolean> {
+  const memoryDir = await ensureMemoryDirExists(options)
+  const safePath = resolveMemoryFilePath(memoryDir, relativePath)
+  if (!safePath) return false
+
+  const raw = await fs.readFile(safePath, 'utf-8')
+  const frontmatter = parseFrontmatter(raw)
+  if (!frontmatter) return false
+
+  const body = stripFrontmatter(raw)
+  const next = renderMemoryDocument(frontmatter, body, { lastAccessedAt: accessedAt })
+  await fs.writeFile(safePath, next, 'utf-8')
+  return true
 }
 
 /** 检测用户查询是否要求本轮忽略已保存记忆。 */
@@ -315,11 +356,66 @@ function parseFrontmatter(raw: string): MemoryFrontmatter | null {
   const description = fields.get('description')
   const type = fields.get('type')
   if (!name || !description || !type || !isMemoryType(type)) return null
-  return { name: normalizeLine(name), description: normalizeLine(description), type }
+  return {
+    name: normalizeLine(name),
+    description: normalizeLine(description),
+    type,
+    ...pickIsoField(fields, 'createdAt'),
+    ...pickIsoField(fields, 'updatedAt'),
+    ...pickIsoField(fields, 'lastAccessedAt')
+  }
 }
 
 function stripFrontmatter(raw: string): string {
   return raw.replace(/^---\n[\s\S]*?\n---\n?/, '').trim()
+}
+
+async function readExistingFrontmatter(filePath: string): Promise<MemoryFrontmatter | null> {
+  try {
+    return parseFrontmatter(await fs.readFile(filePath, 'utf-8'))
+  } catch {
+    return null
+  }
+}
+
+async function memoryFileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function renderMemoryDocument(
+  frontmatter: MemoryFrontmatter,
+  body: string,
+  overrides: Partial<MemoryFrontmatter> = {}
+): string {
+  const next = { ...frontmatter, ...overrides }
+  return [
+    '---',
+    `name: ${normalizeLine(next.name)}`,
+    `description: ${normalizeLine(next.description)}`,
+    `type: ${next.type}`,
+    ...(next.createdAt ? [`createdAt: ${next.createdAt}`] : []),
+    ...(next.updatedAt ? [`updatedAt: ${next.updatedAt}`] : []),
+    ...(next.lastAccessedAt ? [`lastAccessedAt: ${next.lastAccessedAt}`] : []),
+    '---',
+    '',
+    body.trim(),
+    ''
+  ].join('\n')
+}
+
+function pickIsoField(fields: Map<string, string>, key: keyof MemoryFrontmatter): Partial<MemoryFrontmatter> {
+  const value = fields.get(key)
+  if (!value || !isValidIsoDate(value)) return {}
+  return { [key]: value } as Partial<MemoryFrontmatter>
+}
+
+function isValidIsoDate(value: string): boolean {
+  return !Number.isNaN(Date.parse(value))
 }
 
 function truncateEntrypoint(raw: string): { content: string; warning?: string } {

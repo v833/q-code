@@ -4,7 +4,7 @@
 
 `q-code` 是一个基于 Vercel AI SDK 的 TypeScript 命令行 Agent 框架。核心能力包括：
 
-- **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、TUI `/agents` SubAgent Monitor（同步与后台 SubAgent，completed 默认隐藏并可清理，忙碌等待期间可用 `Ctrl+A` 查看）、只读同步 SubAgent 动态并行调度、SubAgent 长 final output artifact/preview 回传、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、项目记忆、Skills、SubAgent、Agent Teams、Worktree 隔离。
+- **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、TUI `/agents` SubAgent Monitor（同步与后台 SubAgent，completed 默认隐藏并可清理，忙碌等待期间可用 `Ctrl+A` 查看）、只读同步 SubAgent 动态并行调度、SubAgent 长 final output artifact/preview 回传、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、文件派项目记忆（headers 精选、预算化正文注入、年龄提示）、Skills、SubAgent、Agent Teams、Worktree 隔离。
 - **工具执行**：文件/搜索工具、可配置超时与 spill 的 Shell 工具（Windows 优先 PowerShell7，缺失时回退 Windows PowerShell 5.1）、后台 Shell job（`f_status` / `f_tail` / `f_kill` / `f_list`）。
 - **集成扩展**：MCP server、Hooks（生命周期事件、pre/post tool-use 决策、prompt/context 注入、退出码协议）、Slash 命令注册表、Output Styles、Markdown User Commands、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
 - **可观测性**：NDJSON 审计日志（默认开启）、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警、启动时版本更新说明（对比 `~/.q-code/last-version.json` 与包内 `changelog.json`）。
@@ -88,7 +88,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `src/cli/`：薄 CLI 入口（early commands、动态 import、启动 trace）、主交互循环（模式切换、上下文压缩调度和整体编排）与启动预热 ready gate。
 - `src/agent/`：核心 Agent Loop、重试、循环检测、模型等待心跳与单步模型请求超时。
 - `src/agents/`：SubAgent、后台 Agent、Agent Teams、worktree、mailbox、notification-store、final output artifact。
-- `src/context/`：System Prompt 管道、鸭子人格（`duck-persona.ts`，主题鸭通过本轮 transient 用户消息注入，不进 system prompt / 会话历史）、上下文压缩与 offload、Plan Mode 附件/计划文件/意图识别、任务、Todo、记忆、运行环境和项目指令加载。
+- `src/context/`：System Prompt 管道、鸭子人格（`duck-persona.ts`，主题鸭通过本轮 transient 用户消息注入，不进 system prompt / 会话历史）、上下文压缩与 offload、Plan Mode 附件/计划文件/意图识别、任务、Todo、记忆（`memory/selection.ts` 负责 headers 精选、正文预算和年龄提示）、运行环境和项目指令加载。
 - `src/tools/`：内置工具定义、注册表（含审计/Hooks 包装层）、自定义工具目录加载器、文件/搜索/计划/任务/团队/Memory/Skill/GitLab KB/Agent 等工具；`shell-tools.ts` 负责 `f`、后台 shell job、输出 spill、cwd 策略和危险命令/交互保护。
 - `src/mcp/`：MCP 配置、连接、工具适配和注册表。
 - `src/skills/`：Skills 加载、预算、条件激活和斜杠命令展开。
@@ -131,6 +131,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - PR 中没改 `AGENTS.md` 的新功能，视为未完成；评审优先回退或要求补全。
 - 鸭子人格默认「小黄鸭」不进 system prompt（保持 system/tools 前缀稳定）；`/ya` 选中主题鸭时通过 Agent Loop 的 `transientMessages` 作为本轮请求尾部用户消息注入，不进入 system prompt pipe，也不写入会话历史或压缩快照。
 - System Prompt 管道保持稳定前缀优先：核心规则、项目指令、稳定工具纪律、稳定 Skill 调用纪律、SubAgents 摘要和稳定延迟工具纪律留在 system prompt；当前可见 Skill 列表、延迟工具列表、Plan/Task/Todo、Agent Teams 活跃状态、运行环境、项目记忆、会话信息、Output Style、长报告提示、鸭子人格等本轮动态内容必须通过 Agent Loop `transientMessages` 追加为尾部 user context，不写入会话历史或压缩快照。新增 system pipe 必须标注 `stability` / `category`，新增动态字段不得插入 system prompt 稳定前缀。工具纪律拆成稳定的 `toolDiscipline` 与动态的 `toolRuntimeSummary`；工具数量、JIT 摘要和委派状态只能放在 transient user context。运行环境默认只注入日期粒度时间与 Git clean/dirty 摘要，完整 `git status --short` 应按需用工具查询。超长 AGENT.md / AGENTS.md 默认通过 `Q_CODE_AGENT_MD_FULL_CHAR_LIMIT` / `Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT` 保留所有章节标题与摘录，关键章节使用更长预算，完整细节按需 `read_file`。`Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS` 默认关闭；开启后只在空闲且 cache 模式非 off 时用当前稳定 system prompt 发短后台请求保温，小于 60000ms 会按 60000ms 执行，请求在超时、模型/会话切换或退出时取消，并写 `cache.keepalive` 审计事件。修改 prompt/cache 逻辑需覆盖 `tests/unit/prompt-builder.test.ts`、`tests/unit/runtime-context.test.ts`、`tests/unit/usage.test.ts`、`tests/integration/agent-loop.test.ts`，必要时运行 `pnpm prompt:cache:verify`。
+- 项目记忆保持文件派结构：`.sessions/projects/<projectKey>/memory/MEMORY.md` 是短索引，主题 Markdown 保留 `name / description / type` 并可带 `createdAt / updatedAt / lastAccessedAt`。`memory_write` 必须维护 createdAt/updatedAt；精选流程只能用 headers + userQuery 做相关性选择，正文只能作为 transient user context 注入，预算为单文件 4KB、单轮 20KB、单会话 60KB，并附带更新时间/年龄/验证提示。用户要求“忽略记忆 / ignore memory”时不得注入索引正文或主题正文。`Q_CODE_MEMORY_AUTO_EXTRACT` 与 `Q_CODE_MEMORY_FLUSH` 默认关闭；开启后只允许保存用户显式要求“记住/remember”的长期信息，普通对话、代码事实、git 状态和临时计划不得自动沉淀。
 - 文件和会话持久化逻辑优先使用项目已有的原子写入、路径计算和存储 helper（如 `SessionStore`、`Q_CODE_HOME` 解析、`auditDir` 解析），避免临时拼接路径。
 - Session/history 只恢复上下文，不决定后续模型；`--continue`、`--session <id>`、TUI `/sessions switch` 和输入 history 召回后的新请求必须继续使用当前 runtime effective model 或本进程 `/model` 覆盖值。历史 `SessionMetadata.model` / usage record model 仅用于展示、审计、usage 与诊断；若历史模型与当前模型不同，只能提示一次且不得暴露 API key 或完整敏感 endpoint。修改相关逻辑需覆盖 `tests/unit/session-management.test.ts`、`tests/integration/session-recovery.test.ts`、`tests/integration/session-switch.test.ts` 或等价恢复入口测试。
 - Prompt、工具描述、项目说明多为中文；新增用户可见文案时优先保持中文一致性。
@@ -176,6 +177,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - TUI 输入历史：`vitest run tests/unit/history-store.test.ts tests/unit/terminal.test.ts tests/integration/history-flow.test.ts`
   - 运行时配置/CLI 子命令：`vitest run tests/unit/runtime-config.test.ts tests/unit/cli-info.test.ts tests/unit/update.test.ts tests/unit/changelog.test.ts tests/unit/init-cli.test.ts`
   - 鸭子人格 / system prompt / prompt cache：`vitest run tests/unit/duck-persona.test.ts tests/unit/prompt-builder.test.ts tests/unit/runtime-context.test.ts tests/unit/usage.test.ts tests/unit/agent-md.test.ts`，必要时运行 `pnpm prompt:cache:verify`
+  - 项目记忆：`vitest run tests/unit/memory.test.ts tests/unit/memory-selection.test.ts tests/unit/memory-auto-extract.test.ts tests/unit/prompt-builder.test.ts tests/unit/audit-logger.test.ts`，必要时运行 `pnpm prompt:cache:verify`
   - 崩溃保护：`vitest run tests/unit/crash-guard.test.ts tests/unit/mcp-bootstrap.test.ts tests/unit/audit-logger.test.ts`
   - Infra / GitLab KB：`vitest run tests/unit/infra.test.ts tests/unit/infra-candidate.test.ts tests/unit/gitlab-kb.test.ts`
   - Agent 工具/SubAgent 参数传递、final output artifact 与只读并行调度：`vitest run tests/unit/agent-tools.test.ts tests/unit/final-output-artifact.test.ts tests/unit/notification-store.test.ts tests/unit/run-async-agent.test.ts tests/unit/hooks.test.ts tests/integration/audit-trail.test.ts`

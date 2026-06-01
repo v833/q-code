@@ -61,7 +61,9 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     thinking_type: 'Q_CODE_THINKING_TYPE',
     reasoning_effort: 'Q_CODE_REASONING_EFFORT',
     cache_stable_prefix_target: 'Q_CODE_CACHE_STABLE_PREFIX_TARGET',
-    cache_keepalive_interval_ms: 'Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS'
+    cache_keepalive_interval_ms: 'Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS',
+    memory_auto_extract: 'Q_CODE_MEMORY_AUTO_EXTRACT',
+    memory_flush: 'Q_CODE_MEMORY_FLUSH'
   },
   q_code: {
     session_dir: 'Q_CODE_SESSION_DIR',
@@ -107,6 +109,8 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     reasoning_effort: 'Q_CODE_REASONING_EFFORT',
     cache_stable_prefix_target: 'Q_CODE_CACHE_STABLE_PREFIX_TARGET',
     cache_keepalive_interval_ms: 'Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS',
+    memory_auto_extract: 'Q_CODE_MEMORY_AUTO_EXTRACT',
+    memory_flush: 'Q_CODE_MEMORY_FLUSH',
     agent_md_full_char_limit: 'Q_CODE_AGENT_MD_FULL_CHAR_LIMIT',
     agent_md_section_char_limit: 'Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT'
   },
@@ -162,6 +166,10 @@ const SECTION_ALIASES: Record<string, Record<string, string>> = {
     keepalive_interval_ms: 'Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS',
     agent_md_full_char_limit: 'Q_CODE_AGENT_MD_FULL_CHAR_LIMIT',
     agent_md_section_char_limit: 'Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT'
+  },
+  memory: {
+    auto_extract: 'Q_CODE_MEMORY_AUTO_EXTRACT',
+    flush: 'Q_CODE_MEMORY_FLUSH'
   },
   audit: {
     enabled: 'Q_CODE_AUDIT_ENABLED',
