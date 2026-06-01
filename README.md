@@ -1,4 +1,12 @@
-# q-code
+<p align="center">
+  <img src="docs/public/q-code-duck-round-128.png" alt="q-code 小黄鸭 Logo" width="96" height="96">
+</p>
+
+<h1 align="center">q-code</h1>
+
+<p align="center">
+  基于 AI SDK 的命令行 Agent 框架
+</p>
 
 基于 AI SDK 的命令行 Agent 框架，支持工具调用、可后台运行的 Shell 长任务、Plan Mode、Task V2 持久化任务图、上下文自动压缩、会话持久化、`@file` 文件引用、跨对话项目记忆、Skills 渐进式披露、后台 SubAgent、Worktree 隔离、Agent Teams 多智能体协作和 MCP 扩展。
 
