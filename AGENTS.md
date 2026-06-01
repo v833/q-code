@@ -27,6 +27,10 @@ pnpm install
 pnpm start                  # tsx src/index.ts
 pnpm continue               # tsx src/index.ts --continue
 
+pnpm docs:dev               # VitePress 文档站本地预览
+pnpm docs:build             # 构建 docs/.vitepress/dist
+pnpm docs:preview           # 预览文档站构建产物
+
 pnpm typecheck              # tsc --noEmit
 pnpm test                   # vitest run（unit + integration）
 pnpm test:unit              # vitest run tests/unit
@@ -101,6 +105,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `src/gitlab-kb/`：GitLab Wiki 知识库读取/搜索/发布（`/gitlab-kb` 命令背后逻辑）。
 - `src/terminal/`：Ink TUI、输入状态机、Plan Mode 入口建议确认面板、SubAgent Monitor（`agent-monitor.ts` 负责排序、tail output 与格式化）、输入历史 JSONL 持久化（`history-store.ts`）、事件流、Markdown 块级/行内语义渲染、表格、主题（`theme/`）、24-bit 代码高亮、布局/光标 utils。
 - `src/utils/`：通用工具（logger、原子写、字符串、环境变量布尔判定等）。
+- `docs/`：VitePress 内部说明文档站，面向维护者和贡献者；`docs/.vitepress/` 存配置和主题，`docs/public/q-code-duck.png` 是小黄鸭主题标识，现有 `docs/agent-evals-guide.md` 作为 Eval 深入指南纳入导航。
 - `tests/unit/`：低成本单元测试。
 - `tests/integration/`：跨模块行为验证（agent-loop、session-recovery、task-graph、audit-trail、team-flow 等）。
 - `tests/_helpers/`：测试通用 helpers（mock-model、mock-tool、temp-home）。
@@ -127,6 +132,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - 文件和会话持久化逻辑优先使用项目已有的原子写入、路径计算和存储 helper（如 `SessionStore`、`Q_CODE_HOME` 解析、`auditDir` 解析），避免临时拼接路径。
 - Session/history 只恢复上下文，不决定后续模型；`--continue`、`--session <id>`、TUI `/sessions switch` 和输入 history 召回后的新请求必须继续使用当前 runtime effective model 或本进程 `/model` 覆盖值。历史 `SessionMetadata.model` / usage record model 仅用于展示、审计、usage 与诊断；若历史模型与当前模型不同，只能提示一次且不得暴露 API key 或完整敏感 endpoint。修改相关逻辑需覆盖 `tests/unit/session-management.test.ts`、`tests/integration/session-recovery.test.ts`、`tests/integration/session-switch.test.ts` 或等价恢复入口测试。
 - Prompt、工具描述、项目说明多为中文；新增用户可见文案时优先保持中文一致性。
+- 文档站保持简洁易懂：`README.md` 放用户入口和快速开始，`AGENTS.md` 放 Agent 协作规则，`docs/` 放人类可浏览的内部说明；新增重要模块、命令、环境变量、测试跑法或协作规则时，同步更新对应文档页，避免复制 `.env`、密钥、本地私人路径、`.sessions/`、`.q-code/`、`docs/.vitepress/cache/` 或 `docs/.vitepress/dist/` 运行产物。
 - 新增环境变量需同时更新：(a) `.env.example`；(b) `src/config/runtime-config.ts` 的 `SECTION_ALIASES`（让 toml 配置可用）；(c) README 配置表。
 - 模型等待诊断通过 `Q_CODE_MODEL_WAIT_HEARTBEAT_MS` / `Q_CODE_MODEL_SLOW_REQUEST_WARN_MS` / `Q_CODE_MODEL_STALLED_REQUEST_WARN_MS` 控制 10/30/60s 首 token 心跳；`Q_CODE_MODEL_REQUEST_TIMEOUT_MS` 控制单步模型请求总超时（默认 0/未设置为不启用），错误提示必须只包含脱敏 endpoint，不得包含 API key。
 - Plan Mode 语义入口由 `Q_CODE_PLAN_INTENT=auto|suggest|off` 控制，默认 `auto`。pending plan 的自然语言审批必须先走本地 deterministic fast-path、否定词优先、保守批准；本地 unknown 时可用当前会话模型做短超时 JSON intent judge 兜底（`Q_CODE_PLAN_INTENT_MODEL_TIMEOUT_MS`，默认 3000ms，0 关闭），模型失败、超时或低置信度必须回退 unknown。复杂执行型任务只建议进入 Plan Mode，不得静默强制切换；TUI 可显示确认面板保留原请求，Enter 进入 Plan 后继续，Esc 按普通模式执行，Ctrl+C 取消且不执行；classic readline 只提示并继续当前请求。修改相关逻辑需覆盖 `tests/unit/plan-intent.test.ts`、`tests/unit/terminal.test.ts` 并同步 README、`.env.example`、`AGENTS.md`、`src/config/runtime-config.ts`。
@@ -170,6 +176,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - Infra / GitLab KB：`vitest run tests/unit/infra.test.ts tests/unit/infra-candidate.test.ts tests/unit/gitlab-kb.test.ts`
   - Agent 工具/SubAgent 参数传递、final output artifact 与只读并行调度：`vitest run tests/unit/agent-tools.test.ts tests/unit/final-output-artifact.test.ts tests/unit/notification-store.test.ts tests/unit/run-async-agent.test.ts tests/unit/hooks.test.ts tests/integration/audit-trail.test.ts`
   - Eval 框架：`vitest run tests/unit/evals.test.ts tests/unit/cli-info.test.ts`，必要时运行 `pnpm eval:smoke`、`pnpm eval:cli`、`pnpm eval:trend`；Langfuse 连通性可跑 `pnpm eval:smoke:langfuse`
+- VitePress 文档站：`pnpm docs:build`，并检查文档中不要出现 `.env` 明文、密钥、token、本地私人路径或运行产物。
 - 类型、接口或公共工具改动：运行 `pnpm typecheck`。
 - 涉及 Agent Loop、上下文、会话恢复、任务图、团队协作或审计端到端：运行 `pnpm test` 或相关 `tests/integration/**`（含 `agent-loop`、`session-recovery`、`task-graph`、`team-flow`、`audit-trail`）。
 - 涉及 MCP、Skills、Agents、Teams 或 worktree 端到端行为：运行对应 `pnpm test:mcp`、`pnpm test:skills`、`pnpm test:agents`、`pnpm test:teams`、`pnpm test:infra-candidate`，必要时运行 `pnpm test:legacy`。

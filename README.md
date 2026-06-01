@@ -12,6 +12,18 @@
 | 包管理   | pnpm / npm                              |
 | 运行方式 | npm CLI 包                              |
 
+## 文档站
+
+仓库内置 VitePress 文档站，面向维护者和贡献者，内容比 README 更偏内部结构、开发入口和测试策略。
+
+```bash
+pnpm docs:dev      # 本地预览
+pnpm docs:build    # 静态构建
+pnpm docs:preview  # 预览构建产物
+```
+
+入口文件在 `docs/index.md`，小黄鸭主题资源在 `docs/public/q-code-duck.png`。
+
 ## 快速开始
 
 ### 环境要求
@@ -65,12 +77,12 @@ npm 全局安装后推荐使用 `~/.q-code/config.toml`，在任意目录运行 
 
 ```toml
 [openai]
-api_key = "sk-..."
+api_key = "<your-api-key>"
 base_url = "https://api.openai.com/v1"
 model = "gpt-5.4"
 
 [summary]
-api_key = "sk-..."
+api_key = "<your-api-key>"
 base_url = "https://api.openai.com/v1"
 model = "gpt-5.4"
 

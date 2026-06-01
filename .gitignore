@@ -6,6 +6,8 @@ dist/
 build/
 coverage/
 *.tsbuildinfo
+docs/.vitepress/cache/
+docs/.vitepress/dist/
 
 # Environment files
 .env

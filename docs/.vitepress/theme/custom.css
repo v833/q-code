@@ -1,0 +1,41 @@
+:root {
+  --vp-c-brand-1: #b45f06;
+  --vp-c-brand-2: #d97706;
+  --vp-c-brand-3: #f6ad1a;
+  --vp-c-brand-soft: rgba(246, 173, 26, 0.16);
+  --vp-c-bg: #fffaf0;
+  --vp-c-bg-alt: #fff6df;
+  --vp-c-bg-soft: #fff1c4;
+  --vp-c-text-1: #292317;
+  --vp-c-text-2: #5e5139;
+  --vp-c-text-3: #8a7653;
+  --vp-home-hero-name-color: #b45f06;
+  --vp-home-hero-image-background-image: linear-gradient(135deg, rgba(246, 173, 26, 0.2), rgba(95, 165, 130, 0.14));
+  --vp-home-hero-image-filter: blur(34px);
+}
+
+.dark {
+  --vp-c-brand-1: #ffd166;
+  --vp-c-brand-2: #f6ad1a;
+  --vp-c-brand-3: #d97706;
+  --vp-c-brand-soft: rgba(255, 209, 102, 0.16);
+  --vp-c-bg: #1e1a12;
+  --vp-c-bg-alt: #17140e;
+  --vp-c-bg-soft: #2a2418;
+  --vp-c-text-1: #f5eddc;
+  --vp-c-text-2: #d8cbb1;
+  --vp-c-text-3: #b7a680;
+}
+
+.VPNavBarTitle .logo {
+  border-radius: 0;
+}
+
+.VPHomeHero .image-src {
+  width: 190px;
+  max-height: 190px;
+}
+
+.VPFeature {
+  border-radius: 8px;
+}

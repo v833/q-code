@@ -318,7 +318,7 @@ Langfuse 是可选 exporter，不是 eval 真源。
 
 开启方式依赖 `.env` 或 `.q-code/config.toml`：
 
-```env
+```txt
 Q_CODE_LANGFUSE_ENABLED=true
 LANGFUSE_PUBLIC_KEY=...
 LANGFUSE_SECRET_KEY=...
@@ -468,4 +468,3 @@ workspaces/<case-id>-<repeat>-*/
 - 稳定 live benchmark 集。
 
 在这些能力完成前，当前 eval 最适合作为“本地优先的 Agent 回归框架”和“Langfuse 可选观测桥”，不是自动优化系统。
-

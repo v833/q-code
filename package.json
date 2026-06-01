@@ -32,6 +32,9 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "changelog": "node scripts/generate-changelog.mjs",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
     "start": "tsx src/index.ts",
     "continue": "tsx src/index.ts --continue",
     "test": "vitest run",
@@ -101,6 +104,8 @@
     "simple-git-hooks": "^2.13.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
+    "vite": "^6",
+    "vitepress": "^1.6.4",
     "vitest": "^4.1.7"
   }
 }
