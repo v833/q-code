@@ -175,6 +175,7 @@ describe('cli info', () => {
     }
 
     expect(pkg.scripts?.['prompt:cache:verify']).toBe('tsx src/scripts/verify-prompt-cache.ts')
+    expect(pkg.scripts?.['prompt:quality:verify']).toBe('tsx src/scripts/verify-prompt-quality.ts')
   })
 
   it('formats version output', () => {

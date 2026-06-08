@@ -24,7 +24,7 @@ export interface PromptContext {
   memoryContext?: string
 }
 
-type PipeFn = (ctx: PromptContext) => string | null
+export type PipeFn = (ctx: PromptContext) => string | null
 
 /** Prompt pipe 的稳定性分层，用于 cache 前缀治理与诊断。 */
 export type PromptStability = 'stable' | 'session-stable' | 'dynamic'
@@ -50,6 +50,12 @@ export interface PromptPipeMeta {
   stability?: PromptStability
   category?: PromptSectionCategory
   cacheCritical?: boolean
+}
+
+/** 共享稳定 prompt pipe 的插入点配置。 */
+export interface SharedStablePromptPipeOptions {
+  afterProjectInstructions?: Array<{ meta: PromptPipeMeta; fn: PipeFn }>
+  includeAgentsContext?: boolean
 }
 
 /** 单个 prompt pipe 的渲染诊断信息。 */
@@ -121,13 +127,43 @@ export class PromptBuilder {
 
 /** 创建主 CLI 的稳定 system prompt 管道；CLI 与 cache 验证脚本共用，避免实现漂移。 */
 export function createSystemPromptBuilder(): PromptBuilder {
-  return new PromptBuilder()
+  return createSharedStablePromptBuilder()
+}
+
+/** 创建主 Agent / SubAgent 共用的稳定 system prompt 管道。 */
+export function createSharedStablePromptBuilder(
+  options: SharedStablePromptPipeOptions = {}
+): PromptBuilder {
+  return addSharedStablePromptPipes(new PromptBuilder(), options)
+}
+
+/** 向指定 builder 追加共享稳定 prompt pipe，允许在项目指令后插入角色专属说明。 */
+export function addSharedStablePromptPipes(
+  builder: PromptBuilder,
+  options: SharedStablePromptPipeOptions = {}
+): PromptBuilder {
+  const includeAgentsContext = options.includeAgentsContext ?? true
+
+  builder
     .pipe({ name: 'coreRules', stability: 'stable', category: 'core', cacheCritical: true }, coreRules())
     .pipe({ name: 'agentMdInstructions', stability: 'stable', category: 'project', cacheCritical: true }, agentMdInstructions())
+
+  for (const pipe of options.afterProjectInstructions ?? []) {
+    builder.pipe(pipe.meta, pipe.fn)
+  }
+
+  builder
     .pipe({ name: 'toolDiscipline', stability: 'stable', category: 'tools', cacheCritical: true }, toolDiscipline())
+    .pipe({ name: 'behaviorExamples', stability: 'stable', category: 'core', cacheCritical: true }, behaviorExamples())
     .pipe({ name: 'skillDiscipline', stability: 'stable', category: 'skills', cacheCritical: true }, skillDiscipline())
-    .pipe({ name: 'agentsContext', stability: 'stable', category: 'agents', cacheCritical: true }, agentsContext())
-    .pipe({ name: 'deferredToolDiscipline', stability: 'stable', category: 'tools' }, () => '若当前工具列表中存在 `tool_search`，并且你需要的工具不在当前列表中，使用 `tool_search` 搜索。')
+
+  if (includeAgentsContext) {
+    builder.pipe({ name: 'agentsContext', stability: 'stable', category: 'agents', cacheCritical: true }, agentsContext())
+  }
+
+  builder.pipe({ name: 'deferredToolDiscipline', stability: 'stable', category: 'tools' }, () => '若当前工具列表中存在 `tool_search`，并且你需要的工具不在当前列表中，使用 `tool_search` 搜索。')
+
+  return builder
 }
 
 function normalizePipeMeta(nameOrMeta: string | PromptPipeMeta): Required<PromptPipeMeta> {
@@ -154,8 +190,10 @@ export function coreRules(): PipeFn {
 你的行为准则：
 - 先读文件再修改，不要凭记忆编辑
 - 不要加没被要求的功能
+- 最终回答默认使用 Markdown，说明改了什么、验证了什么和仍有什么风险
 - 工具调用失败时，换一个思路而不是重复同样的操作
 - 执行需要多次工具调用的任务时，在关键工具调用前后输出简短、可公开的进度说明：说明你正在看什么、为什么看、刚确认了什么。每次 1-2 句即可，不要暴露隐藏推理链或内部草稿
+- 复杂任务先计划再执行；验证不通过不得声明完成
 - 回答要简洁直接`
 }
 
@@ -168,6 +206,7 @@ export function toolDiscipline(): PipeFn {
       '- 上下文应在需要时进入，不要在一开始批量读取可能无关的大文件、网页或长命令输出。',
       '- 代码/文件探索优先使用低成本到高成本阶梯：list_directory/glob → grep → read_file 的精确行段。',
       '- 只把能推进当前判断的最小证据放进当前上下文；不要调用当前工具列表中不存在的委派工具。',
+      '- 会改动同一工作区状态的工具调用应保持串行，避免并发写入造成不可预期结果。',
       '- Skill、SubAgent、MCP 工具都遵循渐进式披露：先看名称/摘要/Schema，必要时再加载正文或执行高成本工具。',
       '- 使用 f 执行 shell 命令时先看运行环境：Windows 下 command 已在 PowerShell 中运行，macOS/Linux 下 command 已在 Bash 中运行；直接写当前系统的原生 shell 命令，不要再套同类 shell，也不要混用其他平台方言。',
     ]
@@ -200,6 +239,21 @@ export function toolGuide(): PipeFn {
   }
 }
 
+/** 少量稳定正反例，用来钉住工具选择、沟通、失败恢复与交付输出边界。 */
+export function behaviorExamples(): PipeFn {
+  return () => [
+    '[Behavior Examples / 行为示例]',
+    '- Good: 需要定位代码时，先 grep/list_directory 缩小范围，再 read_file 精确行段；BAD: 一开始批量读取大量文件。',
+    '- Good: 缺少关键决策、权限确认或设计偏好时再问用户，并用一句话澄清；BAD: 能通过工具先探索的问题直接追问。',
+    '- Good: 多步骤任务保持恰好一个 in_progress，完成后再标 completed；BAD: 未执行就提前标记完成。',
+    '- Good: 遇到密钥、越权或危险请求时明确拒绝，并给出安全替代方案；BAD: 解释如何绕过权限或泄露敏感信息。',
+    '- Good: 项目记忆正文只通过 transient context 按需注入，用户说忽略记忆时不读取或注入 MEMORY.md 详情；BAD: 把记忆内容当作本轮必须遵循的新需求。',
+    '- Good: 工具或测试失败时，先看错误，核实参数，换路尝试，按需运行 typecheck，仍失败再求助；BAD: 反复重试同一命令或修改测试掩盖问题。',
+    '- Good: 最终回答说明改了什么、验证了什么、仍有什么风险；BAD: 验证不通过不得声明完成，也不要输出冗长无关解释。',
+    '- Good: 行为示例应作为正反例锚点，前端或文档质量使用最多/禁用这类可执行约束；BAD: 只写“更好看、更高级”这类主观目标。'
+  ].join('\n')
+}
+
 /** 延迟加载工具与 tool_search 提示 pipe。 */
 export function deferredTools(): PipeFn {
   return (ctx) => {
@@ -211,7 +265,7 @@ export function deferredTools(): PipeFn {
 /** 稳定 Skill 使用纪律 pipe；当前 Skill 列表由 transient context 承载。 */
 export function skillDiscipline(): PipeFn {
   return () => [
-    '若当前工具列表中存在 `Skill` 工具，本轮运行上下文会列出当前模型可见 Skill。',
+    '若当前工具列表中存在 `Skill` 工具，本轮运行上下文会列出当前模型可见 Skills。',
     '当用户请求匹配某个已列出 Skill 的描述或适用场景时，优先调用 `Skill(skill="<name>", args="<optional args>")` 获取完整工作流。',
     '不要猜测未列出的 Skill，也不要把 Skill 正文预加载进上下文。'
   ].join('\n')

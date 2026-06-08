@@ -53,6 +53,7 @@ pnpm eval:nightly           # 运行定期 deterministic 回归并生成趋势�
 pnpm eval:trend             # 从历史 eval runs 生成本地趋势看板
 pnpm eval:compare           # 对比两个 eval run
 pnpm prompt:cache:verify    # 本地验证稳定 system prompt hash 与 90%+ 前缀目标
+pnpm prompt:quality:verify  # 本地审计 Agent prompt 12 维质量基线
 
 pnpm test:all               # pnpm test && pnpm test:legacy
 pnpm precommit              # typecheck + test:unit
@@ -107,7 +108,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `src/gitlab-kb/`：GitLab Wiki 知识库读取/搜索/发布（`/gitlab-kb` 命令背后逻辑）。
 - `src/terminal/`：Ink TUI、输入状态机、Plan Mode 入口建议确认面板、SubAgent Monitor（`agent-monitor.ts` 负责排序、tail output 与格式化）、输入历史 JSONL 持久化（`history-store.ts`）、事件流、Markdown 块级/行内语义渲染、表格、主题（`theme/`）、24-bit 代码高亮、布局/光标 utils。
 - `src/utils/`：通用工具（logger、原子写、字符串、环境变量布尔判定等）。
-- `docs/`：VitePress 内部说明文档站，面向维护者和贡献者；`docs/.vitepress/` 存配置和主题，`docs/public/q-code-duck-round.png` 是小黄鸭主题标识，现有 `docs/agent-evals-guide.md` 作为 Eval 深入指南纳入导航。
+- `docs/`：VitePress 内部说明文档站，面向维护者和贡献者；`docs/.vitepress/` 存配置和主题，`docs/public/q-code-duck-round.png` 是小黄鸭主题标识，现有 `docs/agent-evals-guide.md` 作为 Eval 深入指南纳入导航，`docs/agent-prompt-quality.md` 记录 Agent prompt 12 维质量基线。
 - `tests/unit/`：低成本单元测试。
 - `tests/integration/`：跨模块行为验证（agent-loop、session-recovery、task-graph、audit-trail、team-flow 等）。
 - `tests/_helpers/`：测试通用 helpers（mock-model、mock-tool、temp-home）。
@@ -130,7 +131,8 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - 新测试套件或专项跑法 → `## 测试策略`
   - PR 中没改 `AGENTS.md` 的新功能，视为未完成；评审优先回退或要求补全。
 - 鸭子人格默认「小黄鸭」不进 system prompt（保持 system/tools 前缀稳定）；`/ya` 选中主题鸭时通过 Agent Loop 的 `transientMessages` 作为本轮请求尾部用户消息注入，不进入 system prompt pipe，也不写入会话历史或压缩快照。
-- System Prompt 管道保持稳定前缀优先：核心规则、项目指令、稳定工具纪律、稳定 Skill 调用纪律、SubAgents 摘要和稳定延迟工具纪律留在 system prompt；当前可见 Skill 列表、延迟工具列表、Plan/Task/Todo、Agent Teams 活跃状态、运行环境、项目记忆、会话信息、Output Style、长报告提示、鸭子人格等本轮动态内容必须通过 Agent Loop `transientMessages` 追加为尾部 user context，不写入会话历史或压缩快照。新增 system pipe 必须标注 `stability` / `category`，新增动态字段不得插入 system prompt 稳定前缀。工具纪律拆成稳定的 `toolDiscipline` 与动态的 `toolRuntimeSummary`；工具数量、JIT 摘要和委派状态只能放在 transient user context。运行环境默认只注入日期粒度时间与 Git clean/dirty 摘要，完整 `git status --short` 应按需用工具查询。超长 AGENT.md / AGENTS.md 默认通过 `Q_CODE_AGENT_MD_FULL_CHAR_LIMIT` / `Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT` 保留所有章节标题与摘录，关键章节使用更长预算，完整细节按需 `read_file`。`Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS` 默认关闭；开启后只在空闲且 cache 模式非 off 时用当前稳定 system prompt 发短后台请求保温，小于 60000ms 会按 60000ms 执行，请求在超时、模型/会话切换或退出时取消，并写 `cache.keepalive` 审计事件。修改 prompt/cache 逻辑需覆盖 `tests/unit/prompt-builder.test.ts`、`tests/unit/runtime-context.test.ts`、`tests/unit/usage.test.ts`、`tests/integration/agent-loop.test.ts`，必要时运行 `pnpm prompt:cache:verify`。
+- System Prompt 管道保持稳定前缀优先：核心规则、项目运行纪律、稳定工具纪律、稳定行为正反例、稳定 Skill 调用纪律、SubAgents 摘要和稳定延迟工具纪律留在 system prompt；当前可见 Skill 列表、延迟工具列表、Plan/Task/Todo、Agent Teams 活跃状态、运行环境、项目记忆、会话信息、Output Style、长报告提示、鸭子人格等本轮动态内容必须通过 Agent Loop `transientMessages` 追加为尾部 user context，不写入会话历史或压缩快照。新增 system pipe 必须标注 `stability` / `category`，新增动态字段不得插入 system prompt 稳定前缀。主 Agent / SubAgent 的共同规则必须通过共享稳定 prompt pipe 维护；SubAgent 只在项目指令后插入自身角色说明，避免两套 prompt 漂移。工具纪律拆成稳定的 `toolDiscipline` 与动态的 `toolRuntimeSummary`；工具数量、JIT 摘要和委派状态只能放在 transient user context。运行环境默认只注入日期粒度时间与 Git clean/dirty 摘要，完整 `git status --short` 应按需用工具查询。短 AGENT.md / AGENTS.md 可原样注入；超长文件默认通过 `Q_CODE_AGENT_MD_FULL_CHAR_LIMIT` / `Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT` 只保留模型必须遵守的运行纪律摘要和章节索引，人类可读长文档细节按需 `read_file`。`Q_CODE_CACHE_KEEPALIVE_INTERVAL_MS` 默认关闭；开启后只在空闲且 cache 模式非 off 时用当前稳定 system prompt 发短后台请求保温，小于 60000ms 会按 60000ms 执行，请求在超时、模型/会话切换或退出时取消，并写 `cache.keepalive` 审计事件。修改 prompt/cache 逻辑需覆盖 `tests/unit/prompt-builder.test.ts`、`tests/unit/runtime-context.test.ts`、`tests/unit/usage.test.ts`、`tests/integration/agent-loop.test.ts`，必要时运行 `pnpm prompt:cache:verify`。
+- Agent prompt 质量基线由 `src/context/prompt-quality.ts` 和 `pnpm prompt:quality:verify` 维护，用 12 个维度审计身份、安全、工具、工作流、输出、编辑、记忆、沟通、领域知识、正反例、失败恢复和品质约束。修改 system prompt、工具纪律或项目指令时，按需运行 `pnpm prompt:quality:verify -- --format=md`，出现 `missing` 需补齐规则或说明缺口。
 - 项目记忆保持文件派结构：`.sessions/projects/<projectKey>/memory/MEMORY.md` 是短索引，主题 Markdown 保留 `name / description / type` 并可带 `createdAt / updatedAt / lastAccessedAt`。`memory_write` 必须维护 createdAt/updatedAt；精选流程只能用 headers + userQuery 做相关性选择，正文只能作为 transient user context 注入，预算为单文件 4KB、单轮 20KB、单会话 60KB，并附带更新时间/年龄/验证提示。用户要求“忽略记忆 / ignore memory”时不得注入索引正文或主题正文。`Q_CODE_MEMORY_AUTO_EXTRACT` 与 `Q_CODE_MEMORY_FLUSH` 默认关闭；开启后只允许保存用户显式要求“记住/remember”的长期信息，普通对话、代码事实、git 状态和临时计划不得自动沉淀。
 - 文件和会话持久化逻辑优先使用项目已有的原子写入、路径计算和存储 helper（如 `SessionStore`、`Q_CODE_HOME` 解析、`auditDir` 解析），避免临时拼接路径。
 - Session/history 只恢复上下文，不决定后续模型；`--continue`、`--session <id>`、TUI `/sessions switch` 和输入 history 召回后的新请求必须继续使用当前 runtime effective model 或本进程 `/model` 覆盖值。历史 `SessionMetadata.model` / usage record model 仅用于展示、审计、usage 与诊断；若历史模型与当前模型不同，只能提示一次且不得暴露 API key 或完整敏感 endpoint。修改相关逻辑需覆盖 `tests/unit/session-management.test.ts`、`tests/integration/session-recovery.test.ts`、`tests/integration/session-switch.test.ts` 或等价恢复入口测试。
@@ -176,7 +178,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - TUI SubAgent Monitor：`vitest run tests/unit/agent-monitor.test.ts tests/unit/terminal.test.ts`
   - TUI 输入历史：`vitest run tests/unit/history-store.test.ts tests/unit/terminal.test.ts tests/integration/history-flow.test.ts`
   - 运行时配置/CLI 子命令：`vitest run tests/unit/runtime-config.test.ts tests/unit/cli-info.test.ts tests/unit/update.test.ts tests/unit/changelog.test.ts tests/unit/init-cli.test.ts`
-  - 鸭子人格 / system prompt / prompt cache：`vitest run tests/unit/duck-persona.test.ts tests/unit/prompt-builder.test.ts tests/unit/runtime-context.test.ts tests/unit/usage.test.ts tests/unit/agent-md.test.ts`，必要时运行 `pnpm prompt:cache:verify`
+  - 鸭子人格 / system prompt / prompt cache / prompt quality：`vitest run tests/unit/duck-persona.test.ts tests/unit/prompt-builder.test.ts tests/unit/prompt-quality.test.ts tests/unit/runtime-context.test.ts tests/unit/usage.test.ts tests/unit/agent-md.test.ts`，必要时运行 `pnpm prompt:cache:verify`、`pnpm prompt:quality:verify`
   - 项目记忆：`vitest run tests/unit/memory.test.ts tests/unit/memory-selection.test.ts tests/unit/memory-auto-extract.test.ts tests/unit/prompt-builder.test.ts tests/unit/audit-logger.test.ts`，必要时运行 `pnpm prompt:cache:verify`
   - 崩溃保护：`vitest run tests/unit/crash-guard.test.ts tests/unit/mcp-bootstrap.test.ts tests/unit/audit-logger.test.ts`
   - Infra / GitLab KB：`vitest run tests/unit/infra.test.ts tests/unit/infra-candidate.test.ts tests/unit/gitlab-kb.test.ts`

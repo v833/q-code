@@ -46,6 +46,7 @@ export default defineConfig({
           { text: '仓库地图', link: '/development/repository-map' },
           { text: '测试', link: '/development/testing' },
           { text: '文档规则', link: '/development/documentation-rules' },
+          { text: 'Prompt 质量基线', link: '/agent-prompt-quality' },
           { text: 'Eval 指南', link: '/agent-evals-guide' }
         ]
       },

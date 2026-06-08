@@ -8,13 +8,9 @@ import type { ModelMessage } from 'ai'
 import { agentLoop } from '../agent/loop'
 import type { ProviderOptions } from '../runtime/reasoning-config'
 import {
-  coreRules,
+  createSharedStablePromptBuilder,
   deferredTools,
-  agentMdInstructions,
-  PromptBuilder,
   runtimeEnvironment,
-  skillDiscipline,
-  toolDiscipline,
   toolRuntimeSummary,
   type PromptContext
 } from '../context/prompt-builder'
@@ -359,8 +355,8 @@ function buildChildRegistry(
   return registry
 }
 
-/** 组装子 Agent / 队友 prompt：稳定 system prompt + 每轮动态 transient context。 */
-function buildChildPrompt(params: {
+/** @internal 组装子 Agent / 队友 prompt；导出仅供单元测试锁定共享 prompt 管道。 */
+export function buildChildPrompt(params: {
   definition: AgentDefinition
   registry: ToolRegistry
   runtimeContext?: string
@@ -388,13 +384,15 @@ function buildChildPrompt(params: {
         params.definition.getSystemPrompt()
       ].join('\n')
 
-  const builder = new PromptBuilder()
-    .pipe({ name: 'coreRules', stability: 'stable', category: 'core', cacheCritical: true }, coreRules())
-    .pipe({ name: 'agentMdInstructions', stability: 'stable', category: 'project', cacheCritical: true }, agentMdInstructions())
-    .pipe({ name: 'subAgentInstructions', stability: 'stable', category: 'agents', cacheCritical: true }, () => subAgentBlock)
-    .pipe({ name: 'toolDiscipline', stability: 'stable', category: 'tools', cacheCritical: true }, toolDiscipline())
-    .pipe({ name: 'skillDiscipline', stability: 'stable', category: 'skills', cacheCritical: true }, skillDiscipline())
-    .pipe({ name: 'deferredToolDiscipline', stability: 'stable', category: 'tools' }, () => '若当前工具列表中存在 `tool_search`，并且你需要的工具不在当前列表中，使用 `tool_search` 搜索。')
+  const builder = createSharedStablePromptBuilder({
+    afterProjectInstructions: [
+      {
+        meta: { name: 'subAgentInstructions', stability: 'stable', category: 'agents', cacheCritical: true },
+        fn: () => subAgentBlock
+      }
+    ],
+    includeAgentsContext: false
+  })
 
   const ctx: PromptContext = {
     toolCount: params.registry.getActiveTools().length,

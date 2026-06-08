@@ -155,7 +155,7 @@ cp .env.example .env
 | `Q_CODE_MEMORY_AUTO_EXTRACT`   | ❌   | 自动提取长期记忆开关，默认 false；开启后仅保存用户显式“记住 / remember”的长期信息 |
 | `Q_CODE_MEMORY_FLUSH`          | ❌   | 压缩前 Memory Flush 开关，默认 false；开启后复用显式记忆提取逻辑 |
 | `Q_CODE_AGENT_MD_FULL_CHAR_LIMIT` | ❌ | 单个 AGENT/AGENTS 文件超过该字符数时进入稳定摘要，默认 16000 |
-| `Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT` | ❌ | AGENT/AGENTS 摘要中单个关键章节保留字符数；非关键章节保留较短摘录，默认 1800 |
+| `Q_CODE_AGENT_MD_SECTION_CHAR_LIMIT` | ❌ | AGENT/AGENTS 超长摘要中运行纪律摘录的基础预算，默认 1800 |
 | `Q_CODE_AUDIT_ENABLED`         | ❌   | 审计日志开关，默认开启；设为 false/0/off/no 可关闭            |
 | `Q_CODE_AUDIT_DIR`             | ❌   | 审计日志目录，默认 `<Q_CODE_HOME>/logs`                       |
 | `Q_CODE_AUDIT_RETENTION_DAYS`  | ❌   | 审计日志保留天数，默认 30                                    |
@@ -335,7 +335,7 @@ src/
 │   ├── offload.ts        # Context Offloading：大工具结果落盘
 │   ├── token-budget.ts   # 上下文 token 估算与状态追踪
 │   ├── auto-compact.ts   # 压缩熔断器
-│   ├── agent-md.ts       # AGENT.md 项目指令加载
+│   ├── agent-md.ts       # AGENT/AGENTS 运行纪律加载
 │   ├── plan-attachments.ts# Plan Mode 内部提醒
 │   ├── plan-intent.ts    # Plan Mode 自然语言审批与智能进入规则
 │   ├── plans.ts          # 计划文件读写
@@ -489,9 +489,9 @@ System Prompt 会注入固定的 JIT 纪律：
 
 #### Prompt Cache 稳定前缀
 
-System Prompt 管道只保留高稳定前缀：核心规则、项目指令、稳定工具纪律、稳定 Skill 调用纪律、SubAgents 摘要和稳定延迟工具纪律。当前可见 Skill 列表、延迟工具列表、Plan/Task/Todo、Agent Teams 活跃状态、运行环境、项目记忆索引/精选正文、会话信息和长报告提示等本轮动态内容，会通过 Agent Loop 的 `transientMessages` 追加为本轮尾部 user context，不进入 system prompt，也不写入会话历史。这样即使日期、Git 状态、条件 Skill 激活、延迟工具发现、任务图或 query-specific memory 改变，也不会切断前面的大块 provider prompt cache。
+System Prompt 管道只保留高稳定前缀：核心规则、项目运行纪律、稳定工具纪律、稳定行为正反例、稳定 Skill 调用纪律、SubAgents 摘要和稳定延迟工具纪律。当前可见 Skill 列表、延迟工具列表、Plan/Task/Todo、Agent Teams 活跃状态、运行环境、项目记忆索引/精选正文、会话信息和长报告提示等本轮动态内容，会通过 Agent Loop 的 `transientMessages` 追加为本轮尾部 user context，不进入 system prompt，也不写入会话历史。这样即使日期、Git 状态、条件 Skill 激活、延迟工具发现、任务图或 query-specific memory 改变，也不会切断前面的大块 provider prompt cache。
 
-AGENT.md / AGENTS.md 超过 `Q_CODE_AGENT_MD_FULL_CHAR_LIMIT` 时会以稳定摘要进入 system prompt：所有章节都会保留标题与确定性摘录，项目概览、环境、常用命令、CLI、目录边界、实现约定、测试策略、Git 注意事项、Security、Testing、Repository Guidelines 等关键章节会获得更长预算；完整内容仍可按需 `read_file` 读取。这样项目级协作说明仍在稳定前缀中，但不会因为超长文档拖低 cache 复用率。
+AGENT.md / AGENTS.md 短文件会原样进入 system prompt；超过 `Q_CODE_AGENT_MD_FULL_CHAR_LIMIT` 时会分层瘦身：稳定前缀只保留模型必须遵守的运行纪律摘要和章节索引，人类可读的背景、目录说明、长表格等细节不常驻注入。完整内容仍可按需 `read_file` 读取。这样项目级协作说明仍是权威来源，但不会因为超长文档长期挤占 prompt cache 前缀。
 
 运行环境默认只注入日期粒度时间和 Git 摘要：`clean` 或 `dirty (N changed files)`；如需完整文件列表，模型应通过工具按需查询。`/cache status` 会显示整体 system/tools hash、稳定前缀比例、每个 prompt pipe 的分段 hash/changed/stability/category 状态、逐工具 schema hash，以及实验性 keepalive 是否开启，用于定位是哪一段或哪一个工具在抖动。clean 工作区和普通多轮会话下，稳定前缀比例目标应保持在 90% 以上；可运行 `pnpm prompt:cache:verify` 在本地构建两次稳定 prompt 并检查 `Q_CODE_CACHE_STABLE_PREFIX_TARGET`。
 
@@ -1400,6 +1400,7 @@ src/evals/                    # q-code eval 本地评测框架
 | `pnpm eval:trend`       | 从历史 eval runs 生成本地趋势看板               |
 | `pnpm eval:compare`     | 对比两个 eval run                              |
 | `pnpm prompt:cache:verify` | 本地验证稳定 system prompt hash 与 90%+ 前缀目标 |
+| `pnpm prompt:quality:verify` | 本地审计 Agent prompt 12 维质量基线 |
 
 ### 关键覆盖点
 
@@ -1489,7 +1490,7 @@ git commit -n -m "..."   # 等同于 --no-verify
 
 ### 项目指令
 
-在项目目录或 `~/.q-code/` 下放置 `AGENT.md` 或 `AGENTS.md`，内容会作为项目级指令注入 System Prompt。加载顺序：
+在项目目录或 `~/.q-code/` 下放置 `AGENT.md` 或 `AGENTS.md`，内容会作为项目级指令来源注入 System Prompt。短文件原样注入，长文件只常驻运行纪律摘要和章节索引，完整内容由 Agent 按需读取。加载顺序：
 
 1. `~/.q-code/AGENT.md` — 全局指令
 2. 项目根目录到当前目录的链式加载
@@ -1502,13 +1503,16 @@ System Prompt 由 `PromptBuilder` 按管道顺序拼接，每个 Pipe 可根据�
 | Pipe                              | 稳定性           | 说明                                  |
 | --------------------------------- | ---------------- | ------------------------------------- |
 | `coreRules`                       | `stable`         | 核心行为准则                          |
-| `agentMdInstructions`             | `stable`         | AGENT.md 项目指令                     |
+| `agentMdInstructions`             | `stable`         | AGENT/AGENTS 运行纪律摘要             |
 | `toolDiscipline`                  | `stable`         | 不含工具数量/JIT 摘要的稳定工具纪律   |
+| `behaviorExamples`                | `stable`         | 工具选择、沟通、失败恢复与交付输出正反例 |
 | `skillDiscipline`                 | `stable`         | 不含当前 Skill 列表的稳定调用纪律     |
 | `agentsContext`                   | `stable`         | SubAgents discovery 提醒              |
 | `deferredToolDiscipline`          | `stable`         | 不含具体列表的稳定 `tool_search` 纪律 |
 
 每轮用户输入时，`buildSystemPrompt(userQuery)` 只重建稳定 system prompt；本轮动态内容由 `buildTurnContextTransientMessages(...)` 汇总到尾部 user context。该 transient context 包含 `toolRuntimeSummary`、当前延迟工具列表、当前可见 Skill 列表、`teamsContext`、`modeContext`、Task/Todo 上下文、`runtimeEnvironment`、`projectMemory` 索引、精选 `q_code_memory_context`、`sessionContext` 和长报告流式提示。它参与本轮模型请求和上下文预算估算，但不会写入会话历史或压缩快照。
+
+`pnpm prompt:quality:verify` 会按 `docs/agent-prompt-quality.md` 的 12 个维度审计当前 prompt 证据，输出 JSON 或 `-- --format=md` Markdown 报告。它只读本地 prompt pipe 和项目指令，不调用模型；与 `pnpm prompt:cache:verify` 互补，前者看行为质量覆盖，后者看稳定前缀和 cache 目标。
 
 ## 数据存储结构
 

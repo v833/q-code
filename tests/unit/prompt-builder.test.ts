@@ -3,6 +3,8 @@ import {
   PromptBuilder,
   agentMdInstructions,
   agentsContext,
+  behaviorExamples,
+  createSharedStablePromptBuilder,
   coreRules,
   modeContext,
   projectMemory,
@@ -178,6 +180,27 @@ describe('PromptBuilder System Prompt 管道', () => {
       expect(String(withoutAgent)).toContain('不要假设或调用不可见的委派能力')
     })
 
+    it('behaviorExamples 提供稳定正反例锚点', () => {
+      const out = behaviorExamples()(baseCtx({
+        toolCount: 42,
+        canDelegateToAgents: true,
+        runtimeContext: 'dynamic runtime'
+      }))
+
+      expect(String(out)).toContain('[Behavior Examples / 行为示例]')
+      expect(String(out)).toContain('Good:')
+      expect(String(out)).toContain('BAD:')
+      expect(String(out)).toContain('grep/list_directory')
+      expect(String(out)).toContain('in_progress')
+      expect(String(out)).toContain('拒绝')
+      expect(String(out)).toContain('忽略记忆')
+      expect(String(out)).toContain('MEMORY.md')
+      expect(String(out)).toContain('最终回答')
+      expect(String(out)).toContain('最多/禁用')
+      expect(String(out)).not.toContain('42')
+      expect(String(out)).not.toContain('dynamic runtime')
+    })
+
     it('Explore agent system prompt 明确禁止递归委派', () => {
       const prompt = EXPLORE_AGENT.getSystemPrompt()
 
@@ -194,9 +217,7 @@ describe('PromptBuilder System Prompt 管道', () => {
     })
 
     it('inspect exposes named sections for cache diagnostics', () => {
-      const builder = new PromptBuilder()
-        .pipe({ name: 'coreRules', stability: 'stable', category: 'core', cacheCritical: true }, coreRules())
-        .pipe({ name: 'agentMdInstructions', stability: 'stable', category: 'project', cacheCritical: true }, agentMdInstructions())
+      const builder = createSharedStablePromptBuilder()
         .pipe({ name: 'runtimeEnvironment', stability: 'dynamic', category: 'runtime' }, runtimeEnvironment())
 
       const sections = builder.inspect(baseCtx({
@@ -207,6 +228,11 @@ describe('PromptBuilder System Prompt 管道', () => {
       expect(sections.map((section) => section.name)).toEqual([
         'coreRules',
         'agentMdInstructions',
+        'toolDiscipline',
+        'behaviorExamples',
+        'skillDiscipline',
+        'agentsContext',
+        'deferredToolDiscipline',
         'runtimeEnvironment'
       ])
       expect(sections.find((section) => section.name === 'coreRules')).toMatchObject({
@@ -216,6 +242,31 @@ describe('PromptBuilder System Prompt 管道', () => {
       })
       expect(sections.find((section) => section.name === 'agentMdInstructions')?.chars)
         .toBeGreaterThan(0)
+    })
+
+    it('shared stable builder supports role-specific pipes without dropping common behavior examples', () => {
+      const builder = createSharedStablePromptBuilder({
+        afterProjectInstructions: [
+          {
+            meta: { name: 'subAgentInstructions', stability: 'stable', category: 'agents', cacheCritical: true },
+            fn: () => '[SubAgent]\n角色说明'
+          }
+        ],
+        includeAgentsContext: false
+      })
+
+      const sections = builder.inspect(baseCtx({ agentMdContext: 'PROJECT_RULES' }))
+
+      expect(sections.map((section) => section.name)).toEqual([
+        'coreRules',
+        'agentMdInstructions',
+        'subAgentInstructions',
+        'toolDiscipline',
+        'behaviorExamples',
+        'skillDiscipline',
+        'deferredToolDiscipline'
+      ])
+      expect(builder.build(baseCtx({ agentMdContext: 'PROJECT_RULES' }))).toContain('[Behavior Examples / 行为示例]')
     })
 
     it('recommended cache order keeps project instructions before runtime context', () => {
