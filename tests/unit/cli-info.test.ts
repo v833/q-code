@@ -41,6 +41,11 @@ describe('cli info', () => {
     expect(getEarlyCliCommand(['eval', 'run', 'evals/smoke'])).toBe('eval')
   })
 
+  it('detects dashboard command', () => {
+    expect(getEarlyCliCommand(['dashboard'])).toBe('dashboard')
+    expect(getEarlyCliCommand(['dashboard', '--port', '0'])).toBe('dashboard')
+  })
+
   it('leaves interactive flags alone', () => {
     expect(getEarlyCliCommand(['--continue'])).toBeUndefined()
     expect(getEarlyCliCommand(['--session', 'demo'])).toBeUndefined()
@@ -100,11 +105,13 @@ describe('cli info', () => {
     expect(bootstrap).not.toContain("from '../evals'")
     expect(bootstrap).not.toContain("from '../config/runtime-config'")
     expect(bootstrap).not.toContain("from '../observability/audit-cli'")
+    expect(bootstrap).not.toContain("from '../dashboard'")
     expect(bootstrap).not.toContain("from 'dotenv'")
     expect(bootstrap).not.toContain("from 'ai'")
     expect(bootstrap).not.toContain("from '@ai-sdk/openai'")
     expect(bootstrap).toContain("await import('./main')")
     expect(bootstrap).toContain("await import('../evals')")
+    expect(bootstrap).toContain("await import('../dashboard')")
   })
 
   it('keeps the published build split so dynamic imports stay lazy', () => {
@@ -191,6 +198,7 @@ describe('cli info', () => {
     expect(help).toContain('-v, --version')
     expect(help).toContain('q-code update')
     expect(help).toContain('q-code init')
+    expect(help).toContain('q-code dashboard')
     expect(help).toContain('q-code eval run')
     expect(help).toContain('--max-cost-usd')
     expect(help).toContain('--allow-real-model')

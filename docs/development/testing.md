@@ -29,6 +29,7 @@ pnpm precommit
 - 改 Agent Loop、上下文、会话：跑 integration。
 - 改 SubAgent 或 Agent Teams：跑 `pnpm test:agents` 或 `pnpm test:teams`。
 - 改 eval：跑 `pnpm eval:smoke`，必要时 `pnpm eval:cli`。
+- 改 Dashboard：跑 `vitest run tests/unit/dashboard-data.test.ts tests/integration/dashboard-flow.test.ts tests/unit/cli-info.test.ts`。
 - 改文档站：跑 `pnpm docs:build`。
 
 ## 降低 flaky

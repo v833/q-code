@@ -8,7 +8,7 @@
   基于 AI SDK 的命令行 Agent 框架
 </p>
 
-基于 AI SDK 的命令行 Agent 框架，支持工具调用、可后台运行的 Shell 长任务、Plan Mode、Task V2 持久化任务图、上下文自动压缩、会话持久化、`@file` 文件引用、跨对话项目记忆、Skills 渐进式披露、后台 SubAgent、Worktree 隔离、Agent Teams 多智能体协作和 MCP 扩展。
+基于 AI SDK 的命令行 Agent 框架，支持工具调用、可后台运行的 Shell 长任务、Plan Mode、Task V2 持久化任务图、上下文自动压缩、会话持久化、`@file` 文件引用、跨对话项目记忆、Skills 渐进式披露、后台 SubAgent、Worktree 隔离、Agent Teams 多智能体协作、MCP 扩展和本地 Web Dashboard。
 
 ## 技术栈
 
@@ -232,6 +232,7 @@ pnpm run continue       # 恢复上次会话
 | `-v`, `--version`      | 输出版本号后退出                                         |
 | `update`               | 将全局安装的 q-code 更新到 npm latest                    |
 | `update --dry-run`     | 只显示更新命令，不实际执行                               |
+| `dashboard`            | 启动本地只读 Web Dashboard，默认绑定 `127.0.0.1:48888`   |
 | `eval list [path...]`  | 列出固定 Agent eval case，默认读取 `evals/smoke`          |
 | `eval run [path...]`   | 运行 deterministic Agent eval，输出本地报告和 trace       |
 | `eval compare <a> <b>` | 对比两个 eval run 的通过率、分数、进度、token 和成本变化  |
@@ -246,7 +247,7 @@ pnpm run continue       # 恢复上次会话
 | `--no-color`           | 关闭 ANSI 语法高亮和颜色输出                               |
 | `--debug`              | 显示启动诊断信息，包括 Prompt Pipe 和工具加载概览        |
 
-发布产物使用薄入口启动：`help` / `version` 只加载颜色环境、argv 解析和帮助/版本格式化后立即退出；`update`、`audit`、`init`、`eval` 与主交互循环按需动态加载各自模块，避免互相支付依赖成本。主交互路径也只在确认进入 TUI 时动态加载 Ink/React；非 TTY、`--classic` 或 `Q_CODE_TUI=0` 会回退到传统 readline，且不会加载 TUI 运行时。TUI 会先渲染会话和输入界面，再继续完成 Custom Tools、Hooks、Skills、Agents、MCP、runtime context 与项目指令预热；如果用户在预热完成前提交会触发 Agent 或依赖预热状态的命令，ready gate 会显示“正在完成启动预热...”并在能力完整后自动继续。需要观察阶段耗时时，可设置 `Q_CODE_STARTUP_TRACE=true` 或使用 `--debug`，输出形如 `[Startup] bootstrap 12ms` 的阶段计时，不包含 API key、token 或工具输出。
+发布产物使用薄入口启动：`help` / `version` 只加载颜色环境、argv 解析和帮助/版本格式化后立即退出；`update`、`audit`、`init`、`eval`、`dashboard` 与主交互循环按需动态加载各自模块，避免互相支付依赖成本。主交互路径也只在确认进入 TUI 时动态加载 Ink/React；非 TTY、`--classic` 或 `Q_CODE_TUI=0` 会回退到传统 readline，且不会加载 TUI 运行时。TUI 会先渲染会话和输入界面，再继续完成 Custom Tools、Hooks、Skills、Agents、MCP、runtime context 与项目指令预热；如果用户在预热完成前提交会触发 Agent 或依赖预热状态的命令，ready gate 会显示“正在完成启动预热...”并在能力完整后自动继续。需要观察阶段耗时时，可设置 `Q_CODE_STARTUP_TRACE=true` 或使用 `--debug`，输出形如 `[Startup] bootstrap 12ms` 的阶段计时，不包含 API key、token 或工具输出。
 
 ### Hooks
 
@@ -599,6 +600,19 @@ CLI 校验与查询：
 q-code audit verify --from 2026-05-25 --to 2026-05-25
 q-code audit tail --session <sessionId> --event tool.result --follow
 ```
+
+#### Web Dashboard
+
+`q-code dashboard` 会启动一个本地只读 Web Dashboard，用浏览器查看分散在本机 artifact 里的会话、工具轨迹、Task V2 任务图、后台 Agent 输出、审计事件、usage/cost 和 eval 趋势。
+
+```bash
+q-code dashboard
+q-code dashboard --port 0       # 使用随机可用端口
+q-code dashboard --open         # 启动后打开浏览器
+q-code dashboard --audit-dir ~/.q-code/logs
+```
+
+默认监听 `127.0.0.1:48888`，如果端口被占用会尝试后续端口；`--host` 仅允许 `127.0.0.1`、`localhost` 或 `::1` 这类 loopback 地址。数据源包括 `.sessions/projects/*/*.jsonl` 与 metadata、`<Q_CODE_HOME>/logs/audit-*.ndjson`、`.sessions/projects/*/tasks/**`、`.sessions/projects/*/async-agents/**`、`.sessions/projects/*/agent-artifacts/**` 和 `.q-code/evals/**`。Dashboard 不上传本地数据；页面和 API 默认只展示摘要、哈希、计数、token 与成本，不返回本机绝对路径，也不渲染 prompt、文件内容、shell 输出或工具输入/输出原文。
 
 #### Langfuse 观测导出
 

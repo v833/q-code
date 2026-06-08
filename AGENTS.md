@@ -7,10 +7,10 @@
 - **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、TUI `/agents` SubAgent Monitor（同步与后台 SubAgent，completed 默认隐藏并可清理，忙碌等待期间可用 `Ctrl+A` 查看）、只读同步 SubAgent 动态并行调度、SubAgent 长 final output artifact/preview 回传、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、文件派项目记忆（headers 精选、预算化正文注入、年龄提示）、Skills、SubAgent、Agent Teams、Worktree 隔离。
 - **工具执行**：文件/搜索工具、可配置超时与 spill 的 Shell 工具（Windows 优先 PowerShell7，缺失时回退 Windows PowerShell 5.1）、后台 Shell job（`f_status` / `f_tail` / `f_kill` / `f_list`）。
 - **集成扩展**：MCP server、Hooks（生命周期事件、pre/post tool-use 决策、prompt/context 注入、退出码协议）、Slash 命令注册表、Output Styles、Markdown User Commands、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
-- **可观测性**：NDJSON 审计日志（默认开启）、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警、启动时版本更新说明（对比 `~/.q-code/last-version.json` 与包内 `changelog.json`）。
+- **可观测性**：NDJSON 审计日志（默认开启）、本地只读 Web Dashboard、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警、启动时版本更新说明（对比 `~/.q-code/last-version.json` 与包内 `changelog.json`）。
 - **评测**：`q-code eval` 本地优先 Agent 质量平台，覆盖固定任务集、mock/cli/真实模型 runner、LLM judge（opt-in）、工具轨迹、预算/成本、进度、文件副作用、策略安全、JSONL trace、Markdown/JUnit 报告、baseline 对比、趋势看板、定期回归与可选 Langfuse evaluator trace / dataset / scores 导出。
 - **TUI**：基于 Ink 的交互式 TUI（默认）、`--classic` 经典 readline、可经管道/CI 自动降级；主 Agent 默认人格为「小黄鸭」，可用 `/ya` 主动切换到主题鸭「降压鸭」「屁老鸭」。
-- **CLI 子命令**：`q-code help|version|update|audit|init`（启动前 short-circuit），其余参数走主交互循环。
+- **CLI 子命令**：`q-code help|version|update|audit|init|eval|dashboard`（启动前 short-circuit），其余参数走主交互循环。
 
 ## 环境与工具
 
@@ -75,6 +75,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `q-code audit verify [--from YYYY-MM-DD] [--to YYYY-MM-DD]`：校验本地 NDJSON 审计日志。
 - `q-code audit tail [--session <id>] [--event <name>] [--follow]`：按会话/事件过滤查看审计日志。
 - `q-code init [--user|-u] [--local|-l]`：交互式初始化 `config.toml`（默认用户目录；`--local` 写入项目 `.q-code/config.toml`）。
+- `q-code dashboard [--host 127.0.0.1] [--port 48888] [--open] [--session-dir <dir>] [--audit-dir <dir>]`：启动本地只读 Web Dashboard，读取 session、audit、Task V2、SubAgent artifact 和 eval artifact，`--host` 仅允许 loopback 地址，默认摘要脱敏且不上传数据。
 - `q-code eval list [path...]`：列出固定 eval case，默认读取 `evals/smoke`。
 - `q-code eval run [path...] [--tag <tag>] [--mode <mode>] [--max-cases N] [--max-total-tokens N] [--max-cost-usd N] [--repeat N] [--concurrency N] [--report json,md,junit] [--out <dir>] [--langfuse|--no-langfuse] [--langfuse-datasets] [--allow-real-model] [--judge]`：运行 Agent eval，输出 `.q-code/evals/runs/<run-id>/` artifact；真实模型和 judge 必须显式 opt-in。
 - `q-code eval compare <baseline-name|baseline-run-dir|run.json> <candidate-run-dir|run.json>`：对比两个 eval run 的通过率、分数、进度、token 和成本变化。
@@ -97,6 +98,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `src/user-commands/`：用户/项目级 Markdown 命令加载、命名空间映射、frontmatter 解析、参数 tokenizer 与模板占位符展开。
 - `src/slash/`：斜杠命令注册表、解析、suggestions、formatHelp（`/help` 输出由此驱动）。
 - `src/hooks/`：生命周期 Hooks 的类型、事件工厂、配置加载、matcher、command-runner 与 DefaultHookRunner；支持 command/handler 两类 Hook、JSON 决策、退出码协议、input/output/prompt/context modify。
+- `src/dashboard/`：本地只读 Web Dashboard 的数据采集、HTTP 服务和静态页面；默认绑定本机地址，并只展示摘要、哈希、计数、token 与成本。
 - `src/observability/`：NDJSON 审计日志（`audit.ts`）、可选 Langfuse/OpenTelemetry 导出（`langfuse.ts`，含 Agent step TTFT/吞吐/等待状态 attributes）与 `q-code audit verify|tail` 子命令实现（`audit-cli.ts`）。
 - `src/evals/`：Agent eval 子系统，包含 case loader、mock/cli-subprocess/real-agent runner、trace recorder、deterministic scorers、LLM judge、报告、Langfuse eval trace/dataset/scores 导出、趋势看板与 `q-code eval` CLI。
 - `src/runtime/`：早期 CLI 子命令识别/帮助文案、`init-cli` 交互式配置向导、通用 reasoning 配置与 DeepSeek reasoning 兼容层、Shell 启动参数与 Windows PowerShell fallback、颜色环境 bootstrap、启动耗时 trace、`getPackageVersion`、`runCliUpdate`、启动更新说明（`changelog.ts`）、`installCrashGuard` 与崩溃报告生成。
@@ -137,6 +139,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - 文件和会话持久化逻辑优先使用项目已有的原子写入、路径计算和存储 helper（如 `SessionStore`、`Q_CODE_HOME` 解析、`auditDir` 解析），避免临时拼接路径。
 - Session/history 只恢复上下文，不决定后续模型；`--continue`、`--session <id>`、TUI `/sessions switch` 和输入 history 召回后的新请求必须继续使用当前 runtime effective model 或本进程 `/model` 覆盖值。历史 `SessionMetadata.model` / usage record model 仅用于展示、审计、usage 与诊断；若历史模型与当前模型不同，只能提示一次且不得暴露 API key 或完整敏感 endpoint。修改相关逻辑需覆盖 `tests/unit/session-management.test.ts`、`tests/integration/session-recovery.test.ts`、`tests/integration/session-switch.test.ts` 或等价恢复入口测试。
 - Prompt、工具描述、项目说明多为中文；新增用户可见文案时优先保持中文一致性。
+- Dashboard 必须保持本地优先和只读：默认绑定 `127.0.0.1`，`--host` 仅允许 `127.0.0.1` / `localhost` / `::1` 等 loopback 地址，页面和 API 不得返回本机绝对路径，不得上传本地数据；默认只展示摘要、哈希、计数、token 与成本，不渲染 prompt、文件内容、shell 输出或工具输入/输出原文。
 - 文档站保持简洁易懂：`README.md` 放用户入口和快速开始，`AGENTS.md` 放 Agent 协作规则，`docs/` 放人类可浏览的内部说明；新增重要模块、命令、环境变量、测试跑法或协作规则时，同步更新对应文档页，避免复制 `.env`、密钥、本地私人路径、`.sessions/`、`.q-code/`、`docs/.vitepress/cache/` 或 `docs/.vitepress/dist/` 运行产物。
 - 新增环境变量需同时更新：(a) `.env.example`；(b) `src/config/runtime-config.ts` 的 `SECTION_ALIASES`（让 toml 配置可用）；(c) README 配置表。
 - 模型等待诊断通过 `Q_CODE_MODEL_WAIT_HEARTBEAT_MS` / `Q_CODE_MODEL_SLOW_REQUEST_WARN_MS` / `Q_CODE_MODEL_STALLED_REQUEST_WARN_MS` 控制 10/30/60s 首 token 心跳；`Q_CODE_MODEL_REQUEST_TIMEOUT_MS` 控制单步模型请求总超时（默认 0/未设置为不启用），错误提示必须只包含脱敏 endpoint，不得包含 API key。
@@ -179,6 +182,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - TUI 输入历史：`vitest run tests/unit/history-store.test.ts tests/unit/terminal.test.ts tests/integration/history-flow.test.ts`
   - 运行时配置/CLI 子命令：`vitest run tests/unit/runtime-config.test.ts tests/unit/cli-info.test.ts tests/unit/update.test.ts tests/unit/changelog.test.ts tests/unit/init-cli.test.ts`
   - 鸭子人格 / system prompt / prompt cache / prompt quality：`vitest run tests/unit/duck-persona.test.ts tests/unit/prompt-builder.test.ts tests/unit/prompt-quality.test.ts tests/unit/runtime-context.test.ts tests/unit/usage.test.ts tests/unit/agent-md.test.ts`，必要时运行 `pnpm prompt:cache:verify`、`pnpm prompt:quality:verify`
+  - Dashboard：`vitest run tests/unit/dashboard-data.test.ts tests/integration/dashboard-flow.test.ts tests/unit/cli-info.test.ts`
   - 项目记忆：`vitest run tests/unit/memory.test.ts tests/unit/memory-selection.test.ts tests/unit/memory-auto-extract.test.ts tests/unit/prompt-builder.test.ts tests/unit/audit-logger.test.ts`，必要时运行 `pnpm prompt:cache:verify`
   - 崩溃保护：`vitest run tests/unit/crash-guard.test.ts tests/unit/mcp-bootstrap.test.ts tests/unit/audit-logger.test.ts`
   - Infra / GitLab KB：`vitest run tests/unit/infra.test.ts tests/unit/infra-candidate.test.ts tests/unit/gitlab-kb.test.ts`

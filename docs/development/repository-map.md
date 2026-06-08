@@ -19,6 +19,7 @@
 | `src/tools` | 内置工具和工具注册表 |
 | `src/mcp` | MCP 配置和工具适配 |
 | `src/agents` | SubAgent、后台任务、Teams、worktree |
+| `src/dashboard` | 本地只读 Web Dashboard 数据采集和 HTTP 服务 |
 | `src/terminal` | TUI、输入状态、事件、渲染 |
 | `src/session` | 会话存储 |
 | `src/observability` | 审计、Langfuse、指标 |

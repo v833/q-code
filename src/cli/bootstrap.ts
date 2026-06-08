@@ -80,6 +80,17 @@ export async function bootstrap(argv: string[] = process.argv.slice(2)): Promise
     return code;
   }
 
+  if (earlyCliCommand === 'dashboard') {
+    await applyRuntimeConfigForStartup(startupTrace);
+    startupTrace.mark('dashboard-import-start');
+    const { runDashboardCli } = await import('../dashboard');
+    startupTrace.mark('dashboard-import');
+    const code = await runDashboardCli(argv.slice(1));
+    startupTrace.mark('dashboard');
+    startupTrace.print();
+    return code;
+  }
+
   await applyRuntimeConfigForStartup(startupTrace);
   startupTrace.mark('main-import-start');
   const { runMain } = await import('./main');

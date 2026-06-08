@@ -29,6 +29,9 @@ q-code --plan
 q-code --agent-teams
 q-code init
 q-code update
+q-code dashboard
+q-code dashboard --port 0 --open
+q-code dashboard --host localhost
 q-code audit verify
 q-code audit tail
 q-code eval run evals/smoke --no-langfuse

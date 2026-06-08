@@ -10,6 +10,7 @@
 | `src/agents` | SubAgent、后台 Agent、Teams |
 | `src/output-styles` | Output Styles 加载、持久化和动态 prompt 格式化 |
 | `src/user-commands` | Markdown User Commands 加载和模板展开 |
+| `src/dashboard` | 本地只读 Web Dashboard |
 | `src/terminal` | Ink TUI |
 | `src/session` | 会话存储 |
 | `src/observability` | 审计和外部 trace |

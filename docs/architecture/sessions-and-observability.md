@@ -30,6 +30,18 @@
 
 Langfuse 是可选外部导出。默认关闭，且 `Q_CODE_LANGFUSE_RECORD_IO` 默认不上传原文。
 
+## Dashboard
+
+`q-code dashboard` 提供本地只读 Web UI。它读取：
+
+- `.sessions/projects/*/*.jsonl` 会话和 usage。
+- `<Q_CODE_HOME>/logs/audit-*.ndjson` 审计事件。
+- `.sessions/projects/*/tasks/**` Task V2 静态任务图。
+- `.sessions/projects/*/async-agents/**` 和 `agent-artifacts/**` 后台 Agent artifact。
+- `.q-code/evals/**` eval run、baseline 和 trend artifact。
+
+Dashboard 默认绑定本机地址，`--host` 只接受 loopback 地址。页面和 API 只展示摘要、哈希、计数、token 与成本，不返回本机绝对路径，也不渲染 prompt、文件内容、shell 输出或工具结果原文。
+
 ## 崩溃报告
 
 crash guard 默认开启。报告写入 `<Q_CODE_HOME>/crashes`，不要依赖 Ink 渲染错误。

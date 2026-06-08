@@ -2,14 +2,14 @@
  * 早期 CLI 子命令路由与版本/帮助文案（不启动 MCP 与会话）。
  *
  * `getEarlyCliCommand` 在 `index.ts` 进入主循环前 short-circuit：
- * help、version、update、audit、init、eval。
+ * help、version、update、audit、init、eval、dashboard。
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** 在进入主交互循环前即可处理的子命令。 */
-export type EarlyCliCommand = 'help' | 'version' | 'update' | 'audit' | 'init' | 'eval'
+export type EarlyCliCommand = 'help' | 'version' | 'update' | 'audit' | 'init' | 'eval' | 'dashboard'
 
 let cachedPackageVersion: string | undefined
 
@@ -54,6 +54,7 @@ export function getEarlyCliCommand(argv: string[]): EarlyCliCommand | undefined 
   if (first === 'audit') return 'audit'
   if (first === 'init') return 'init'
   if (first === 'eval') return 'eval'
+  if (first === 'dashboard') return 'dashboard'
   return undefined
 }
 
@@ -75,6 +76,7 @@ export function formatCliHelp(version: string): string {
     '  q-code audit verify [--from YYYY-MM-DD] [--to YYYY-MM-DD]',
     '  q-code audit tail [--session <id>] [--event <name>] [--follow]',
     '  q-code init [--user|-u] [--local|-l]',
+    '  q-code dashboard [--host 127.0.0.1] [--port 48888] [--open]',
     '  q-code eval list [path...]',
     '  q-code eval run [path...] [--tag <tag>] [--mode <mode>] [--max-cases N] [--max-cost-usd N] [--repeat N] [--concurrency N] [--report json,md,junit] [--out <dir>]',
     '                  [--allow-real-model] [--judge] [--langfuse-datasets]',
@@ -92,6 +94,7 @@ export function formatCliHelp(version: string): string {
     '      init                  Interactive config.toml setup wizard',
     '      init --local          Write config to ./.q-code/config.toml',
     '      init --user           Write config to ~/.q-code/config.toml (default)',
+    '      dashboard             Start the local-only Web Dashboard',
     '      eval list             List eval suites and cases',
     '      eval run              Run deterministic Agent evals and write reports',
     '      eval compare          Compare two eval runs',
@@ -116,6 +119,7 @@ export function formatCliHelp(version: string): string {
     '  q-code',
     '  q-code --continue',
     '  q-code --session my-task --plan',
+    '  q-code dashboard',
     '  q-code update'
   ].join('\n')
 }

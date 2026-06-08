@@ -24,7 +24,10 @@ q-code --agent-teams
 | `q-code init` | 初始化配置 |
 | `q-code audit verify` | 校验审计日志 |
 | `q-code audit tail` | 查看审计日志 |
+| `q-code dashboard` | 启动本地只读 Web Dashboard |
 | `q-code eval ...` | 运行 Agent eval |
+
+`q-code dashboard` 默认绑定 `127.0.0.1:48888`，`--host` 只接受 loopback 地址，读取本地 session、audit、Task V2、SubAgent artifact 和 eval artifact。页面只展示摘要、哈希、计数、token 与成本，不上传数据，不返回本机绝对路径，也不渲染 prompt 或工具输出原文。
 
 ## TUI 常用入口
 
