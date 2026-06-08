@@ -3,9 +3,10 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'q-code',
   description: 'q-code 内部说明文档',
+  base: '/q-code/',
   cleanUrls: true,
   ignoreDeadLinks: true,
-  head: [['link', { rel: 'icon', type: 'image/png', href: '/q-code-duck-round-64.png' }]],
+  head: [['link', { rel: 'icon', type: 'image/png', href: '/q-code/q-code-duck-round-64.png' }]],
   themeConfig: {
     logo: '/q-code-duck-round-64.png',
     siteTitle: 'q-code',
