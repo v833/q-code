@@ -170,6 +170,11 @@ async function handleRequest(
       return
     }
 
+    if (url.pathname === '/favicon.ico') {
+      sendText(response, 200, renderFaviconSvg(), 'image/svg+xml; charset=utf-8')
+      return
+    }
+
     if (url.pathname === '/api/dashboard') {
       const snapshot = collectDashboardDataWithCache(options)
       sendJson(response, 200, applySnapshotFilters(snapshot, url.searchParams))
@@ -340,16 +345,26 @@ function renderDashboardHtml(): string {
   <style>
     :root {
       color-scheme: light;
-      --bg: oklch(0.975 0.008 92);
-      --surface: oklch(0.995 0.005 92);
-      --surface-2: oklch(0.945 0.014 94);
-      --ink: oklch(0.22 0.018 85);
-      --muted: oklch(0.49 0.018 82);
-      --line: oklch(0.86 0.018 88);
-      --accent: oklch(0.62 0.12 71);
-      --accent-2: oklch(0.54 0.11 164);
-      --danger: oklch(0.56 0.16 28);
-      --shadow: 0 16px 38px oklch(0.3 0.02 80 / 0.09);
+      --bg: oklch(0.972 0.006 230);
+      --surface: oklch(0.996 0.003 230);
+      --surface-2: oklch(0.965 0.007 230);
+      --surface-3: oklch(0.938 0.01 228);
+      --ink: oklch(0.23 0.018 238);
+      --muted: oklch(0.52 0.018 236);
+      --soft: oklch(0.68 0.018 236);
+      --line: oklch(0.875 0.012 232);
+      --line-strong: oklch(0.79 0.018 232);
+      --accent: oklch(0.68 0.15 78);
+      --accent-ink: oklch(0.31 0.08 70);
+      --teal: oklch(0.58 0.11 176);
+      --teal-soft: oklch(0.94 0.035 176);
+      --warn-soft: oklch(0.95 0.055 83);
+      --danger: oklch(0.55 0.16 28);
+      --danger-soft: oklch(0.94 0.045 28);
+      --ok: oklch(0.54 0.12 150);
+      --ok-soft: oklch(0.94 0.04 150);
+      --shadow: 0 12px 32px oklch(0.35 0.03 238 / 0.08);
+      --shadow-soft: 0 1px 2px oklch(0.35 0.03 238 / 0.08);
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
@@ -359,43 +374,80 @@ function renderDashboardHtml(): string {
       background: var(--bg);
       color: var(--ink);
       letter-spacing: 0;
+      min-width: 320px;
     }
 
     header {
-      padding: 28px 32px 18px;
+      padding: 18px 32px 20px;
       border-bottom: 1px solid var(--line);
       background: var(--surface);
     }
 
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      font-weight: 750;
+    }
+
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border: 1px solid oklch(0.79 0.08 78);
+      border-radius: 8px;
+      background: var(--warn-soft);
+      color: var(--accent-ink);
+      box-shadow: var(--shadow-soft);
+    }
+
+    .header-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
     h1 {
       margin: 0;
-      font-size: 28px;
+      font-size: 26px;
       line-height: 1.15;
+      font-weight: 760;
     }
 
     .subhead {
       display: flex;
       flex-wrap: wrap;
-      gap: 10px 16px;
-      margin-top: 10px;
+      gap: 8px 14px;
+      margin-top: 8px;
       color: var(--muted);
       font-size: 13px;
     }
 
     .local {
-      color: var(--accent-2);
-      font-weight: 700;
+      color: var(--teal);
+      font-weight: 750;
     }
 
     main {
-      padding: 22px 32px 40px;
+      padding: 20px 32px 40px;
       display: grid;
       gap: 20px;
     }
 
     .metrics {
       display: grid;
-      grid-template-columns: repeat(5, minmax(130px, 1fr));
+      grid-template-columns: repeat(6, minmax(126px, 1fr));
       gap: 12px;
     }
 
@@ -403,27 +455,44 @@ function renderDashboardHtml(): string {
       background: var(--surface);
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 15px 16px;
-      box-shadow: var(--shadow);
-      min-height: 86px;
+      padding: 13px 14px;
+      box-shadow: var(--shadow-soft);
+      min-height: 84px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .metric::after {
+      content: "";
+      position: absolute;
+      inset: auto 12px 10px auto;
+      width: 34px;
+      height: 3px;
+      border-radius: 999px;
+      background: var(--tone, var(--line-strong));
+      opacity: 0.8;
     }
 
     .metric strong {
       display: block;
-      font-size: 26px;
+      font-size: 25px;
       line-height: 1.1;
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
     }
 
     .metric span {
       display: block;
-      margin-top: 8px;
+      margin-top: 9px;
       color: var(--muted);
       font-size: 12px;
+      font-weight: 650;
+      text-transform: uppercase;
     }
 
     .layout {
       display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      grid-template-columns: minmax(0, 1.14fr) minmax(330px, 0.86fr);
       gap: 20px;
       align-items: start;
     }
@@ -436,7 +505,7 @@ function renderDashboardHtml(): string {
       background: var(--surface);
       border: 1px solid var(--line);
       border-radius: 8px;
-      box-shadow: var(--shadow);
+      box-shadow: var(--shadow-soft);
       overflow: hidden;
     }
 
@@ -445,7 +514,7 @@ function renderDashboardHtml(): string {
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      padding: 14px 16px;
+      padding: 13px 15px;
       border-bottom: 1px solid var(--line);
       background: var(--surface-2);
     }
@@ -454,14 +523,16 @@ function renderDashboardHtml(): string {
       margin: 0;
       font-size: 15px;
       line-height: 1.2;
+      font-weight: 740;
     }
 
     .filters {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
-      padding: 12px 16px;
+      padding: 12px 15px;
       border-bottom: 1px solid var(--line);
+      background: oklch(0.985 0.004 230);
     }
 
     input {
@@ -469,24 +540,53 @@ function renderDashboardHtml(): string {
       min-height: 34px;
       border: 1px solid var(--line);
       border-radius: 6px;
-      background: oklch(0.99 0.004 90);
+      background: var(--surface);
       color: var(--ink);
       padding: 7px 9px;
       font: inherit;
       font-size: 13px;
+      outline: none;
+      transition: border-color 150ms ease-out, box-shadow 150ms ease-out;
+    }
+
+    input:focus {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 3px oklch(0.76 0.08 176 / 0.18);
     }
 
     button {
       min-height: 34px;
-      border: 1px solid oklch(0.53 0.09 72);
+      border: 1px solid oklch(0.57 0.12 78);
       border-radius: 6px;
       background: var(--accent);
-      color: oklch(0.99 0.006 90);
+      color: oklch(0.23 0.05 70);
       padding: 7px 11px;
       font: inherit;
       font-size: 13px;
-      font-weight: 700;
+      font-weight: 750;
       cursor: pointer;
+      transition: transform 150ms ease-out, box-shadow 150ms ease-out, background 150ms ease-out;
+    }
+
+    button:hover {
+      background: oklch(0.72 0.15 78);
+      box-shadow: var(--shadow-soft);
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    .table-wrap {
+      overflow: auto;
+    }
+
+    .table-wrap table {
+      min-width: 620px;
+    }
+
+    .detail .table-wrap table {
+      min-width: 520px;
     }
 
     table {
@@ -496,7 +596,7 @@ function renderDashboardHtml(): string {
     }
 
     th, td {
-      padding: 11px 12px;
+      padding: 10px 12px;
       border-bottom: 1px solid var(--line);
       text-align: left;
       vertical-align: top;
@@ -506,17 +606,27 @@ function renderDashboardHtml(): string {
 
     th {
       color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-      background: oklch(0.98 0.006 90);
+      font-size: 11px;
+      font-weight: 760;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      background: oklch(0.982 0.005 230);
+      position: sticky;
+      top: 0;
+      z-index: 1;
     }
 
     tr[data-session-id] {
       cursor: pointer;
+      transition: background 140ms ease-out;
     }
 
     tr[data-session-id]:hover {
-      background: oklch(0.965 0.018 93);
+      background: oklch(0.965 0.014 222);
+    }
+
+    tr.selected {
+      background: var(--teal-soft);
     }
 
     .muted {
@@ -525,7 +635,7 @@ function renderDashboardHtml(): string {
 
     .danger {
       color: var(--danger);
-      font-weight: 700;
+      font-weight: 750;
     }
 
     .stack {
@@ -534,14 +644,18 @@ function renderDashboardHtml(): string {
     }
 
     .detail {
-      padding: 14px 16px;
+      padding: 15px;
       display: grid;
       gap: 14px;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
     }
 
     .detail h3 {
       margin: 0 0 8px;
       font-size: 13px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
     }
 
     .timeline {
@@ -554,36 +668,128 @@ function renderDashboardHtml(): string {
     .timeline-item {
       border: 1px solid var(--line);
       border-radius: 6px;
-      padding: 9px 10px;
-      background: oklch(0.99 0.004 88);
+      padding: 10px;
+      background: oklch(0.99 0.003 230);
       font-size: 12px;
     }
 
     code {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 12px;
-      color: oklch(0.36 0.06 164);
+      color: oklch(0.38 0.06 176);
     }
 
     .empty {
-      padding: 24px 16px;
+      padding: 24px 15px;
       color: var(--muted);
       font-size: 13px;
+      background: oklch(0.989 0.004 230);
+    }
+
+    .chip,
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      padding: 3px 8px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .chip::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--dot, var(--soft));
+    }
+
+    .pill.ok {
+      border-color: oklch(0.78 0.07 150);
+      background: var(--ok-soft);
+      color: var(--ok);
+    }
+
+    .pill.warn {
+      border-color: oklch(0.83 0.09 83);
+      background: var(--warn-soft);
+      color: var(--accent-ink);
+    }
+
+    .pill.error {
+      border-color: oklch(0.78 0.08 28);
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .pill.neutral {
+      background: var(--surface-2);
+      color: var(--muted);
+    }
+
+    .name-cell strong {
+      display: inline-block;
+      max-width: 100%;
+      font-weight: 740;
+    }
+
+    .meta-line {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .detail-placeholder {
+      grid-column: 1 / -1;
+      min-height: 120px;
+      display: grid;
+      align-content: center;
+      gap: 6px;
+    }
+
+    .detail-placeholder strong {
+      color: var(--ink);
     }
 
     @media (max-width: 980px) {
       header, main { padding-left: 18px; padding-right: 18px; }
       .metrics { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
       .layout { grid-template-columns: 1fr; }
+      .detail { grid-template-columns: 1fr; }
       input { width: 100%; flex: 1 1 140px; }
+    }
+
+    @media (max-width: 560px) {
+      header { padding-top: 14px; }
+      .topbar { align-items: flex-start; }
+      .header-actions { justify-content: flex-start; }
+      .metrics { grid-template-columns: 1fr; }
+      h1 { font-size: 23px; }
+      th, td { padding: 9px 10px; }
     }
   </style>
 </head>
 <body>
   <header>
+    <div class="topbar">
+      <div class="brand">
+        <span class="brand-mark">q</span>
+        <span>q-code</span>
+      </div>
+      <div class="header-actions">
+        <span class="chip" style="--dot: var(--teal)">Local only</span>
+        <span class="chip" style="--dot: var(--accent)">Summary</span>
+      </div>
+    </div>
     <h1>q-code Dashboard</h1>
     <div class="subhead">
-      <span class="local">Local only</span>
       <span id="generated">loading...</span>
       <span>摘要模式，不渲染 prompt 或工具输出原文</span>
     </div>
@@ -663,22 +869,23 @@ function renderDashboardHtml(): string {
       const data = state.snapshot;
       document.getElementById('generated').textContent = 'generated ' + shortDate(data.generatedAt);
       document.getElementById('metrics').innerHTML = [
-        metric('Sessions', data.summary.sessionCount),
-        metric('Audit events', data.summary.auditEventCount),
-        metric('Tasks', data.summary.taskCount),
-        metric('Agents', data.summary.agentArtifactCount),
-        metric('Eval runs', data.summary.evalRunCount),
-        metric('Tokens', data.summary.totalTokens)
+        metric('Sessions', data.summary.sessionCount, 'var(--teal)'),
+        metric('Audit events', data.summary.auditEventCount, 'var(--accent)'),
+        metric('Tasks', data.summary.taskCount, 'var(--line-strong)'),
+        metric('Agents', data.summary.agentArtifactCount, 'var(--ok)'),
+        metric('Eval runs', data.summary.evalRunCount, 'var(--danger)'),
+        metric('Tokens', data.summary.totalTokens, 'var(--soft)')
       ].join('');
       renderSessions(data.sessions);
       renderAudit(data.audit.recentEvents);
       renderAgents(data.agents.artifacts);
       renderTasks(data.tasks);
       renderEvals(data.evals.runs, data.evals.trend);
+      renderDetailPlaceholder();
     }
 
-    function metric(label, value) {
-      return '<div class="metric"><strong>' + escapeHtml(fmt.format(value || 0)) + '</strong><span>' + escapeHtml(label) + '</span></div>';
+    function metric(label, value, tone) {
+      return '<div class="metric" style="--tone:' + escapeHtml(tone) + '"><strong>' + escapeHtml(fmt.format(value || 0)) + '</strong><span>' + escapeHtml(label) + '</span></div>';
     }
 
     function renderSessions(sessions) {
@@ -692,8 +899,8 @@ function renderDashboardHtml(): string {
         sessions.map((item) => ({
           attrs: ' data-session-id="' + escapeHtml(item.sessionId) + '"',
           cells: [
-            '<strong>' + escapeHtml(item.displayName || item.sessionId) + '</strong><br><span class="muted">' + escapeHtml(item.lastUserPromptDigest || item.projectKey) + '</span>',
-            escapeHtml(item.model || 'unknown'),
+            '<span class="name-cell"><strong>' + escapeHtml(item.displayName || item.sessionId) + '</strong><span class="meta-line">' + escapeHtml(item.lastUserPromptDigest || item.projectKey) + '</span></span>',
+            '<span class="pill neutral">' + escapeHtml(item.model || 'unknown') + '</span>',
             fmt.format(item.toolCallCount || 0),
             fmt.format(item.totalTokens || 0),
             shortDate(item.updatedAt)
@@ -701,7 +908,11 @@ function renderDashboardHtml(): string {
         }))
       );
       for (const row of document.querySelectorAll('[data-session-id]')) {
-        row.addEventListener('click', () => loadSession(row.dataset.sessionId));
+        row.addEventListener('click', () => {
+          for (const other of document.querySelectorAll('[data-session-id]')) other.classList.remove('selected');
+          row.classList.add('selected');
+          loadSession(row.dataset.sessionId);
+        });
       }
     }
 
@@ -717,8 +928,8 @@ function renderDashboardHtml(): string {
           cells: [
             shortDate(item.ts),
             escapeHtml(item.event) + (item.sessionId ? '<br><code>' + escapeHtml(item.sessionId) + '</code>' : ''),
-            escapeHtml(item.toolName || ''),
-            item.ok === false || item.isError ? '<span class="danger">error</span>' : '<span class="muted">ok</span>'
+            item.toolName ? '<span class="pill neutral">' + escapeHtml(item.toolName) + '</span>' : '',
+            item.ok === false || item.isError ? '<span class="pill error">error</span>' : '<span class="pill ok">ok</span>'
           ]
         }))
       );
@@ -734,7 +945,7 @@ function renderDashboardHtml(): string {
         artifacts.slice(0, 12).map((item) => ({
           cells: [
             '<strong>' + escapeHtml(item.agentType || item.agentId) + '</strong><br><code>' + escapeHtml(item.sessionId) + '</code>',
-            escapeHtml(item.status),
+            statusPill(item.status),
             fmt.format(item.toolUseCount || 0),
             fmt.format(item.totalTokens || 0)
           ]
@@ -752,7 +963,7 @@ function renderDashboardHtml(): string {
         graph.tasks.slice(0, 16).map((item) => ({
           cells: [
             '<strong>#' + escapeHtml(item.taskId) + '</strong><br><code>' + escapeHtml(item.sessionId) + '</code>',
-            escapeHtml(item.status),
+            statusPill(item.status),
             escapeHtml(item.blocks.join(', ') || '')
           ]
         }))
@@ -770,7 +981,7 @@ function renderDashboardHtml(): string {
         runs.slice(0, 12).map((item) => ({
           cells: [
             '<strong>' + escapeHtml(item.suiteName) + '</strong><br><code>' + escapeHtml(item.runId) + '</code>',
-            Math.round((item.passRate || 0) * 100) + '%',
+            passPill(item.passRate || 0),
             String(Math.round((item.averageScore || 0) * 100) / 100),
             fmt.format(item.totalTokens || 0)
           ]
@@ -799,16 +1010,39 @@ function renderDashboardHtml(): string {
         tools.map((item) => ({
           cells: [
             shortDate(item.timestamp),
-            escapeHtml(item.phase),
+            '<span class="pill neutral">' + escapeHtml(item.phase) + '</span>',
             escapeHtml(item.name),
-            item.isError ? '<span class="danger">error</span>' : escapeHtml(String(item.resultLength || ''))
+            item.isError ? '<span class="pill error">error</span>' : '<span class="pill ok">' + escapeHtml(String(item.resultLength || 0)) + '</span>'
           ]
         }))
       );
     }
 
+    function renderDetailPlaceholder() {
+      document.getElementById('detail').innerHTML = '<div class="detail-placeholder empty"><strong>选择一条 session</strong><span>查看最近消息摘要、工具调用和 usage 轨迹。</span></div>';
+    }
+
+    function statusPill(status) {
+      const text = String(status || 'unknown');
+      const lowered = text.toLowerCase();
+      const tone = lowered.includes('fail') || lowered.includes('error') || lowered.includes('blocked')
+        ? 'error'
+        : lowered.includes('done') || lowered.includes('complete') || lowered.includes('passed')
+          ? 'ok'
+          : lowered.includes('running') || lowered.includes('pending')
+            ? 'warn'
+            : 'neutral';
+      return '<span class="pill ' + tone + '">' + escapeHtml(text) + '</span>';
+    }
+
+    function passPill(passRate) {
+      const percent = Math.round(passRate * 100);
+      const tone = percent >= 90 ? 'ok' : percent >= 60 ? 'warn' : 'error';
+      return '<span class="pill ' + tone + '">' + percent + '%</span>';
+    }
+
     function table(headers, rows) {
-      return '<table><thead><tr>' + headers.map((item) => '<th>' + escapeHtml(item) + '</th>').join('') + '</tr></thead><tbody>' + rows.map((row) => '<tr' + (row.attrs || '') + '>' + row.cells.map((cell) => '<td>' + cell + '</td>').join('') + '</tr>').join('') + '</tbody></table>';
+      return '<div class="table-wrap"><table><thead><tr>' + headers.map((item) => '<th>' + escapeHtml(item) + '</th>').join('') + '</tr></thead><tbody>' + rows.map((row) => '<tr' + (row.attrs || '') + '>' + row.cells.map((cell) => '<td>' + cell + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>';
     }
 
     function shortDate(value) {
@@ -840,4 +1074,13 @@ function renderDashboardHtml(): string {
 /** 将 Dashboard API 中的路径按 cwd 缩短，供测试或未来 UI 使用。 */
 export function shortDashboardPath(filePath: string, cwd: string = process.cwd()): string {
   return formatDashboardPath(resolve(filePath), resolve(cwd))
+}
+
+function renderFaviconSvg(): string {
+  return [
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">',
+    '<rect width="32" height="32" rx="8" fill="oklch(0.95 0.055 83)"/>',
+    '<text x="16" y="21" text-anchor="middle" font-family="system-ui, sans-serif" font-size="17" font-weight="800" fill="oklch(0.31 0.08 70)">q</text>',
+    '</svg>'
+  ].join('')
 }
