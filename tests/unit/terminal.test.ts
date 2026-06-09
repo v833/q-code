@@ -24,8 +24,10 @@ import { shouldBackspace, shouldDeleteForward } from '../../src/terminal/keys'
 import { parseMarkdown } from '../../src/terminal/markdown'
 import {
   MARKDOWN_PARSE_CHAR_LIMIT,
+  prepareStreamingMarkdownRenderParts,
   previewStreamingText,
-  shouldParseMarkdownText
+  shouldParseMarkdownText,
+  splitStableMarkdownPrefix
 } from '../../src/terminal/components/MarkdownText'
 import { getCursorRowsFromFrameEnd } from '../../src/terminal/components/InputPrompt'
 import { renderMarkdownTable } from '../../src/terminal/table-renderer'
@@ -886,6 +888,83 @@ describe('terminal markdown parser', () => {
 
     expect(preview).toContain('内容较长，已折叠 1400 字符')
     expect(preview.length).toBeLessThan(2700)
+  })
+
+  it('normalizes CRLF before splitting streaming markdown', () => {
+    expect(splitStableMarkdownPrefix('first\r\n\r\nsecond')).toEqual({
+      stable: 'first',
+      tail: 'second'
+    })
+  })
+
+  it('keeps the last paragraph as plain streaming tail', () => {
+    expect(splitStableMarkdownPrefix('first paragraph\n\nsecond paragraph')).toEqual({
+      stable: 'first paragraph',
+      tail: 'second paragraph'
+    })
+  })
+
+  it('keeps unterminated fenced code and its lead-in paragraph in the plain tail', () => {
+    expect(splitStableMarkdownPrefix('done para\n\n下面是代码：\n```ts\nconst x = 1')).toEqual({
+      stable: 'done para',
+      tail: '下面是代码：\n```ts\nconst x = 1'
+    })
+  })
+
+  it('does not treat fence lines with trailing text as closing fences', () => {
+    expect(splitStableMarkdownPrefix('done para\n\n```ts\n``` not close\nstill code')).toEqual({
+      stable: 'done para',
+      tail: '```ts\n``` not close\nstill code'
+    })
+  })
+
+  it('allows closed fenced code blocks to roll into the stable prefix', () => {
+    expect(splitStableMarkdownPrefix('intro\n\n```ts\nconst x = 1\n```')).toEqual({
+      stable: 'intro\n\n```ts\nconst x = 1\n```',
+      tail: ''
+    })
+  })
+
+  it('keeps text after a closed code fence as the plain streaming tail', () => {
+    expect(splitStableMarkdownPrefix('intro\n\n```ts\nconst x = 1\n```\nnext')).toEqual({
+      stable: 'intro\n\n```ts\nconst x = 1\n```',
+      tail: 'next'
+    })
+  })
+
+  it('retreats paragraphs with unclosed strong markup from the stable prefix', () => {
+    expect(splitStableMarkdownPrefix('broken **bold\n\nnext')).toEqual({
+      stable: '',
+      tail: 'broken **bold\n\nnext'
+    })
+  })
+
+  it('retreats unclosed strong markup even when a later code fence closes', () => {
+    expect(splitStableMarkdownPrefix('broken **bold\n```ts\nconst x = 1\n```')).toEqual({
+      stable: '',
+      tail: 'broken **bold\n```ts\nconst x = 1\n```'
+    })
+  })
+
+  it('retreats paragraphs with unclosed inline code from the stable prefix', () => {
+    expect(splitStableMarkdownPrefix('ok `code`\n\nbad `code\n\nnext')).toEqual({
+      stable: 'ok `code`',
+      tail: 'bad `code\n\nnext'
+    })
+  })
+
+  it('parses only stable streaming sections while leaving the tail as render-only text', () => {
+    const streaming = prepareStreamingMarkdownRenderParts('done **bold**\n\nwriting **bo')
+    expect(streaming.stableText).toBe('done **bold**')
+    expect(streaming.stableBlocks).toMatchObject([{ type: 'paragraph', text: 'done bold' }])
+    expect(JSON.stringify(streaming.stableBlocks)).not.toContain('writing')
+    expect(streaming.tailText).toBe('writing **bo')
+
+    const final = parseMarkdown('done **bold**\n\nwriting **bold**')
+    expect(final).toMatchObject([
+      { type: 'paragraph', text: 'done bold' },
+      { type: 'paragraph', text: 'writing bold' }
+    ])
   })
 
   it('parses common markdown blocks used by agent output', () => {

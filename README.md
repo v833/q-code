@@ -275,7 +275,7 @@ Hooks 用来把安全检查、审计、质量门控和上下文注入从“提�
 
 完整协议、退出码和示例脚本见 `docs/guide/hooks.md`。
 
-默认在交互式 TTY 中启动 Ink TUI。TUI 将 Agent 输出、工具调用、上下文占用、任务进度、SubAgent 状态和 token 用量统一渲染为事件流，支持 `Ctrl+J` 多行输入、`Ctrl+R` 历史搜索、`Esc` 清空/恢复输入、忙时 `Ctrl+C` 中断当前任务和 Markdown 代码块/列表/表格展示。多工具任务中，Agent 会在关键工具调用前后输出简短的公开进度说明；TUI 会按时间线把这些说明和工具调用交错展示，避免执行过程中只剩工具流水账。Markdown 行内内容会保留语义高亮：`**重点**`、inline code、URL、issue ref、文件路径和 `src/foo.ts:123` 行号会使用不同视觉通道，便于在长回复中快速定位关键信息。代码块使用 24-bit ANSI 主题 palette，TypeScript / TSX、diff 等内容在明暗终端中都保持较高对比；可通过 `Q_CODE_THEME=dark|light|auto` 控制配色，终端无法暴露背景色或 auto 判断不准时建议手动指定 `light` / `dark`，也可使用 `--no-color` / `NO_COLOR=1` 关闭全部颜色。输入区使用真实终端光标锚定输入法候选窗，避免 macOS IME 跑到屏幕角落。
+默认在交互式 TTY 中启动 Ink TUI。TUI 将 Agent 输出、工具调用、上下文占用、任务进度、SubAgent 状态和 token 用量统一渲染为事件流，支持 `Ctrl+J` 多行输入、`Ctrl+R` 历史搜索、`Esc` 清空/恢复输入、忙时 `Ctrl+C` 中断当前任务和 Markdown 代码块/列表/表格展示。多工具任务中，Agent 会在关键工具调用前后输出简短的公开进度说明；TUI 会按时间线把这些说明和工具调用交错展示，避免执行过程中只剩工具流水账。Markdown 行内内容会保留语义高亮：`**重点**`、inline code、URL、issue ref、文件路径和 `src/foo.ts:123` 行号会使用不同视觉通道，便于在长回复中快速定位关键信息。流式输出时，TUI 只格式化已经越过空行边界且语法闭合的稳定前缀，最后一段和未闭合代码块保持纯文本，减少半成品 Markdown 的闪烁与重排。代码块使用 24-bit ANSI 主题 palette，TypeScript / TSX、diff 等内容在明暗终端中都保持较高对比；可通过 `Q_CODE_THEME=dark|light|auto` 控制配色，终端无法暴露背景色或 auto 判断不准时建议手动指定 `light` / `dark`，也可使用 `--no-color` / `NO_COLOR=1` 关闭全部颜色。输入区使用真实终端光标锚定输入法候选窗，避免 macOS IME 跑到屏幕角落。
 
 ### @file 文件引用
 
