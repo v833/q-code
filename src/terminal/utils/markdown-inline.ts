@@ -51,6 +51,11 @@ export function parseMarkdownInline(text: string): MarkdownInlineSegment[] {
   return parseInlineTokens(Lexer.lexInline(text, { gfm: true, breaks: false }))
 }
 
+/** 判断普通文本是否包含 TUI 行内语义信号。 */
+export function hasMarkdownInlineSignal(text: string): boolean {
+  return scanPlainText(text).some((segment) => segment.type !== 'text')
+}
+
 /** 将 segment 渲染回无颜色纯文本，供 NO_COLOR、表格宽度和兼容字段使用。 */
 export function renderInlineSegmentsPlain(segments: readonly MarkdownInlineSegment[]): string {
   return segments.map(renderInlineSegmentPlain).join('')

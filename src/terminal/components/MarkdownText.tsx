@@ -10,6 +10,7 @@ import {
 } from '../table-renderer'
 import {
   formatFileRefParts,
+  hasMarkdownInlineSignal,
   renderInlineSegmentsAnsi,
   renderInlineSegmentsPlain,
   resolveInlinePalette,
@@ -26,15 +27,47 @@ import { rgbToInkColor } from '../utils/ansi-style'
 import {
   highlightCode,
   isNoColorEnabled,
-  resolveHighlightThemeMode
+  resolveHighlightThemeMode,
+  type HighlightThemeMode
 } from '../utils/highlight'
 
 /** 超过此长度则跳过 Markdown 解析，直接纯文本渲染。 */
 export const MARKDOWN_PARSE_CHAR_LIMIT = 12000
+export const MARKDOWN_PARSE_CACHE_MAX_ENTRIES = 500
 const STREAMING_MAX_CHARS = 2600
 const STREAMING_RESERVED_ROWS = 8
 const STREAMING_FALLBACK_ROWS = 16
 const BLANK_LINE_PATTERN = /\n[ \t]*(?:\n[ \t]*)+/g
+const MARKDOWN_CACHE_VERSION = 'blocks:v1'
+const TABLE_SEPARATOR_PATTERN = /(^|\n)[ \t]{0,3}\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*(?=\n|$)/
+const MARKDOWN_SIGNAL_PATTERNS: readonly RegExp[] = [
+  /^[ \t]{0,3}#{1,6}[ \t]+\S/m,
+  /^[ \t]{0,3}\S.*\n[ \t]{0,3}(?:=+|-+)[ \t]*(?=\n|$)/m,
+  /^[ \t]{0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?\S/m,
+  /^[ \t]{0,3}>[ \t]?\S/m,
+  /^[ \t]{0,3}(?:`{3,}|~{3,})/m,
+  /^(?: {4}|\t)\S/m,
+  /^[ \t]{0,3}(?:-{3,}|\*{3,}|_{3,})[ \t]*(?=\n|$)/m,
+  /`/,
+  /\[[^\]\n]+\]\([^)]+\)/,
+  /\*\*|__|\*[^*\s][^*\n]*\*|_[^_\s][^_\n]*_/,
+  /~~[^~\n]+~~/,
+  TABLE_SEPARATOR_PATTERN
+]
+
+export interface MarkdownParseCacheOptions {
+  theme?: HighlightThemeMode
+  noColor?: boolean
+}
+
+export interface MarkdownParseCacheStats {
+  size: number
+  hits: number
+  misses: number
+  sets: number
+  evictions: number
+  skips: number
+}
 
 interface StableMarkdownParts {
   stable: string
@@ -45,6 +78,15 @@ export interface StreamingMarkdownRenderParts {
   stableText: string
   stableBlocks: MarkdownBlock[]
   tailText: string
+}
+
+const markdownParseCache = new Map<string, MarkdownBlock[]>()
+const markdownParseCacheStats: Omit<MarkdownParseCacheStats, 'size'> = {
+  hits: 0,
+  misses: 0,
+  sets: 0,
+  evictions: 0,
+  skips: 0
 }
 
 /** 块级 Markdown 渲染；`streaming` 时启用行/字符折叠预览。 */
@@ -79,7 +121,7 @@ const MarkdownBlocksText = React.memo(function MarkdownBlocksText({
   dim: boolean
   parse: boolean
 }): React.JSX.Element {
-  const blocks = useMemo(() => parseMarkdownBlocksSafe(text, parse), [text, parse])
+  const blocks = useMemo(() => parseMarkdownBlocksForDisplay(text, parse), [text, parse])
 
   return <MarkdownBlocksView text={text} blocks={blocks} dim={dim} />
 })
@@ -398,6 +440,60 @@ export function shouldParseMarkdownText(text: string, parse = true): boolean {
   return parse && text.length <= MARKDOWN_PARSE_CHAR_LIMIT
 }
 
+/** 是否包含值得进入 Markdown 解析器的语法或 TUI 行内语义信号。 */
+export function hasMarkdownSyntax(text: string): boolean {
+  if (!text) return false
+  return MARKDOWN_SIGNAL_PATTERNS.some((pattern) => pattern.test(text)) || hasMarkdownInlineSignal(text)
+}
+
+/** 可复用的 Markdown block 解析入口，包含快路径和有界 LRU。 */
+export function parseMarkdownBlocksForDisplay(
+  text: string,
+  parse = true,
+  options: MarkdownParseCacheOptions = {}
+): MarkdownBlock[] {
+  if (!shouldParseMarkdownText(text, parse) || !hasMarkdownSyntax(text)) {
+    markdownParseCacheStats.skips++
+    return []
+  }
+
+  const key = markdownParseCacheKey(text, options)
+  const cached = markdownParseCache.get(key)
+  if (cached) {
+    markdownParseCache.delete(key)
+    markdownParseCache.set(key, cached)
+    markdownParseCacheStats.hits++
+    return cached
+  }
+
+  markdownParseCacheStats.misses++
+  try {
+    const blocks = parseMarkdown(text)
+    markdownParseCacheSet(key, blocks)
+    return blocks
+  } catch {
+    return []
+  }
+}
+
+/** 清空 Markdown parse cache；主要供单元测试和未来诊断入口使用。 */
+export function clearMarkdownParseCache(): void {
+  markdownParseCache.clear()
+  markdownParseCacheStats.hits = 0
+  markdownParseCacheStats.misses = 0
+  markdownParseCacheStats.sets = 0
+  markdownParseCacheStats.evictions = 0
+  markdownParseCacheStats.skips = 0
+}
+
+/** 返回 Markdown parse cache 的当前统计快照。 */
+export function getMarkdownParseCacheStats(): MarkdownParseCacheStats {
+  return {
+    ...markdownParseCacheStats,
+    size: markdownParseCache.size
+  }
+}
+
 /** 生成流式 Markdown 渲染计划：稳定前缀可解析，尾巴保持纯文本。 */
 export function prepareStreamingMarkdownRenderParts(
   text: string,
@@ -406,7 +502,7 @@ export function prepareStreamingMarkdownRenderParts(
   const { stable, tail } = splitStableMarkdownPrefix(text)
   return {
     stableText: stable,
-    stableBlocks: parseMarkdownBlocksSafe(stable, parse),
+    stableBlocks: parseMarkdownBlocksForDisplay(stable, parse),
     tailText: tail
   }
 }
@@ -430,12 +526,20 @@ export function splitStableMarkdownPrefix(content: string): StableMarkdownParts 
   })
 }
 
-function parseMarkdownBlocksSafe(text: string, parse: boolean): MarkdownBlock[] {
-  if (!shouldParseMarkdownText(text, parse)) return []
-  try {
-    return parseMarkdown(text)
-  } catch {
-    return []
+function markdownParseCacheKey(text: string, options: MarkdownParseCacheOptions): string {
+  const theme = options.theme ?? resolveHighlightThemeMode()
+  const noColor = options.noColor ?? isNoColorEnabled()
+  return JSON.stringify([MARKDOWN_CACHE_VERSION, theme, noColor, text])
+}
+
+function markdownParseCacheSet(key: string, blocks: MarkdownBlock[]): void {
+  markdownParseCache.set(key, blocks)
+  markdownParseCacheStats.sets++
+  while (markdownParseCache.size > MARKDOWN_PARSE_CACHE_MAX_ENTRIES) {
+    const oldest = markdownParseCache.keys().next().value
+    if (oldest === undefined) break
+    markdownParseCache.delete(oldest)
+    markdownParseCacheStats.evictions++
   }
 }
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import {
   createInitialTerminalState,
   terminalReducer
@@ -23,7 +23,12 @@ import {
 import { shouldBackspace, shouldDeleteForward } from '../../src/terminal/keys'
 import { parseMarkdown } from '../../src/terminal/markdown'
 import {
+  clearMarkdownParseCache,
+  getMarkdownParseCacheStats,
+  hasMarkdownSyntax,
   MARKDOWN_PARSE_CHAR_LIMIT,
+  MARKDOWN_PARSE_CACHE_MAX_ENTRIES,
+  parseMarkdownBlocksForDisplay,
   prepareStreamingMarkdownRenderParts,
   previewStreamingText,
   shouldParseMarkdownText,
@@ -869,10 +874,118 @@ function editingKey(overrides: Partial<Parameters<typeof shouldBackspace>[1]> = 
 }
 
 describe('terminal markdown parser', () => {
+  beforeEach(() => {
+    clearMarkdownParseCache()
+  })
+
   it('skips rich markdown parsing for very long assistant output', () => {
     expect(shouldParseMarkdownText('# short')).toBe(true)
     expect(shouldParseMarkdownText('x'.repeat(MARKDOWN_PARSE_CHAR_LIMIT))).toBe(true)
     expect(shouldParseMarkdownText('x'.repeat(MARKDOWN_PARSE_CHAR_LIMIT + 1))).toBe(false)
+  })
+
+  it('detects common markdown and terminal semantic signals', () => {
+    expect(hasMarkdownSyntax('Thinking...')).toBe(false)
+    expect(hasMarkdownSyntax('## Title')).toBe(true)
+    expect(hasMarkdownSyntax('- item')).toBe(true)
+    expect(hasMarkdownSyntax('- [x] done')).toBe(true)
+    expect(hasMarkdownSyntax('> quote')).toBe(true)
+    expect(hasMarkdownSyntax('```ts\nconst x = 1')).toBe(true)
+    expect(hasMarkdownSyntax('    const x = 1')).toBe(true)
+    expect(hasMarkdownSyntax('---')).toBe(true)
+    expect(hasMarkdownSyntax('Title\n---')).toBe(true)
+    expect(hasMarkdownSyntax('use `code`')).toBe(true)
+    expect(hasMarkdownSyntax('[README](README.md)')).toBe(true)
+    expect(hasMarkdownSyntax('**strong** and _em_')).toBe(true)
+    expect(hasMarkdownSyntax('~~gone~~')).toBe(true)
+    expect(hasMarkdownSyntax('|---|---|')).toBe(true)
+    expect(hasMarkdownSyntax('see https://example.com')).toBe(true)
+    expect(hasMarkdownSyntax('open src/index.ts:12')).toBe(true)
+    expect(hasMarkdownSyntax('fix #86')).toBe(true)
+    expect(hasMarkdownSyntax('Warning: check it')).toBe(true)
+    expect(hasMarkdownSyntax('PATH=/tmp/q-code')).toBe(true)
+    expect(hasMarkdownSyntax('run tsc --noEmit')).toBe(true)
+  })
+
+  it('keeps parser-supported markdown syntax on the cached display path', () => {
+    expect(parseMarkdownBlocksForDisplay('---')).toMatchObject([{ type: 'rule' }])
+    expect(parseMarkdownBlocksForDisplay('Title\n---')).toMatchObject([{ type: 'heading', depth: 2, text: 'Title' }])
+    expect(parseMarkdownBlocksForDisplay('    const x = 1')).toMatchObject([{ type: 'code', code: 'const x = 1' }])
+    expect(parseMarkdownBlocksForDisplay('~~gone~~')).toMatchObject([{ type: 'paragraph', text: 'gone' }])
+  })
+
+  it('keeps terminal inline semantic signals on the cached display path', () => {
+    expect(parseMarkdownBlocksForDisplay('Warning: check it')).toMatchObject([
+      { type: 'paragraph', segments: expect.arrayContaining([expect.objectContaining({ type: 'status', text: 'Warning:' })]) }
+    ])
+    expect(parseMarkdownBlocksForDisplay('PATH=/tmp/q-code')).toMatchObject([
+      { type: 'paragraph', segments: expect.arrayContaining([expect.objectContaining({ type: 'envVar', name: 'PATH' })]) }
+    ])
+    expect(parseMarkdownBlocksForDisplay('run tsc --noEmit')).toMatchObject([
+      { type: 'paragraph', segments: expect.arrayContaining([expect.objectContaining({ type: 'command', command: 'tsc --noEmit' })]) }
+    ])
+  })
+
+  it('keeps plain text on the fast path without markdown parser cache misses', () => {
+    expect(parseMarkdownBlocksForDisplay('Thinking...')).toEqual([])
+    expect(getMarkdownParseCacheStats()).toMatchObject({
+      hits: 0,
+      misses: 0,
+      sets: 0,
+      skips: 1,
+      size: 0
+    })
+  })
+
+  it('caches repeated markdown block parses', () => {
+    const first = parseMarkdownBlocksForDisplay('## Title\n\n- item')
+    const second = parseMarkdownBlocksForDisplay('## Title\n\n- item')
+
+    expect(second).toBe(first)
+    expect(second).toMatchObject([
+      { type: 'heading', text: 'Title' },
+      { type: 'list', items: [{ text: 'item' }] }
+    ])
+    expect(getMarkdownParseCacheStats()).toMatchObject({
+      hits: 1,
+      misses: 1,
+      sets: 1,
+      size: 1
+    })
+  })
+
+  it('evicts least recently used markdown parse entries', () => {
+    for (let index = 0; index < MARKDOWN_PARSE_CACHE_MAX_ENTRIES; index++) {
+      parseMarkdownBlocksForDisplay(`## Title ${index}`)
+    }
+    parseMarkdownBlocksForDisplay('## Title 0')
+    parseMarkdownBlocksForDisplay('## Newest')
+
+    const beforeReparse = getMarkdownParseCacheStats()
+    expect(beforeReparse.size).toBe(MARKDOWN_PARSE_CACHE_MAX_ENTRIES)
+    expect(beforeReparse.evictions).toBe(1)
+
+    parseMarkdownBlocksForDisplay('## Title 1')
+    const afterReparse = getMarkdownParseCacheStats()
+    expect(afterReparse.misses).toBe(beforeReparse.misses + 1)
+    expect(afterReparse.evictions).toBe(2)
+  })
+
+  it('isolates markdown parse cache entries by render-affecting options', () => {
+    const dark = parseMarkdownBlocksForDisplay('## Theme scoped', true, { theme: 'dark', noColor: false })
+    const darkAgain = parseMarkdownBlocksForDisplay('## Theme scoped', true, { theme: 'dark', noColor: false })
+    const light = parseMarkdownBlocksForDisplay('## Theme scoped', true, { theme: 'light', noColor: false })
+    const noColor = parseMarkdownBlocksForDisplay('## Theme scoped', true, { theme: 'light', noColor: true })
+
+    expect(darkAgain).toBe(dark)
+    expect(light).not.toBe(dark)
+    expect(noColor).not.toBe(light)
+    expect(getMarkdownParseCacheStats()).toMatchObject({
+      hits: 1,
+      misses: 3,
+      sets: 3,
+      size: 3
+    })
   })
 
   it('caps streaming markdown previews to avoid oversized live terminal renders', () => {

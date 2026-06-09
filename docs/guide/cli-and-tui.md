@@ -42,4 +42,4 @@ q-code --agent-teams
 
 TUI 负责显示模型输出、工具调用、token 用量、上下文状态和 SubAgent 进度。重活尽量交给工具和 SubAgent，主对话只保留摘要。
 
-流式 assistant Markdown 使用“稳定前缀 + 纯文本尾巴”策略：已经越过空行边界且语法闭合的前缀使用完整 Markdown 语义渲染，正在输出的最后一段或未闭合代码块保持纯文本，避免半成品 `**粗体**`、inline code、fenced code block 在 streaming 阶段反复重排。
+流式 assistant Markdown 使用“稳定前缀 + 纯文本尾巴”策略：已经越过空行边界且语法闭合的前缀使用完整 Markdown 语义渲染，正在输出的最后一段或未闭合代码块保持纯文本，避免半成品 `**粗体**`、inline code、fenced code block 在 streaming 阶段反复重排。普通纯文本会通过 Markdown signal 快路径跳过 parser，重复 Markdown 文本会命中有界 LRU parse cache，以降低长会话回看和 Static transcript 重渲染成本。
