@@ -4,7 +4,7 @@
 
 `q-code` 是一个基于 Vercel AI SDK 的 TypeScript 命令行 Agent 框架。核心能力包括：
 
-- **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、TUI `/agents` SubAgent Monitor（同步与后台 SubAgent，completed 默认隐藏并可清理，忙碌等待期间可用 `Ctrl+A` 查看）、只读同步 SubAgent 动态并行调度、SubAgent 长 final output artifact/preview 回传、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、文件派项目记忆（headers 精选、预算化正文注入、年龄提示）、Skills、SubAgent、Agent Teams、Worktree 隔离。
+- **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、文件历史快照与 `/rewind` 按轮次回滚内置写工具改动、TUI `/agents` SubAgent Monitor（同步与后台 SubAgent，completed 默认隐藏并可清理，忙碌等待期间可用 `Ctrl+A` 查看）、只读同步 SubAgent 动态并行调度、SubAgent 长 final output artifact/preview 回传、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、文件派项目记忆（headers 精选、预算化正文注入、年龄提示）、Skills、SubAgent、Agent Teams、Worktree 隔离。
 - **工具执行**：文件/搜索工具、可配置超时与 spill 的 Shell 工具（Windows 优先 PowerShell7，缺失时回退 Windows PowerShell 5.1）、后台 Shell job（`f_status` / `f_tail` / `f_kill` / `f_list`）。
 - **集成扩展**：MCP server、Hooks（生命周期事件、pre/post tool-use 决策、prompt/context 注入、退出码协议）、Slash 命令注册表、Output Styles、Markdown User Commands、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
 - **可观测性**：NDJSON 审计日志（默认开启）、本地只读 Web Dashboard、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警、启动时版本更新说明（对比 `~/.q-code/last-version.json` 与包内 `changelog.json`）。
@@ -82,7 +82,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `q-code eval promote <run-dir|run.json> --as <baseline-name>`：把一次 run 保存为 `.q-code/evals/baselines/<name>/` 命名 baseline。
 - `q-code eval trend [--suite <name>] [--limit N] [--runs-dir <dir>] [--out <dir>]`：聚合历史 run，写出 `.q-code/evals/trends/trend.json` 与 `trend.md`。
 
-主交互循环还接受以下启动参数：`--continue`、`--session <id>`、`--plan`、`--agent-teams`、`--classic`、`--debug`、`--dump-system-prompt`。内置 Slash 含 `/output-style [list|default|name]`、`/commands [doctor]`、`/ya [list|yellow|shanghai|heilongjiang|toggle]`（别名 `/duck`）；TUI 下 `/ya` 或 `/ya list` 打开鸭子选择器（↑/↓ + Enter），默认 `yellow`（小黄鸭）。
+主交互循环还接受以下启动参数：`--continue`、`--session <id>`、`--plan`、`--agent-teams`、`--classic`、`--debug`、`--dump-system-prompt`。内置 Slash 含 `/rewind [n]`、`/output-style [list|default|name]`、`/commands [doctor]`、`/ya [list|yellow|shanghai|heilongjiang|toggle]`（别名 `/duck`）；TUI 下 `/ya` 或 `/ya list` 打开鸭子选择器（↑/↓ + Enter），默认 `yellow`（小黄鸭）。
 
 ## 目录边界
 
@@ -92,6 +92,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `src/agents/`：SubAgent、后台 Agent、Agent Teams、worktree、mailbox、notification-store、final output artifact。
 - `src/context/`：System Prompt 管道、鸭子人格（`duck-persona.ts`，主题鸭通过本轮 transient 用户消息注入，不进 system prompt / 会话历史）、上下文压缩与 offload、Plan Mode 附件/计划文件/意图识别、任务、Todo、记忆（`memory/selection.ts` 负责 headers 精选、正文预算和年龄提示）、运行环境和项目指令加载。
 - `src/tools/`：内置工具定义、注册表（含审计/Hooks 包装层）、自定义工具目录加载器、文件/搜索/计划/任务/团队/Memory/Skill/GitLab KB/Agent 等工具；`shell-tools.ts` 负责 `f`、后台 shell job、输出 spill、cwd 策略和危险命令/交互保护。
+- `src/file-history/`：按主 Agent 用户轮次维护内置写工具文件历史快照，正文备份写 `<Q_CODE_HOME>/file-history/<projectKey>/<sessionId>/`，transcript 只保存元数据，并为 `/rewind [n]` 提供 diff、冲突检测和恢复。
 - `src/mcp/`：MCP 配置、连接、工具适配和注册表。
 - `src/skills/`：Skills 加载、预算、条件激活和斜杠命令展开。
 - `src/output-styles/`：内置/用户级/项目级 Output Styles 加载、frontmatter 解析、settings 持久化和动态 prompt 格式化。
@@ -137,6 +138,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - Agent prompt 质量基线由 `src/context/prompt-quality.ts` 和 `pnpm prompt:quality:verify` 维护，用 12 个维度审计身份、安全、工具、工作流、输出、编辑、记忆、沟通、领域知识、正反例、失败恢复和品质约束。修改 system prompt、工具纪律或项目指令时，按需运行 `pnpm prompt:quality:verify -- --format=md`，出现 `missing` 需补齐规则或说明缺口。
 - 项目记忆保持文件派结构：`~/sessions/<projectKey>/memory/MEMORY.md` 是短索引，主题 Markdown 保留 `name / description / type` 并可带 `createdAt / updatedAt / lastAccessedAt`。`memory_write` 必须维护 createdAt/updatedAt；精选流程只能用 headers + userQuery 做相关性选择，正文只能作为 transient user context 注入，预算为单文件 4KB、单轮 20KB、单会话 60KB，并附带更新时间/年龄/验证提示。用户要求“忽略记忆 / ignore memory”时不得注入索引正文或主题正文。`Q_CODE_MEMORY_AUTO_EXTRACT` 与 `Q_CODE_MEMORY_FLUSH` 默认关闭；开启后只允许保存用户显式要求“记住/remember”的长期信息，普通对话、代码事实、git 状态和临时计划不得自动沉淀。
 - 文件和会话持久化逻辑优先使用项目已有的原子写入、路径计算和存储 helper（如 `SessionStore`、用户 home 解析、`auditDir` 解析），避免临时拼接路径。会话默认集中写入 `~/sessions/<projectKey>`，项目内 `.sessions/projects/<projectKey>` 不作为保留存储；debug 模式可创建指向 home session 目录的链接映射；`/sessions` 命令只显示与当前项目目录匹配的记录。
+- 文件历史快照只追踪内置 `write_file` / `edit_file`，追踪点必须位于 `pre_tool_use` 放行之后、真实写入之前；追踪失败必须阻断写工具，避免产生不可回滚的 Agent 写入。snapshot metadata 可进入 transcript，文件正文只能进入 `<Q_CODE_HOME>/file-history/...` 备份目录，不得进入 transcript 或审计 payload。`/rewind [n]` 回滚前必须用最近一次已知写后 hash/size/mode 检测冲突；首版不追踪 shell 或外部进程直接写入。
 - Session/history 只恢复上下文，不决定后续模型；`--continue`、`--session <id>`、TUI `/sessions switch` 和输入 history 召回后的新请求必须继续使用当前 runtime effective model 或本进程 `/model` 覆盖值。历史 `SessionMetadata.model` / usage record model 仅用于展示、审计、usage 与诊断；若历史模型与当前模型不同，只能提示一次且不得暴露 API key 或完整敏感 endpoint。修改相关逻辑需覆盖 `tests/unit/session-management.test.ts`、`tests/integration/session-recovery.test.ts`、`tests/integration/session-switch.test.ts` 或等价恢复入口测试。
 - Prompt、工具描述、项目说明多为中文；新增用户可见文案时优先保持中文一致性。
 - Dashboard 必须保持本地优先和只读：默认绑定 `127.0.0.1`，`--host` 仅允许 `127.0.0.1` / `localhost` / `::1` 等 loopback 地址，页面和 API 不得返回本机绝对路径，不得上传本地数据；默认只展示摘要、哈希、计数、token 与成本，不渲染 prompt、文件内容、shell 输出或工具输入/输出原文。
@@ -172,6 +174,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - Output Styles / User Commands：`vitest run tests/unit/output-styles.test.ts tests/unit/user-commands.test.ts tests/unit/prompt-builder.test.ts tests/unit/tool-registry.test.ts`
   - Tool registry 改动：`vitest run tests/unit/tool-registry.test.ts`
   - 文件/读写工具改动：`vitest run tests/unit/file-tools.test.ts tests/unit/tool-registry.test.ts`
+  - 文件历史 / `/rewind`：`vitest run tests/unit/file-history.test.ts tests/unit/tool-registry.test.ts tests/unit/session-management.test.ts`
   - Shell 工具改动：`vitest run tests/unit/shell-tools.test.ts tests/integration/shell-streaming.test.ts`
   - 自定义工具目录改动：`vitest run tests/unit/custom-tools.test.ts tests/unit/tool-registry.test.ts`
   - `@file` 文件引用：`vitest run tests/unit/file-mentions.test.ts tests/unit/file-index-cache.test.ts tests/unit/terminal.test.ts tests/unit/runtime-config.test.ts`

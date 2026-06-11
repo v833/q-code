@@ -2,6 +2,7 @@
  * q-code 主交互运行时：完成 MCP/Skills/Agents 引导、TUI 或经典 readline、
  * 会话、Agent Loop、Slash 命令与上下文压缩编排。
  */
+import { randomUUID } from 'node:crypto'
 import * as path from 'node:path'
 import { generateText, type ModelMessage } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
@@ -269,6 +270,19 @@ import {
   createUserPromptPayload,
   getAuditLogger,
 } from '../observability/audit';
+import {
+  createFileHistoryState,
+  createFileHistoryTranscriptRewind,
+  FileHistoryConflictError,
+  getFileHistoryDiffStats,
+  makeFileHistorySnapshot,
+  recordFileHistoryPostEdit,
+  restoreFileHistoryTranscriptEvents,
+  rewindFileHistory,
+  snapshotToTranscriptEntry,
+  trackFileHistoryEdit,
+  type FileHistoryState,
+} from '../file-history';
 import {
   findOutputStyle,
   formatOutputStylePrompt,
@@ -747,6 +761,9 @@ export async function runMain(options: {
 
   let activeStore: SessionStore = initialStore as SessionStore;
   if (initialStore) activeStoreRef.current = activeStore;
+  let fileHistoryState: FileHistoryState | undefined = initialStore
+    ? createRestoredFileHistoryState(activeStore)
+    : undefined;
   const inputHistoryStore = initialStore
     ? createHistoryStore({
         cwd: activeStore.cwd,
@@ -2441,6 +2458,23 @@ export async function runMain(options: {
     memoryWrittenThisTurn = false;
     beginMemorySelection(userQuery);
 
+    const turnId = randomUUID();
+    const fileHistorySnapshot = fileHistoryState
+      ? makeFileHistorySnapshot(fileHistoryState, turnId)
+      : undefined;
+    if (fileHistoryState && fileHistorySnapshot) {
+      persistFileHistorySnapshot(fileHistorySnapshot);
+      getAuditLogger().emit(
+        'file_history.snapshot',
+        {
+          snapshotId: fileHistorySnapshot.snapshotId,
+          turnId,
+          trackedFiles: Object.keys(fileHistorySnapshot.trackedFileBackups).length,
+        },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+    }
+
     messages.push(...userMessages);
     activeStore.appendAll(userMessages);
     lastUserPromptDigest = sha256ForCrashGuard(userQuery);
@@ -2514,6 +2548,9 @@ export async function runMain(options: {
             sessionId,
             hooks,
             agent: { kind: 'main' },
+            ...(fileHistoryState
+              ? { fileHistory: createTurnFileHistoryTracker(fileHistoryState, turnId, persistFileHistorySnapshot) }
+              : {}),
             stopAfterToolNames: ['exit_plan_mode'],
             telemetry: ({ step }) => langfuseTurn.telemetryForStep(step),
             preflight: (currentMessages, { step, usageAnchor }) =>
@@ -2905,6 +2942,13 @@ export async function runMain(options: {
         '/history [clear|on|off]',
         'Core',
         handleHistoryCommand,
+      ),
+      command(
+        '/rewind',
+        '按轮次回滚本会话中 Agent 写工具造成的文件改动',
+        '/rewind [n]',
+        'Core',
+        (input) => handleRewindCommand(input.args),
       ),
       command(
         '/output-style',
@@ -3341,6 +3385,7 @@ export async function runMain(options: {
     activeStore = nextStore;
     activeStoreRef.current = activeStore;
     sessionId = nextStore.sessionId;
+    fileHistoryState = createRestoredFileHistoryState(nextStore);
     getInputHistoryStore().setContext({ cwd: activeStore.cwd, sessionId });
     planOptions = { cwd: nextStore.cwd, sessionId };
     planFilePath = getPlanFilePath(planOptions);
@@ -4525,6 +4570,142 @@ export async function runMain(options: {
       reservedOutputTokens: defaultMaxOutputTokens,
     });
     print(`\n${renderContextReport(report)}`);
+  }
+
+  function createRestoredFileHistoryState(store: SessionStore): FileHistoryState {
+    const state = createFileHistoryState({ cwd: store.cwd, sessionId: store.sessionId });
+    restoreFileHistoryTranscriptEvents(state, store.getFileHistoryEvents());
+    return state;
+  }
+
+  function persistFileHistorySnapshot(snapshot: FileHistoryState['snapshots'][number]): void {
+    if (!fileHistoryState) return;
+    activeStore.appendFileHistorySnapshot(snapshotToTranscriptEntry(fileHistoryState, snapshot));
+  }
+
+  function createTurnFileHistoryTracker(
+    state: FileHistoryState,
+    turnId: string,
+    persistSnapshot: (snapshot: FileHistoryState['snapshots'][number]) => void,
+  ) {
+    return {
+      beforeEdit: async (targetPath: string, context: { toolName: string }) => {
+        const snapshot = trackFileHistoryEdit(state, targetPath, turnId);
+        persistSnapshot(snapshot);
+        getAuditLogger().emit(
+          'file_history.track_edit',
+          {
+            phase: 'before',
+            snapshotId: snapshot.snapshotId,
+            turnId,
+            toolName: context.toolName,
+            path: targetPath,
+          },
+          { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+        );
+      },
+      afterEdit: async (targetPath: string, context: { toolName: string }) => {
+        const snapshot = recordFileHistoryPostEdit(state, targetPath, turnId);
+        persistSnapshot(snapshot);
+        getAuditLogger().emit(
+          'file_history.track_edit',
+          {
+            phase: 'after',
+            snapshotId: snapshot.snapshotId,
+            turnId,
+            toolName: context.toolName,
+            path: targetPath,
+          },
+          { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+        );
+      },
+    };
+  }
+
+  function handleRewindCommand(args: string): void {
+    if (!fileHistoryState) {
+      print('\n  [Rewind] 当前会话未启用文件历史。');
+      return;
+    }
+    const steps = parseRewindSteps(args);
+    if (!steps) {
+      print('\n  [Rewind] 用法: /rewind [正整数轮次]');
+      return;
+    }
+    const target = fileHistoryState.snapshots[fileHistoryState.snapshots.length - steps];
+    if (!target) {
+      print(`\n  [Rewind] 无法回滚 ${steps} 轮：当前只有 ${fileHistoryState.snapshots.length} 个文件历史快照。`);
+      return;
+    }
+
+    const preview = getFileHistoryDiffStats(fileHistoryState, target);
+    try {
+      const result = rewindFileHistory(fileHistoryState, steps);
+      activeStore.appendFileHistoryRewind(createFileHistoryTranscriptRewind(result, steps));
+      const changedCount = result.changedFiles.length;
+      getAuditLogger().emit(
+        'file_history.rewind',
+        {
+          snapshotId: result.snapshot.snapshotId,
+          turnId: result.snapshot.turnId,
+          steps,
+          filesChanged: changedCount,
+          insertions: result.stats.insertions,
+          deletions: result.stats.deletions,
+        },
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+      print(formatRewindResult(steps, result.stats));
+    } catch (error) {
+      if (error instanceof FileHistoryConflictError) {
+        getAuditLogger().emit(
+          'file_history.conflict',
+          {
+            snapshotId: target.snapshotId,
+            turnId: target.turnId,
+            steps,
+            conflicts: error.conflicts,
+            previewFilesChanged: preview.filesChanged.length,
+          },
+          { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+        );
+        print(
+          [
+            `\n  [Rewind] 检测到 ${error.conflicts.length} 个冲突，已取消回滚。`,
+            ...error.conflicts.slice(0, 10).map((conflict) => `  - ${conflict.path}: ${conflict.reason}`),
+            error.conflicts.length > 10 ? `  ... 还有 ${error.conflicts.length - 10} 个冲突` : '',
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        );
+        return;
+      }
+      print(`\n  [Rewind] 回滚失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  function parseRewindSteps(args: string): number | undefined {
+    const trimmed = args.trim();
+    if (!trimmed) return 1;
+    if (!/^\d+$/.test(trimmed)) return undefined;
+    const value = Number(trimmed);
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  }
+
+  function formatRewindResult(steps: number, stats: ReturnType<typeof getFileHistoryDiffStats>): string {
+    if (stats.filesChanged.length === 0) {
+      return `\n  [Rewind] 已检查 ${steps} 轮，文件内容无需变更。`;
+    }
+    const files = stats.filesChanged
+      .slice(0, 12)
+      .map((file) => `  - ${file.path} (${file.status}, +${file.insertions}/-${file.deletions})`);
+    return [
+      `\n  [Rewind] 已回滚 ${steps} 轮：${stats.filesChanged.length} 个文件，+${stats.insertions}/-${stats.deletions}`,
+      ...files,
+      stats.filesChanged.length > 12 ? `  ... 还有 ${stats.filesChanged.length - 12} 个文件` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 
   function handleUsageCommand(): void {

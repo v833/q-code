@@ -82,6 +82,12 @@ export interface ToolProgressEvent {
   metadata?: Record<string, unknown>
 }
 
+/** 文件历史追踪回调：写工具执行前备份，执行后记录最新状态。 */
+export interface ToolFileHistoryTracker {
+  beforeEdit: (path: string, context: { toolName: string; input: unknown }) => void | Promise<void>
+  afterEdit: (path: string, context: { toolName: string; input: unknown }) => void | Promise<void>
+}
+
 /** 单次工具调用时的运行时上下文（cwd、会话、Hooks、队友身份等）。 */
 export interface ToolExecutionContext {
   cwd: string
@@ -89,6 +95,7 @@ export interface ToolExecutionContext {
   sessionId?: string
   hooks?: HookRunner
   agent?: HookAgentContext
+  fileHistory?: ToolFileHistoryTracker
   onProgress?: (event: ToolProgressEvent) => void
   /**
    * Set when the tool runs inside a named teammate's loop (Agent Teams).
@@ -432,12 +439,28 @@ export class ToolRegistry {
               }
             }
 
+            const fileHistoryPath = getFileHistoryInputPath(tool.name, effectiveInput)
+            if (fileHistoryPath && context.fileHistory) {
+              const tracked = await runFileHistoryTracking(
+                context.fileHistory.beforeEdit(fileHistoryPath, { toolName: tool.name, input: effectiveInput }),
+                'before',
+                tool.name,
+                toolCallId,
+                startedAt,
+                auditCtx,
+                maxChars,
+                options
+              )
+              if (tracked) return tracked
+            }
+
             const toolContext: ToolExecutionContext = {
               cwd,
               ...(context.abortSignal ? { abortSignal: context.abortSignal } : {}),
               ...(context.sessionId ? { sessionId: context.sessionId } : {}),
               ...(context.hooks ? { hooks: context.hooks } : {}),
               ...(context.agent ? { agent: context.agent } : {}),
+              ...(context.fileHistory ? { fileHistory: context.fileHistory } : {}),
               ...(context.onProgress
                 ? {
                     onProgress: (event) =>
@@ -452,6 +475,20 @@ export class ToolRegistry {
               ...(context.teammateIdentity ? { teammateIdentity: context.teammateIdentity } : {})
             }
             let raw = await executeFn(effectiveInput, toolContext)
+            const envelope = normalizeToolResult(raw)
+            if (fileHistoryPath && context.fileHistory && envelope.ok) {
+              const tracked = await runFileHistoryTracking(
+                context.fileHistory.afterEdit(fileHistoryPath, { toolName: tool.name, input: effectiveInput }),
+                'after',
+                tool.name,
+                toolCallId,
+                startedAt,
+                auditCtx,
+                maxChars,
+                options
+              )
+              if (tracked) return tracked
+            }
             if (context.hooks && context.sessionId) {
               const post = await context.hooks.run(
                 createPostToolUseEvent(
@@ -494,16 +531,16 @@ export class ToolRegistry {
                 raw = post.output
               }
             }
-            const envelope = normalizeToolResult(raw)
+            const finalEnvelope = normalizeToolResult(raw)
             getAuditLogger().emit(
               'tool.result',
               createToolResultPayload({
                 name: tool.name,
                 ...(toolCallId ? { toolCallId } : {}),
-                output: envelope.ok ? envelope.content : envelope.error,
-                ok: envelope.ok,
-                isError: !envelope.ok,
-                ...(envelope.code ? { code: envelope.code } : {}),
+                output: finalEnvelope.ok ? finalEnvelope.content : finalEnvelope.error,
+                ok: finalEnvelope.ok,
+                isError: !finalEnvelope.ok,
+                ...(finalEnvelope.code ? { code: finalEnvelope.code } : {}),
                 durationMs: Date.now() - startedAt
               }),
               auditCtx
@@ -626,6 +663,53 @@ function hookAgentFromTeammate(teammate: TeammateIdentity | undefined): HookAgen
     kind: 'teammate',
     agentName: teammate.agentName,
     teamName: teammate.teamName
+  }
+}
+
+function getFileHistoryInputPath(toolName: string, input: unknown): string | undefined {
+  if (toolName !== 'write_file' && toolName !== 'edit_file') return undefined
+  if (!input || typeof input !== 'object') return undefined
+  const value = (input as Record<string, unknown>).path
+  return typeof value === 'string' && value.trim() ? value : undefined
+}
+
+async function runFileHistoryTracking(
+  action: void | Promise<void>,
+  phase: 'before' | 'after',
+  toolName: string,
+  toolCallId: string | undefined,
+  startedAt: number,
+  auditCtx: ReturnType<typeof auditContext>,
+  maxChars: number | undefined,
+  options: ToolRegistryFormatOptions
+): Promise<string | ToolResultEnvelope | undefined> {
+  try {
+    await action
+    return undefined
+  } catch (error) {
+    const code = phase === 'before' ? 'file_history_failed' : 'file_history_post_failed'
+    const message = phase === 'before'
+      ? `文件历史快照失败，已取消 ${toolName}: ${formatUnknownError(error)}`
+      : `${toolName} 已执行，文件可能已修改，但文件历史写后状态记录失败: ${formatUnknownError(error)}`
+    const failed = {
+      ok: false,
+      error: message,
+      code
+    }
+    getAuditLogger().emit(
+      'tool.result',
+      createToolResultPayload({
+        name: toolName,
+        ...(toolCallId ? { toolCallId } : {}),
+        output: failed.error,
+        ok: false,
+        isError: true,
+        code: failed.code,
+        durationMs: Date.now() - startedAt
+      }),
+      auditCtx
+    )
+    return formatToolResult(failed, maxChars, options)
   }
 }
 

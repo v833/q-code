@@ -18,6 +18,7 @@ import { isRetryable, calculateDelay, sleep } from './retry'
 import {
   ToolRegistry,
   type TeammateIdentity,
+  type ToolFileHistoryTracker,
   type ToolProgressEvent,
   type ToolResultEnvelope
 } from '../tools/registry'
@@ -174,6 +175,7 @@ export interface AgentLoopOptions {
   sessionId?: string
   hooks?: HookRunner
   agent?: HookAgentContext
+  fileHistory?: ToolFileHistoryTracker
   quiet?: boolean
   toolStepIdleTimeoutMs?: number
   /** 模型首个可见事件等待提示阈值，默认 10s。 */
@@ -366,6 +368,7 @@ export async function agentLoop(
                 ...(options.sessionId ? { sessionId: options.sessionId } : {}),
                 ...(options.hooks ? { hooks: options.hooks } : {}),
                 ...(options.agent ? { agent: options.agent } : {}),
+                ...(options.fileHistory ? { fileHistory: options.fileHistory } : {}),
                 ...(options.onToolProgress ? { onProgress: toAgentToolProgress(options) } : {}),
                 ...(options.teammateIdentity ? { teammateIdentity: options.teammateIdentity } : {})
               },

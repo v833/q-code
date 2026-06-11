@@ -288,6 +288,109 @@ describe('ToolRegistry 工具注册表与并发控制', () => {
       expect(result).toContain('policy denied')
     })
 
+    it('write_file 在执行前后触发文件历史追踪', async () => {
+      const registry = new ToolRegistry({ cwd: '/tmp', quiet: true })
+      const calls: string[] = []
+      registry.register(makeMockTool('write_file', () => {
+        calls.push('execute')
+        return 'done'
+      }, { isReadOnly: false }))
+
+      const tools = registry.toAISDKFormat({
+        fileHistory: {
+          beforeEdit: async (path) => {
+            calls.push(`before:${path}`)
+          },
+          afterEdit: async (path) => {
+            calls.push(`after:${path}`)
+          }
+        }
+      })
+
+      await tools.write_file.execute({ path: 'a.txt', content: 'hello' }, { toolCallId: 'tc1', messages: [] })
+
+      expect(calls).toEqual(['before:a.txt', 'execute', 'after:a.txt'])
+    })
+
+    it('只读工具不会触发文件历史追踪', async () => {
+      const registry = new ToolRegistry({ cwd: '/tmp', quiet: true })
+      const tracked: string[] = []
+      registry.register(makeMockTool('read_file', () => 'content', { isReadOnly: true }))
+
+      const tools = registry.toAISDKFormat({
+        fileHistory: {
+          beforeEdit: async (path) => {
+            tracked.push(`before:${path}`)
+          },
+          afterEdit: async (path) => {
+            tracked.push(`after:${path}`)
+          }
+        }
+      })
+
+      await tools.read_file.execute({ path: 'a.txt' }, { toolCallId: 'tc1', messages: [] })
+
+      expect(tracked).toEqual([])
+    })
+
+    it('hook 阻断写工具时不会触发文件历史追踪', async () => {
+      const registry = new ToolRegistry({ cwd: '/tmp', quiet: true })
+      const tracked: string[] = []
+      const hooks = new DefaultHookRunner([
+        {
+          name: 'deny',
+          type: 'handler',
+          event: 'pre_tool_use',
+          scope: 'runtime',
+          handler: () => ({ action: 'block', reason: 'policy denied' })
+        }
+      ])
+      registry.register(makeMockTool('write_file', () => 'done', { isReadOnly: false }))
+
+      const tools = registry.toAISDKFormat({
+        sessionId: 's1',
+        hooks,
+        fileHistory: {
+          beforeEdit: async (path) => {
+            tracked.push(`before:${path}`)
+          },
+          afterEdit: async (path) => {
+            tracked.push(`after:${path}`)
+          }
+        }
+      })
+      const result = await tools.write_file.execute({ path: 'a.txt', content: 'hello' }, { toolCallId: 'tc1', messages: [] })
+
+      expect(result).toContain('[hook blocked] write_file 未执行')
+      expect(tracked).toEqual([])
+    })
+
+    it('写工具执行后的文件历史记录失败时不声称写入已取消', async () => {
+      const registry = new ToolRegistry({ cwd: '/tmp', quiet: true })
+      const calls: string[] = []
+      registry.register(makeMockTool('write_file', () => {
+        calls.push('execute')
+        return 'done'
+      }, { isReadOnly: false }))
+
+      const tools = registry.toAISDKFormat({
+        fileHistory: {
+          beforeEdit: async () => {
+            calls.push('before')
+          },
+          afterEdit: async () => {
+            throw new Error('hash failed')
+          }
+        }
+      })
+      const result = await tools.write_file.execute({ path: 'a.txt', content: 'hello' }, { toolCallId: 'tc1', messages: [] })
+
+      expect(calls).toEqual(['before', 'execute'])
+      expect(result).toContain('write_file 已执行')
+      expect(result).toContain('文件可能已修改')
+      expect(result).not.toContain('已取消 write_file')
+    })
+
     it('post_tool_use hook 可以改写工具输出', async () => {
       const registry = new ToolRegistry({ cwd: '/tmp', quiet: true })
       registry.register(makeMockTool('probe', () => 'raw output'))

@@ -50,6 +50,7 @@ q-code eval run evals/smoke --no-langfuse
 /sessions
 /model
 /usage
+/rewind 1
 ```
 
 ## 测试

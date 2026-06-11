@@ -12,6 +12,15 @@ import {
   searchSessions,
   SessionStore
 } from '../../src/session/store'
+import {
+  createFileHistoryState,
+  createFileHistoryTranscriptRewind,
+  makeFileHistorySnapshot,
+  recordFileHistoryPostEdit,
+  rewindFileHistory,
+  snapshotToTranscriptEntry,
+  trackFileHistoryEdit
+} from '../../src/file-history'
 import { setupTempHome, type TempHome } from '../_helpers/temp-home'
 
 describe('session management', () => {
@@ -169,6 +178,65 @@ describe('session management', () => {
         currentModel: 'old-model'
       })
     ).toBeUndefined()
+  })
+
+  it('persists file history snapshot metadata without file contents', () => {
+    const store = makeStore('file-history')
+    const state = createFileHistoryState({ cwd: home.cwd, sessionId: store.sessionId })
+    const snapshot = makeFileHistorySnapshot(state, 'turn-1')
+    snapshot.trackedFileBackups['note.txt'] = {
+      backupFileName: 'abc@v1',
+      version: 1,
+      backupTime: '2026-06-11T00:00:00.000Z',
+      size: 6,
+      contentHash: 'hash-only'
+    }
+    snapshot.postEditFileStates['note.txt'] = {
+      exists: true,
+      checkedAt: '2026-06-11T00:00:01.000Z',
+      size: 5,
+      contentHash: 'post-hash-only'
+    }
+
+    store.appendFileHistorySnapshot(snapshotToTranscriptEntry(state, snapshot))
+    const reopened = makeStore('file-history')
+
+    expect(reopened.getFileHistorySnapshots()).toEqual([
+      expect.objectContaining({
+        snapshotId: snapshot.snapshotId,
+        turnId: 'turn-1',
+        trackedFileBackups: {
+          'note.txt': expect.objectContaining({
+            backupFileName: 'abc@v1',
+            contentHash: 'hash-only'
+          })
+        },
+        postEditFileStates: {
+          'note.txt': expect.objectContaining({
+            contentHash: 'post-hash-only'
+          })
+        }
+      })
+    ])
+    expect(readFileSync(store.paths.transcriptPath, 'utf-8')).not.toContain('file body')
+  })
+
+  it('persists file history rewind events in transcript order', () => {
+    const store = makeStore('file-history-rewind')
+    const file = join(home.cwd, 'note.txt')
+    writeFileSync(file, 'before', 'utf-8')
+    const state = createFileHistoryState({ cwd: home.cwd, sessionId: store.sessionId })
+    const snapshot = makeFileHistorySnapshot(state, 'turn-1')
+    trackFileHistoryEdit(state, 'note.txt', 'turn-1')
+    writeFileSync(file, 'after', 'utf-8')
+    recordFileHistoryPostEdit(state, 'note.txt', 'turn-1')
+
+    store.appendFileHistorySnapshot(snapshotToTranscriptEntry(state, snapshot))
+    const rewind = rewindFileHistory(state, 1)
+    store.appendFileHistoryRewind(createFileHistoryTranscriptRewind(rewind, 1))
+    const reopened = makeStore('file-history-rewind')
+
+    expect(reopened.getFileHistoryEvents().map((event) => event.type)).toEqual(['snapshot', 'rewind'])
   })
 
   it('uses fresh metadata as the list fast path', () => {

@@ -6,6 +6,7 @@
 | `src/agent` | Agent Loop |
 | `src/context` | Prompt、压缩、任务、记忆 |
 | `src/tools` | 工具定义和注册 |
+| `src/file-history` | Agent 写工具文件历史快照与 `/rewind` 回滚 |
 | `src/mcp` | MCP server 接入 |
 | `src/agents` | SubAgent、后台 Agent、Teams |
 | `src/output-styles` | Output Styles 加载、持久化和动态 prompt 格式化 |
@@ -27,6 +28,7 @@
 | `<project>/.q-code/output-styles/*.md` | 项目级回答风格 |
 | `~/.q-code/commands/**/*.md` | 用户级 Slash prompt 模板 |
 | `<project>/.q-code/commands/**/*.md` | 项目级 Slash prompt 模板 |
+| `<Q_CODE_HOME>/file-history/<projectKey>/<sessionId>/` | `/rewind` 文件正文备份 |
 | `~/.q-code/settings.json` | 用户级 settings，如 `outputStyle`、Hooks、MCP |
 | `<project>/.q-code/settings.json` | 项目级 settings |
 

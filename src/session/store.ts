@@ -22,6 +22,11 @@ import { basename, dirname, extname, join, resolve } from 'node:path'
 import type { ModelMessage } from 'ai'
 import { PROJECTS_DIR, getProjectStorageInfo, type ProjectStorageInfo } from '../context/project-paths'
 import type { TokenUsage } from '../context/token-budget'
+import type {
+  FileHistoryTranscriptEvent,
+  FileHistoryTranscriptRewind,
+  FileHistoryTranscriptSnapshot
+} from '../file-history'
 import type { CacheMode, NormalizedUsage, UsageCost, UsageRecord, UsageTotals } from '../usage'
 
 const LATEST_FILE = 'latest'
@@ -179,6 +184,16 @@ export type TranscriptEntry =
       isError?: boolean
     }
   | {
+      type: 'file_history_snapshot'
+      timestamp: string
+      snapshot: FileHistoryTranscriptSnapshot
+    }
+  | {
+      type: 'file_history_rewind'
+      timestamp: string
+      rewind: FileHistoryTranscriptRewind
+    }
+  | {
       type: 'compaction'
       timestamp: string
       trigger: CompactionTrigger
@@ -308,6 +323,24 @@ export class SessionStore {
     })
   }
 
+  /** 记录文件历史快照元数据；正文备份存放在 Q_CODE_HOME/file-history，不写入 transcript。 */
+  appendFileHistorySnapshot(snapshot: FileHistoryTranscriptSnapshot): void {
+    this.appendEntry({
+      type: 'file_history_snapshot',
+      timestamp: new Date().toISOString(),
+      snapshot
+    })
+  }
+
+  /** 记录 `/rewind` 后的快照栈裁剪事件，恢复时按 transcript 顺序重放。 */
+  appendFileHistoryRewind(rewind: FileHistoryTranscriptRewind): void {
+    this.appendEntry({
+      type: 'file_history_rewind',
+      timestamp: new Date().toISOString(),
+      rewind
+    })
+  }
+
   /**
    * 写入压缩元数据并批量追加压缩后的消息快照。
    *
@@ -406,6 +439,24 @@ export class SessionStore {
       .find((entry): entry is Extract<TranscriptEntry, { type: 'cache_mode' }> => {
         return entry.type === 'cache_mode'
       })?.mode
+  }
+
+  /** 返回 transcript 中可恢复的文件历史快照元数据（不含文件正文）。 */
+  getFileHistorySnapshots(): FileHistoryTranscriptSnapshot[] {
+    return this.readEntries()
+      .filter((entry): entry is Extract<TranscriptEntry, { type: 'file_history_snapshot' }> => {
+        return entry.type === 'file_history_snapshot'
+      })
+      .map((entry) => entry.snapshot)
+  }
+
+  /** 返回文件历史 transcript 事件，保持原始顺序用于重放 snapshot 更新和 rewind 裁剪。 */
+  getFileHistoryEvents(): FileHistoryTranscriptEvent[] {
+    return this.readEntries().flatMap((entry): FileHistoryTranscriptEvent[] => {
+      if (entry.type === 'file_history_snapshot') return [{ type: 'snapshot', snapshot: entry.snapshot }]
+      if (entry.type === 'file_history_rewind') return [{ type: 'rewind', rewind: entry.rewind }]
+      return []
+    })
   }
 
   private appendEntry(entry: TranscriptEntry): void {
@@ -1452,6 +1503,22 @@ function parseEntry(line: string): TranscriptEntry | null {
       }
     }
 
+    if (parsed.type === 'file_history_snapshot' && isFileHistoryTranscriptSnapshot(parsed.snapshot)) {
+      return {
+        type: 'file_history_snapshot',
+        timestamp: typeof parsed.timestamp === 'string' ? parsed.timestamp : new Date().toISOString(),
+        snapshot: parsed.snapshot
+      }
+    }
+
+    if (parsed.type === 'file_history_rewind' && isFileHistoryTranscriptRewind(parsed.rewind)) {
+      return {
+        type: 'file_history_rewind',
+        timestamp: typeof parsed.timestamp === 'string' ? parsed.timestamp : new Date().toISOString(),
+        rewind: parsed.rewind
+      }
+    }
+
     if (parsed.type === 'compaction') {
       return {
         type: 'compaction',
@@ -1467,6 +1534,58 @@ function parseEntry(line: string): TranscriptEntry | null {
   }
 
   return null
+}
+
+function isFileHistoryTranscriptRewind(value: unknown): value is FileHistoryTranscriptRewind {
+  if (!isRecord(value)) return false
+  return (
+    typeof value.snapshotId === 'string' &&
+    typeof value.turnId === 'string' &&
+    typeof value.sessionId === 'string' &&
+    typeof value.timestamp === 'string' &&
+    typeof value.steps === 'number' &&
+    Array.isArray(value.removedSnapshotIds) &&
+    value.removedSnapshotIds.every((item) => typeof item === 'string')
+  )
+}
+
+function isFileHistoryTranscriptSnapshot(value: unknown): value is FileHistoryTranscriptSnapshot {
+  if (!isRecord(value)) return false
+  return (
+    typeof value.snapshotId === 'string' &&
+    typeof value.turnId === 'string' &&
+    typeof value.sessionId === 'string' &&
+    typeof value.timestamp === 'string' &&
+    typeof value.backupRoot === 'string' &&
+    isRecord(value.trackedFileBackups) &&
+    Object.values(value.trackedFileBackups).every(isFileHistoryBackup) &&
+    (value.postEditFileStates === undefined ||
+      (isRecord(value.postEditFileStates) && Object.values(value.postEditFileStates).every(isFileHistoryFileState)))
+  )
+}
+
+function isFileHistoryBackup(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  return (
+    (typeof value.backupFileName === 'string' || value.backupFileName === null) &&
+    typeof value.version === 'number' &&
+    typeof value.backupTime === 'string' &&
+    (value.size === undefined || typeof value.size === 'number') &&
+    (value.mtimeMs === undefined || typeof value.mtimeMs === 'number') &&
+    (value.mode === undefined || typeof value.mode === 'number') &&
+    (value.contentHash === undefined || typeof value.contentHash === 'string')
+  )
+}
+
+function isFileHistoryFileState(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  return (
+    typeof value.exists === 'boolean' &&
+    typeof value.checkedAt === 'string' &&
+    (value.size === undefined || typeof value.size === 'number') &&
+    (value.mode === undefined || typeof value.mode === 'number') &&
+    (value.contentHash === undefined || typeof value.contentHash === 'string')
+  )
 }
 
 function parseCompactionTrigger(value: unknown): CompactionTrigger {

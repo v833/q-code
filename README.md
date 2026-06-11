@@ -1268,6 +1268,8 @@ prefix = "q-code-kb"
 
 Session/history 只负责恢复上下文，不决定后续模型。`--continue`、`--session=<id>` 和 TUI `/sessions switch` 之后的新请求都会使用当前 runtime 解析出的模型（或本进程内 `/model` 覆盖值）；历史 metadata 中的模型只用于展示、审计、usage 和排障。如果历史模型与当前模型不同，q-code 会对该会话最多提示一次，并说明后续新请求将使用当前模型。
 
+文件历史会按主 Agent 用户轮次创建本地快照，并在内置 `write_file` / `edit_file` 执行前备份目标文件。快照元数据写入 transcript，文件正文备份写入 `<Q_CODE_HOME>/file-history/<projectKey>/<sessionId>/`，不会把完整文件内容塞进 transcript 或审计日志。可用 `/rewind [n]` 回滚最近 `n` 轮中这些写工具造成的文件改动；首版不追踪 shell 命令或外部进程直接写入的文件，若回滚前检测到文件已在最新已知 Agent 写后状态之外发生变化，会拒绝静默覆盖并提示冲突。
+
 TUI 内可直接使用 `/sessions` 管理会话，不需要重启进程：
 
 | 命令 | 说明 |
@@ -1556,6 +1558,7 @@ System Prompt 由 `PromptBuilder` 按管道顺序拼接，每个 Pipe 可根据�
 ├── skills/<name>/SKILL.md     # 用户级 Skills
 ├── agents/<name>.md           # 用户级自定义 Agents
 ├── history/global.jsonl       # 全局 TUI 输入历史
+├── file-history/<projectKey>/  # /rewind 文件历史正文备份（transcript 只保存元数据）
 ├── shell-spills/<jobId>.log   # f 同步超大输出 spill
 └── shell-jobs/<sessionId>.index# f 后台 job 元数据索引
 
@@ -1591,6 +1594,7 @@ TUI 输入历史会跨进程持久化：项目历史写入 `<cwd>/.q-code/histor
 | `/models [list]`        | 根据当前配置列出可用模型（TUI 可选中切换） |
 | `/sessions`             | 列出/切换/管理会话     |
 | `/history [clear|on|off]` | 查看或管理输入历史     |
+| `/rewind [n]`           | 回滚最近 n 轮内置写工具造成的文件改动 |
 | `/usage`                | 查看 token/cache/成本  |
 | `/cost`                 | `/usage` 的兼容别名    |
 | `/cache [status|auto|on|off]` | 查看或切换 cache 策略 |
