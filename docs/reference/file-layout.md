@@ -4,6 +4,7 @@
 | --- | --- |
 | `src/cli` | CLI 启动和主循环 |
 | `src/agent` | Agent Loop |
+| `src/attachments` | 图片附件识别、限制、审计摘要与多模态消息构造 |
 | `src/context` | Prompt、压缩、任务、记忆 |
 | `src/tools` | 工具定义和注册 |
 | `src/file-history` | Agent 写工具文件历史快照与 `/rewind` 回滚 |
@@ -29,6 +30,7 @@
 | `~/.q-code/commands/**/*.md` | 用户级 Slash prompt 模板 |
 | `<project>/.q-code/commands/**/*.md` | 项目级 Slash prompt 模板 |
 | `<Q_CODE_HOME>/file-history/<projectKey>/<sessionId>/` | `/rewind` 文件正文备份 |
+| `<Q_CODE_HOME>/clips/<sessionId>/` | 剪贴板图片临时文件，默认 turn 结束后清理 |
 | `~/.q-code/settings.json` | 用户级 settings，如 `outputStyle`、Hooks、MCP |
 | `<project>/.q-code/settings.json` | 项目级 settings |
 

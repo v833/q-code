@@ -6,6 +6,33 @@ import type { TokenUsage } from '../context/token-budget'
 import type { SessionSummary } from '../session/store'
 import type { SlashCommandSuggestion } from '../slash'
 import type { CacheMode } from '../usage'
+import type { ImageAttachment } from '../attachments'
+
+/** 用户提交的一轮输入；TUI 可附带内存态图片附件。 */
+export interface TerminalSubmitPayload {
+  text: string
+  imageAttachments?: ImageAttachment[]
+}
+
+/** TUI Plan 建议确认期间暂存的原始请求；图片附件必须随请求一起保留。 */
+export interface PendingPlanEntrySuggestion {
+  input: string
+  reason: string
+  imageAttachments: ImageAttachment[]
+}
+
+/** 构造 Plan 建议暂存状态，复制附件数组以避免后续 TUI 状态清空影响本轮请求。 */
+export function createPendingPlanEntrySuggestion(
+  input: string,
+  reason: string,
+  imageAttachments: ImageAttachment[] = []
+): PendingPlanEntrySuggestion {
+  return {
+    input,
+    reason,
+    imageAttachments: [...imageAttachments]
+  }
+}
 
 /** 启动 Ink TUI 的选项；保持在无 React/Ink 依赖的轻量模块中，供主循环类型引用。 */
 export interface TerminalRuntimeOptions {
@@ -18,7 +45,7 @@ export interface TerminalRuntimeOptions {
   fileMentionIndex?: import('../mentions').FileMentionIndex
   fileMentionIndexStore?: import('../mentions').FileMentionIndexStore
   inputHistoryStore?: import('./history-store').HistoryStore
-  onSubmit: (input: string) => Promise<void> | void
+  onSubmit: (input: string | TerminalSubmitPayload) => Promise<void> | void
   onSessionPickerSelect?: (sessionId: string) => Promise<void> | void
   onAgentKill?: (agentId: string) => Promise<boolean> | boolean
   onAgentKillAll?: (agentIds: string[]) => Promise<number> | number

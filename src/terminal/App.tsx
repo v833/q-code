@@ -4,7 +4,11 @@
  */
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { Box, Static, Text, useApp, useInput, useStdin, useStdout } from 'ink'
-import type { TerminalBackgroundAgentItem, TerminalEventBus } from './events'
+import type {
+  TerminalBackgroundAgentItem,
+  TerminalEventBus,
+  TerminalSubmitPayload
+} from './events'
 import { createInitialTerminalState, terminalReducer, type TranscriptItem } from './state'
 import {
   backspace,
@@ -56,6 +60,16 @@ import {
 } from '../mentions'
 import type { SessionSummary } from '../session/store'
 import type { HistoryStore } from './history-store'
+import {
+  detectPastedImagePath,
+  formatBytes,
+  IMAGE_ATTACHMENT_MAX_COUNT,
+  prepareImageAttachmentAsync,
+  readClipboardImageAttachment,
+  summarizeImageAttachment,
+  type ImageAttachment,
+  type ImageAttachmentSummary
+} from '../attachments'
 
 const ASSISTANT_STREAM_FLUSH_MS = 80
 const CLEAR_TERMINAL = '\u001B[2J\u001B[3J\u001B[H'
@@ -69,7 +83,7 @@ export interface TerminalAppProps {
   /** 终端事件总线，驱动 transcript 与状态栏更新。 */
   bus: TerminalEventBus
   /** 用户按 Enter 提交非空输入时调用。 */
-  onSubmit: (input: string) => Promise<void> | void
+  onSubmit: (input: string | TerminalSubmitPayload) => Promise<void> | void
   onSessionPickerSelect?: (sessionId: string) => Promise<void> | void
   /** Agent Monitor 中请求停止一个后台 SubAgent。 */
   onAgentKill?: (agentId: string) => Promise<boolean> | boolean
@@ -295,6 +309,7 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
   const [sessionPickerRenaming, setSessionPickerRenaming] = useState<
     { sessionId: string; value: string } | undefined
   >(undefined)
+  const [imageAttachments, setImageAttachments] = useState<ImageAttachment[]>([])
   const [isBusy, setIsBusy] = useState(false)
   const [interruptRequested, setInterruptRequested] = useState(false)
   const [staticTranscriptItems, setStaticTranscriptItems] = useState<TranscriptItem[]>([])
@@ -364,6 +379,10 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
   const showSlashCommands = fileMentionAtCursor === null && filteredSlashCommands.length > 0
   const suggestionNotice = fileMentionAtCursor ? fileMentionIndexNotice(fileMentionIndex) : undefined
   const suggestionsVisible = (showFileMentions || showSlashCommands || Boolean(suggestionNotice)) && !isBusy
+  const attachmentSummaries = useMemo(
+    () => imageAttachments.map(summarizeImageAttachment),
+    [imageAttachments]
+  )
   const isInteractiveOverlayOpen = Boolean(
     state.modelsPicker || state.sessionPicker || state.agentMonitor
   )
@@ -444,6 +463,62 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
     if (selectedFileMentionIndex >= filteredFileMentions.length) setSelectedFileMentionIndex(-1)
   }, [filteredFileMentions.length, selectedFileMentionIndex, showFileMentions])
 
+  const attachImagePath = async (
+    filePath: string,
+    source: ImageAttachment['source'] = 'path'
+  ): Promise<boolean> => {
+    if (imageAttachments.length >= IMAGE_ATTACHMENT_MAX_COUNT) {
+      dispatch({ type: 'error', text: `图片附件最多 ${IMAGE_ATTACHMENT_MAX_COUNT} 张。` })
+      return false
+    }
+    setIsBusy(true)
+    try {
+      const attachment = await prepareImageAttachmentAsync(filePath, {
+        cwd: props.cwd ?? process.cwd(),
+        source,
+        allowAbsolute: true
+      })
+      setImageAttachments((current) => [...current, attachment])
+      dispatch({
+        type: 'message',
+        role: 'system',
+        text: `已附加图片: ${attachment.displayName} (${formatBytes(attachment.bytes)}, ${attachment.mediaType})`
+      })
+      return true
+    } catch (error) {
+      dispatch({ type: 'error', text: formatErrorMessage(error) })
+      return false
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  const attachClipboardImage = (): void => {
+    if (imageAttachments.length >= IMAGE_ATTACHMENT_MAX_COUNT) {
+      dispatch({ type: 'error', text: `图片附件最多 ${IMAGE_ATTACHMENT_MAX_COUNT} 张。` })
+      return
+    }
+    setIsBusy(true)
+    void readClipboardImageAttachment({
+      cwd: props.cwd ?? process.cwd(),
+      sessionId: props.sessionId ?? 'tui'
+    })
+      .then((result) => {
+        if (result.attachment) {
+          setImageAttachments((current) => [...current, result.attachment!])
+          dispatch({
+            type: 'message',
+            role: 'system',
+            text: `已从剪贴板附加图片: ${result.attachment.displayName} (${formatBytes(result.attachment.bytes)}, ${result.attachment.mediaType})`
+          })
+          return
+        }
+        dispatch({ type: 'error', text: result.error ?? '未读取到剪贴板图片。' })
+      })
+      .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
+      .finally(() => setIsBusy(false))
+  }
+
   useEffect(() => {
     // 当建议列表从“有”变为“无”时，Ink 在 Windows 终端上偶发无法完整清理上一帧残留文本。
     // 这里强制渲染一帧空白 suggestions 区，确保残留字符（如 `/`）被覆盖。
@@ -509,6 +584,9 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
     const isCtrlX = key.ctrl && value === 'x'
     const isCtrlK = key.ctrl && value === 'k'
     const isCtrlA = key.ctrl && value === 'a'
+    const isImageClipboardShortcut =
+      (key.ctrl && key.shift && value.toLowerCase() === 'v') ||
+      (key.meta && value.toLowerCase() === 'v')
 
     if (isShiftTab && !isBusy && !isInteractiveOverlayOpen && !suggestionsVisible) {
       setIsBusy(true)
@@ -952,6 +1030,11 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
       return
     }
 
+    if (isImageClipboardShortcut) {
+      attachClipboardImage()
+      return
+    }
+
     if (key.ctrl && value === 'r') {
       setInput((current) =>
         searchHistoryPrevious(current, {
@@ -1029,17 +1112,22 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
         maxHistory: props.inputHistoryStore?.getRuntimeLimit()
       })
       const text = submitted.input.trim()
+      const attachments = imageAttachments
       setInput(submitted.state)
-      if (!text) return
+      setImageAttachments([])
+      if (!text && attachments.length === 0) return
       if (shouldRecord(submitted.input)) {
         void props.inputHistoryStore
           ?.append(submitted.input)
           .catch((error) => dispatch({ type: 'error', text: formatErrorMessage(error) }))
       }
-      dispatch({ type: 'message', role: 'user', text })
+      const transcriptText = attachments.length > 0
+        ? `${text || '[图片附件]'}\n${formatAttachmentTranscriptText(attachments.map(summarizeImageAttachment))}`
+        : text
+      dispatch({ type: 'message', role: 'user', text: transcriptText })
       setIsBusy(true)
       setInterruptRequested(false)
-      void Promise.resolve(props.onSubmit(text))
+      void Promise.resolve(props.onSubmit({ text, imageAttachments: attachments }))
         .catch((error) => {
           dispatch({ type: 'error', text: formatErrorMessage(error) })
         })
@@ -1055,6 +1143,10 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
     }
 
     if (shouldBackspace(value, key, rawInput)) {
+      if (!input.value && imageAttachments.length > 0) {
+        setImageAttachments((current) => current.slice(0, -1))
+        return
+      }
       setInput((current) => backspace(current))
       return
     }
@@ -1083,6 +1175,13 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
       return
     }
     if (value && !key.ctrl && !key.meta) {
+      const pastedImagePath = detectPastedImagePath(value)
+      if (pastedImagePath) {
+        void attachImagePath(pastedImagePath).then((attached) => {
+          if (!attached) setInput((current) => insertText(current, value))
+        })
+        return
+      }
       setInput((current) => insertText(current, value))
     }
   })
@@ -1136,6 +1235,7 @@ export function TerminalApp(props: TerminalAppProps): React.JSX.Element {
           useRealCursor={process.env.Q_CODE_TUI_CURSOR?.trim().toLowerCase() === 'ansi'}
           historySearchLabel={historySearchLabel}
           hasUndoClear={!input.value && input.clearedValue !== undefined}
+          attachments={attachmentSummaries}
         />
       </Box>
     </>
@@ -1165,4 +1265,10 @@ function formatHistorySearchLabel(input: ReturnType<typeof createInputState>): s
     return `Ctrl+R 历史搜索中 (${input.historySearchMatchIndex}/${input.historySearchMatchCount})`
   }
   return 'Ctrl+R 历史搜索中'
+}
+
+function formatAttachmentTranscriptText(attachments: ImageAttachmentSummary[]): string {
+  return attachments
+    .map((item, index) => `[image ${index + 1}] ${item.displayName} ${formatBytes(item.bytes)} ${item.mediaType}`)
+    .join('\n')
 }

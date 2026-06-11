@@ -47,6 +47,8 @@ import { formatStaticTranscriptItems } from '../../src/terminal/utils/static-out
 import { stringDisplayWidth } from '../../src/terminal/utils/string-width'
 import { formatStartupDuckBanner, STARTUP_DUCK_SOURCE } from '../../src/terminal/utils/duck'
 import type { SlashCommandSuggestion } from '../../src/slash'
+import { createPendingPlanEntrySuggestion } from '../../src/terminal/events'
+import type { ImageAttachment } from '../../src/attachments'
 
 describe('terminal state reducer', () => {
   it('streams assistant deltas into one transcript item', () => {
@@ -306,6 +308,19 @@ describe('terminal state reducer', () => {
 
     state = terminalReducer(state, { type: 'plan_entry_suggestion_clear' })
     expect(state.planEntrySuggestion).toBeUndefined()
+  })
+
+  it('keeps image attachments on pending plan entry suggestions', () => {
+    const attachment = makeImageAttachment({ id: 'img-1' })
+    const imageAttachments = [attachment]
+    const pending = createPendingPlanEntrySuggestion(
+      '完整重构图片解析流程',
+      '任务可能涉及多文件或多阶段修改',
+      imageAttachments
+    )
+
+    expect(pending.imageAttachments).toEqual([attachment])
+    expect(pending.imageAttachments).not.toBe(imageAttachments)
   })
 
   it('clears plan entry suggestions when the transcript is cleared', () => {
@@ -706,6 +721,20 @@ describe('terminal state reducer', () => {
     })
   })
 })
+
+function makeImageAttachment(overrides: Partial<ImageAttachment> = {}): ImageAttachment {
+  return {
+    id: 'img',
+    source: 'path',
+    path: 'debug.png',
+    displayName: 'debug.png',
+    mediaType: 'image/png',
+    bytes: 9,
+    sha256: 'a'.repeat(64),
+    data: 'iVBORw0KGgo=',
+    ...overrides
+  }
+}
 
 describe('terminal input state', () => {
   it('supports editing, submit, and history recall', () => {

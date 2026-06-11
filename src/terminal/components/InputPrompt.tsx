@@ -9,6 +9,7 @@ import {
   renderPromptInputRows
 } from '../input'
 import { animeTheme, formatPromptGlyph } from '../theme/index'
+import { formatBytes, type ImageAttachmentSummary } from '../../attachments'
 
 export function getInlineCursorBlinkMs(env: NodeJS.ProcessEnv = process.env): number | undefined {
   const raw = env.Q_CODE_TUI_CURSOR_BLINK_MS?.trim()
@@ -27,7 +28,8 @@ export function InputPrompt({
   isBusy,
   historySearchLabel,
   hasUndoClear,
-  useRealCursor
+  useRealCursor,
+  attachments = []
 }: {
   value: string
   cursor: number
@@ -35,6 +37,7 @@ export function InputPrompt({
   historySearchLabel?: string
   hasUndoClear?: boolean
   useRealCursor?: boolean
+  attachments?: ImageAttachmentSummary[]
 }): React.JSX.Element {
   const inputRef = useRef<DOMElement>(null)
   const realCursorEnabled = useRealCursor ?? true
@@ -80,6 +83,16 @@ export function InputPrompt({
       ) : null}
       {historySearchLabel ? (
         <Text color={animeTheme.sky}>  {historySearchLabel}</Text>
+      ) : null}
+      {attachments.length > 0 ? (
+        <Box flexDirection="column">
+          {attachments.map((attachment, index) => (
+            <Text key={`${attachment.id}-${index}`} color={animeTheme.textDim}>
+              {'  '}[image] {index + 1}: {attachment.displayName}  {formatBytes(attachment.bytes)}  {attachment.mediaType}
+              {index === attachments.length - 1 ? '  [Backspace 移除]' : ''}
+            </Text>
+          ))}
+        </Box>
       ) : null}
       <Box>
         <Text color={animeTheme.mint} bold>{formatPromptGlyph()}</Text>

@@ -9,7 +9,12 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { getRequiredEnv, normalizeBaseURL } from '../utils';
 import { fmtBanner, fmtContextUsage, fmtStop } from '../utils/logger';
 import { createInterface } from 'node:readline';
-import type { TerminalRuntime } from '../terminal/events';
+import {
+  createPendingPlanEntrySuggestion,
+  type PendingPlanEntrySuggestion,
+  type TerminalRuntime,
+  type TerminalSubmitPayload,
+} from '../terminal/events';
 import { fetchOpenAiModels } from '../runtime/init-cli';
 import {
   createHistoryStore,
@@ -307,6 +312,15 @@ import {
   expandFileMentions,
   type FileMentionIndexStore,
 } from '../mentions';
+import {
+  cleanupClipboardImages,
+  createUserAttachmentPayload,
+  createUserMessageWithImages,
+  expandImageMentions,
+  mergeImageAttachments,
+  redactImageMessageForTranscript,
+  type ImageAttachment,
+} from '../attachments';
 
 let startupTrace: StartupTrace = createStartupTrace();
 let debugMode = false;
@@ -690,9 +704,7 @@ export async function runMain(options: {
   let needsPlanModeExitAttachment = false;
   let pendingPlanApproval = false;
   let pendingPlanSummary = '';
-  let pendingPlanEntrySuggestion:
-    | { input: string; reason: string }
-    | undefined;
+  let pendingPlanEntrySuggestion: PendingPlanEntrySuggestion | undefined;
   let pendingSessionSelection: PendingSessionSelection | undefined;
   let pendingSessionPurge: PendingSessionPurge | undefined;
   let canEmitSessionInfo = false;
@@ -2047,9 +2059,11 @@ export async function runMain(options: {
     terminal?.instance.unmount();
   }
 
-  async function handleInput(input: string): Promise<void> {
-    const trimmed = input.trim();
-    if (!trimmed || trimmed === 'exit') {
+  async function handleInput(input: string | TerminalSubmitPayload): Promise<void> {
+    const submittedText = typeof input === 'string' ? input : input.text;
+    const submittedImages = typeof input === 'string' ? [] : input.imageAttachments ?? [];
+    const trimmed = submittedText.trim();
+    if ((!trimmed && submittedImages.length === 0) || trimmed === 'exit') {
       print('Bye!');
       await closeCli();
       return;
@@ -2100,6 +2114,7 @@ export async function runMain(options: {
           }
           await runAgentTurnWithMessages(
             skillExpansion.messages,
+            skillExpansion.messages,
             trimmed,
             promptHook.appendContext,
           );
@@ -2120,13 +2135,17 @@ export async function runMain(options: {
         if (!closed) ask();
         return;
       }
-      const routedInput = await routePlanEntryIntent(trimmed);
+      if (!trimmed && submittedImages.length > 0) {
+        await runAgentTurn('请查看我附加的图片。', submittedImages);
+        return;
+      }
+      const routedInput = await routePlanEntryIntent(trimmed, submittedImages);
       if (!routedInput) {
         if (!closed) ask();
         return;
       }
 
-      await runAgentTurn(routedInput);
+      await runAgentTurn(routedInput, submittedImages);
     } catch (error) {
       getAuditLogger().emit(
         'error',
@@ -2146,18 +2165,26 @@ export async function runMain(options: {
     if (!closed) ask();
   }
 
-  async function runAgentTurn(userContent: string): Promise<void> {
-    const promptHook = await runUserPromptSubmitHook(userContent);
-    if (promptHook.blocked) return;
-    const effectiveUserContent =
-      typeof promptHook.prompt === 'string' ? promptHook.prompt : userContent;
-    await runExpandedAgentTurn(effectiveUserContent, promptHook.appendContext);
+  async function runAgentTurn(
+    userContent: string,
+    imageAttachments: ImageAttachment[] = [],
+  ): Promise<void> {
+    try {
+      const promptHook = await runUserPromptSubmitHook(userContent);
+      if (promptHook.blocked) return;
+      const effectiveUserContent =
+        typeof promptHook.prompt === 'string' ? promptHook.prompt : userContent;
+      await runExpandedAgentTurn(effectiveUserContent, promptHook.appendContext, {}, imageAttachments);
+    } finally {
+      cleanupClipboardImages(sessionId);
+    }
   }
 
   async function runExpandedAgentTurn(
     userContent: string,
     hookAppendContext?: string,
     turnOptions: { modelName?: string; allowedToolNames?: Set<string> } = {},
+    imageAttachments: ImageAttachment[] = [],
   ): Promise<void> {
     const mentionExpansion = expandFileMentions(userContent, {
       cwd: activeStore.cwd,
@@ -2191,11 +2218,40 @@ export async function runMain(options: {
       }
     }
 
-    const userMsg: ModelMessage = {
-      role: 'user',
-      content: mentionExpansion.prompt,
-    };
-    await runAgentTurnWithMessages([userMsg], userContent, hookAppendContext, turnOptions);
+    const imageExpansion = expandImageMentions(mentionExpansion.prompt, {
+      cwd: activeStore.cwd,
+      existingAttachments: imageAttachments,
+    });
+    for (const warning of imageExpansion.warnings) {
+      print(`\n  [@image] ${warning.raw}: ${warning.reason}`);
+    }
+    const mergedImages = mergeImageAttachments([
+      ...imageAttachments,
+      ...imageExpansion.attachments,
+    ]);
+    for (const warning of mergedImages.warnings) {
+      print(`\n  [image] ${warning.raw}: ${warning.reason}`);
+    }
+    if (mergedImages.attachments.length > 0) {
+      getAuditLogger().emit(
+        'user.attachment',
+        createUserAttachmentPayload(mergedImages.attachments),
+        { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
+      );
+      print(
+        `\n  [image] 已附加 ${mergedImages.attachments.length} 张图片，合计 ${mergedImages.attachments.reduce((sum, item) => sum + item.bytes, 0)} bytes`,
+      );
+    }
+
+    const userMsg = createUserMessageWithImages(imageExpansion.prompt, mergedImages.attachments);
+    const persistedUserMsg = redactImageMessageForTranscript(userMsg);
+    await runAgentTurnWithMessages(
+      [userMsg],
+      [persistedUserMsg],
+      userContent,
+      hookAppendContext,
+      turnOptions,
+    );
   }
 
   async function runUserCommandTurn(
@@ -2348,7 +2404,10 @@ export async function runMain(options: {
     ].join('\n');
   }
 
-  async function routePlanEntryIntent(input: string): Promise<string | undefined> {
+  async function routePlanEntryIntent(
+    input: string,
+    imageAttachments: ImageAttachment[] = [],
+  ): Promise<string | undefined> {
     if (agentMode === 'plan' || planIntentMode === 'off') return input;
 
     const intent = classifyPlanEntryIntent(input);
@@ -2375,7 +2434,11 @@ export async function runMain(options: {
     }
 
     if (useTui) {
-      pendingPlanEntrySuggestion = { input, reason: intent.reason };
+      pendingPlanEntrySuggestion = createPendingPlanEntrySuggestion(
+        input,
+        intent.reason,
+        imageAttachments,
+      );
       emitTerminal({
         type: 'plan_entry_suggestion',
         request: input,
@@ -2412,7 +2475,7 @@ export async function runMain(options: {
       },
       { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
     );
-    await runAgentTurn(input);
+    await runAgentTurn(input, pending?.imageAttachments ?? []);
   }
 
   async function declinePlanEntrySuggestion(input: string): Promise<void> {
@@ -2428,7 +2491,7 @@ export async function runMain(options: {
       },
       { sessionId, cwd: activeStore.cwd, agent: { kind: 'main' } },
     );
-    await runAgentTurn(input);
+    await runAgentTurn(input, pending?.imageAttachments ?? []);
   }
 
   function cancelPlanEntrySuggestion(input: string): void {
@@ -2436,6 +2499,7 @@ export async function runMain(options: {
     pendingPlanEntrySuggestion = undefined;
     emitTerminal({ type: 'plan_entry_suggestion_clear' });
     print(`\n  [Plan] 已取消 Plan 建议，未执行原请求。`);
+    cleanupClipboardImages(sessionId);
     getAuditLogger().emit(
       'plan.entry.cancelled',
       {
@@ -2448,6 +2512,7 @@ export async function runMain(options: {
 
   async function runAgentTurnWithMessages(
     userMessages: ModelMessage[],
+    persistedUserMessages: ModelMessage[],
     userQuery: string,
     hookAppendContext?: string,
     turnOptions: { modelName?: string; allowedToolNames?: Set<string> } = {},
@@ -2476,7 +2541,7 @@ export async function runMain(options: {
     }
 
     messages.push(...userMessages);
-    activeStore.appendAll(userMessages);
+    activeStore.appendAll(persistedUserMessages);
     lastUserPromptDigest = sha256ForCrashGuard(userQuery);
     const turnPrompt = await buildSystemPromptWithInspection(userQuery);
     const turnSystem = turnPrompt.systemPrompt;
@@ -2717,6 +2782,7 @@ export async function runMain(options: {
       if (activeTurnAbortController === turnAbortController) {
         activeTurnAbortController = undefined;
       }
+      cleanupClipboardImages(sessionId);
     }
   }
 

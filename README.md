@@ -187,7 +187,8 @@ cp .env.example .env
 | `Q_CODE_EVAL_JUDGE_BASE_URL`   | ❌   | LLM judge 专用 OpenAI 兼容 base URL；未设时回退 `SUMMARY_BASE_URL` |
 | `Q_CODE_EVAL_JUDGE_API_KEY`    | ❌   | LLM judge 专用 API key；未设时回退 `SUMMARY_API_KEY`          |
 | `Q_CODE_EVAL_JUDGE_MODEL`      | ❌   | LLM judge 专用模型；未设时回退 `SUMMARY_MODEL`                |
-| `Q_CODE_MENTION_ALLOW_ABS`     | ❌   | 设为 true 后允许 `@file` 引用绝对路径；默认只允许当前目录内路径 |
+| `Q_CODE_MENTION_ALLOW_ABS`     | ❌   | 设为 true 后允许 `@file` / `@image:` 引用绝对路径；默认只允许当前目录内路径 |
+| `Q_CODE_KEEP_CLIPS`            | ❌   | 设为 true 后保留剪贴板图片临时文件；默认 turn 结束后清理 `<Q_CODE_HOME>/clips/<sessionId>/` |
 | `Q_CODE_FILE_INDEX_IGNORE`     | ❌   | 非 git fallback walk 额外跳过的目录名，逗号分隔              |
 | `Q_CODE_SHELL_TIMEOUT_MS`      | ❌   | `f` 同步命令默认超时，默认 60000ms                           |
 | `Q_CODE_SHELL_TIMEOUT_MAX_MS`  | ❌   | `f.timeoutMs` 上限，默认 1800000ms（30 分钟）                 |
@@ -1580,6 +1581,8 @@ System Prompt 由 `PromptBuilder` 按管道顺序拼接，每个 Pipe 可根据�
 ## CLI 命令总览
 
 交互式启动默认进入 TUI。快捷键：`Enter` 发送，`Ctrl+J` 换行，`↑/↓` 切换历史，`Ctrl+R` 搜索历史，`Esc` 清空/恢复输入，忙时 `Ctrl+C` 中断当前任务，空闲时 `Ctrl+C` 退出。出现 Plan Mode 建议确认条时，`Enter` 进入 Plan 并继续原请求，`Esc` 按普通模式执行，`Ctrl+C` 取消建议。需要旧版纯文本交互时使用 `pnpm start -- --classic` 或设置 `Q_CODE_TUI=0`。
+
+TUI 支持把本地图片作为下一轮多模态输入：截图后可按 `Ctrl+Shift+V`（部分终端可用 `Alt+V`）读取剪贴板图片；从资源管理器拖拽图片路径到终端会自动附加；也可以在提示词中写 `@image:./debug.png`。单轮最多 4 张图片，单图 10MB，总量 20MB；当前支持 `.png/.jpg/.jpeg/.gif/.webp/.bmp/.svg`。图片正文只进入本轮模型请求，transcript 与审计日志只保存附件摘要、大小、media type 和 SHA-256，不保存 base64 原文。剪贴板临时文件默认写入 `<Q_CODE_HOME>/clips/<sessionId>/` 并在 turn 结束后清理；调试时可设 `Q_CODE_KEEP_CLIPS=true` 保留。
 
 TUI 状态栏默认只展示当前状态；需要查看模式、模型、cache 策略、任务系统、context 进度和 token 摘要时使用 `/status on` 打开详情，`/status off` 关闭。已完成历史会静态输出，流式输出期间只刷新当前轮，并限制 streaming 预览高度以减少 VSCode 等终端闪烁。执行中会同时保留中间进度旁白和工具调用摘要；等最终回答出现后，已完成工具调用会折叠，只留下对话内容。输入 `/` 时命令建议按类别分组展示，工具调用默认以一行紧凑摘要呈现，失败时显示恢复建议。
 

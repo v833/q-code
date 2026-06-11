@@ -4,7 +4,7 @@
 
 `q-code` 是一个基于 Vercel AI SDK 的 TypeScript 命令行 Agent 框架。核心能力包括：
 
-- **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、文件历史快照与 `/rewind` 按轮次回滚内置写工具改动、TUI `/agents` SubAgent Monitor（同步与后台 SubAgent，completed 默认隐藏并可清理，忙碌等待期间可用 `Ctrl+A` 查看）、只读同步 SubAgent 动态并行调度、SubAgent 长 final output artifact/preview 回传、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、文件派项目记忆（headers 精选、预算化正文注入、年龄提示）、Skills、SubAgent、Agent Teams、Worktree 隔离。
+- **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、文件历史快照与 `/rewind` 按轮次回滚内置写工具改动、TUI `/agents` SubAgent Monitor（同步与后台 SubAgent，completed 默认隐藏并可清理，忙碌等待期间可用 `Ctrl+A` 查看）、只读同步 SubAgent 动态并行调度、SubAgent 长 final output artifact/preview 回传、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、`@image:<path>` / TUI 图片附件多模态输入、文件派项目记忆（headers 精选、预算化正文注入、年龄提示）、Skills、SubAgent、Agent Teams、Worktree 隔离。
 - **工具执行**：文件/搜索工具、可配置超时与 spill 的 Shell 工具（Windows 优先 PowerShell7，缺失时回退 Windows PowerShell 5.1）、后台 Shell job（`f_status` / `f_tail` / `f_kill` / `f_list`）。
 - **集成扩展**：MCP server、Hooks（生命周期事件、pre/post tool-use 决策、prompt/context 注入、退出码协议）、Slash 命令注册表、Output Styles、Markdown User Commands、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
 - **可观测性**：NDJSON 审计日志（默认开启）、本地只读 Web Dashboard、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警、启动时版本更新说明（对比 `~/.q-code/last-version.json` 与包内 `changelog.json`）。
@@ -89,6 +89,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `src/index.ts`：开发态兼容入口，委托给 `src/cli/bootstrap.ts`。
 - `src/cli/`：薄 CLI 入口（early commands、动态 import、启动 trace）、主交互循环（模式切换、上下文压缩调度和整体编排）与启动预热 ready gate。
 - `src/agent/`：核心 Agent Loop、重试、循环检测、模型等待心跳与单步模型请求超时。
+- `src/attachments/`：图片附件识别、路径安全校验、大小/数量限制、剪贴板临时文件、多模态 `ModelMessage` 构造和 transcript/audit 脱敏摘要。
 - `src/agents/`：SubAgent、后台 Agent、Agent Teams、worktree、mailbox、notification-store、final output artifact。
 - `src/context/`：System Prompt 管道、鸭子人格（`duck-persona.ts`，主题鸭通过本轮 transient 用户消息注入，不进 system prompt / 会话历史）、上下文压缩与 offload、Plan Mode 附件/计划文件/意图识别、任务、Todo、记忆（`memory/selection.ts` 负责 headers 精选、正文预算和年龄提示）、运行环境和项目指令加载。
 - `src/tools/`：内置工具定义、注册表（含审计/Hooks 包装层）、自定义工具目录加载器、文件/搜索/计划/任务/团队/Memory/Skill/GitLab KB/Agent 等工具；`shell-tools.ts` 负责 `f`、后台 shell job、输出 spill、cwd 策略和危险命令/交互保护。
@@ -149,7 +150,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - Agent Loop 必须保留 AI SDK reasoning part（如 DeepSeek thinking/reasoner 的 `reasoning_content`）并随 assistant 消息回传给后续模型请求；`Q_CODE_MODEL_PROVIDER` / `Q_CODE_THINKING_TYPE` / `Q_CODE_REASONING_EFFORT` 是通用 reasoning 配置，主 Agent、SubAgent、摘要压缩、real-agent eval 与 LLM judge 都应统一接入。OpenAI 官方 provider 通过 `providerOptions.openai.reasoningEffort` 接收；DeepSeek 命中或显式设置 `Q_CODE_MODEL_PROVIDER=deepseek-compatible` 时走官方 `@ai-sdk/openai-compatible` provider 和 `src/runtime/deepseek-compat.ts` 请求体兼容层；`Q_CODE_REASONING_EFFORT=none` 对 DeepSeek 应关闭 thinking，不能回退为高强度推理。DeepSeek V4 Pro thinking + tools 只可静默移除默认 `tool_choice=auto`，显式 `required` 或指定函数必须报清晰错误，避免吞掉调用意图。reasoning 不作为普通 `onText` 文本输出到 TUI。
 - 工具默认通过 `ToolRegistry.toAISDKFormat` 包装，会自动写 `tool.call` / `tool.result` 审计事件；新增工具入口或绕过 registry 时需自行接审计与 Hooks 管线（参考 `src/observability/audit.ts::getAuditLogger`）。
 - SubAgent 最终产物遵循控制面/数据面分离：短 `finalText` 可继续内联；长结果必须通过 `src/agents/final-output-artifact.ts` 写入 `~/sessions/<projectKey>/agent-artifacts/<sessionId>/<agentId>.final.md`，同步 `Agent` 工具结果、后台 `<task-notification>` 和 `subagent_stop` Hook 只回传 preview、artifact 路径、原始字符数、截断标记和恢复说明。Hook 兼容策略是短结果保留 `finalText`，长结果改用 `finalTextPreview` / `artifactFile` 等 metadata。失败和 killed 的错误文本也要做长度保护。
-- `@file` mention 默认只能引用当前工作目录内文件，并必须校验 symlink 解析后的真实路径；绝对路径必须显式设置 `Q_CODE_MENTION_ALLOW_ABS=true`，并写 `user.mention` 审计事件。单文件/总附件预算变更需同步 README 和 `src/mentions/file-mentions.ts` 常量。TUI 候选索引缓存写入 `<cwd>/.q-code/file-mention-index.json`，启动可先使用旧缓存并后台刷新；watcher/刷新失败不得阻塞输入，需保留旧索引并显示简短提示。非 git fallback walk 的额外忽略目录通过 `Q_CODE_FILE_INDEX_IGNORE` 配置。
+- `@file` mention 默认只能引用当前工作目录内文件，并必须校验 symlink 解析后的真实路径；绝对路径必须显式设置 `Q_CODE_MENTION_ALLOW_ABS=true`，并写 `user.mention` 审计事件。`@image:<path>` 复用同一绝对路径开关并写 `user.attachment` 审计事件；图片正文只能进入本轮模型请求，不得写入 transcript、压缩快照或 audit payload，transcript 只能保留脱敏摘要。单文件/总附件预算变更需同步 README 和对应常量。TUI 候选索引缓存写入 `<cwd>/.q-code/file-mention-index.json`，启动可先使用旧缓存并后台刷新；watcher/刷新失败不得阻塞输入，需保留旧索引并显示简短提示。非 git fallback walk 的额外忽略目录通过 `Q_CODE_FILE_INDEX_IGNORE` 配置。
 - 文件工具的读类入口（`read_file` / `list_directory` / `glob` / `grep`）可只读访问用户级 q-code 信任目录：`~/.q-code`、`~/.agents/skills`、`~/.agents/agents`；写入和编辑仍必须限制在当前 `cwd` 内。Windows 下路径比较必须兼容盘符大小写与分隔符差异。不要恢复全局 `Q_CODE_ALLOW_OUTSIDE_CWD` 式开关。
 - Shell 工具默认只能在当前 `cwd` 内执行；跳出目录必须显式设置 `Q_CODE_SHELL_ALLOW_ABS_CWD=true`。长命令优先使用 `timeoutMs` 或 `background=true`，超大输出通过 `<Q_CODE_HOME>/shell-spills` 恢复全文，后台 job 元数据写 `<Q_CODE_HOME>/shell-jobs`。
 - TUI 输入历史默认写入 `<cwd>/.q-code/history.jsonl` 与 `<Q_CODE_HOME>/history/global.jsonl`（由 `Q_CODE_HISTORY_SCOPE=project|global|both` 控制），必须过滤空格开头、连续重复和默认敏感 pattern（除非 `history.excludeDefaults=false`）；`Q_CODE_HISTORY_REDACT=true` 时不得保存完整输入原文。
@@ -180,6 +181,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - `@file` 文件引用：`vitest run tests/unit/file-mentions.test.ts tests/unit/file-index-cache.test.ts tests/unit/terminal.test.ts tests/unit/runtime-config.test.ts`
   - 会话管理：`vitest run tests/unit/session-management.test.ts tests/integration/session-recovery.test.ts tests/integration/session-switch.test.ts tests/unit/terminal.test.ts`
   - Plan Mode 意图识别：`vitest run tests/unit/plan-intent.test.ts tests/unit/runtime-config.test.ts tests/unit/terminal.test.ts`
+  - 图片附件 / 多模态输入：`vitest run tests/unit/attachments.test.ts tests/unit/terminal.test.ts tests/unit/session-management.test.ts`
   - 终端/输入状态机改动：`vitest run tests/unit/terminal.test.ts`
   - TUI SubAgent Monitor：`vitest run tests/unit/agent-monitor.test.ts tests/unit/terminal.test.ts`
   - TUI 输入历史：`vitest run tests/unit/history-store.test.ts tests/unit/terminal.test.ts tests/integration/history-flow.test.ts`

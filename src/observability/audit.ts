@@ -27,6 +27,7 @@ export type AuditEventName =
   | "session.switch"
   | "user.prompt"
   | "user.mention"
+  | "user.attachment"
   | "user.command"
   | "cache.keepalive"
   | "memory.selection.start"
