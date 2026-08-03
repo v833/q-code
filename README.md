@@ -8,7 +8,7 @@
   基于 AI SDK 的命令行 Agent 框架
 </p>
 
-基于 AI SDK 的命令行 Agent 框架，支持工具调用、可后台运行的 Shell 长任务、Plan Mode、Task V2 持久化任务图、上下文自动压缩、会话持久化、`@file` 文件引用、跨对话项目记忆、Skills 渐进式披露、后台 SubAgent、Worktree 隔离、Agent Teams 多智能体协作、MCP 扩展和本地 Web Dashboard。
+基于 AI SDK 的命令行 Agent 框架，支持工具调用、可后台运行的 Shell 长任务、Plan Mode、Task V2 持久化任务图、上下文自动压缩、会话持久化、Codex CLI 兼容的无头 `exec`、`@file` 文件引用、跨对话项目记忆、Skills 渐进式披露、后台 SubAgent、Worktree 隔离、Agent Teams 多智能体协作、MCP 扩展和本地 Web Dashboard。
 
 ## 技术栈
 
@@ -234,6 +234,8 @@ pnpm run continue       # 恢复上次会话
 | `update`               | 将全局安装的 q-code 更新到 npm latest                    |
 | `update --dry-run`     | 只显示更新命令，不实际执行                               |
 | `dashboard`            | 启动本地只读 Web Dashboard，默认绑定 `127.0.0.1:48888`   |
+| `exec [options] [prompt]` | 以 Codex CLI 兼容协议运行一轮无头 Agent                |
+| `exec resume <id> [prompt]` | 恢复 `thread_id` 对应的 q-code 会话并继续执行       |
 | `eval list [path...]`  | 列出固定 Agent eval case，默认读取 `evals/smoke`          |
 | `eval run [path...]`   | 运行 deterministic Agent eval，输出本地报告和 trace       |
 | `eval compare <a> <b>` | 对比两个 eval run 的通过率、分数、进度、token 和成本变化  |
@@ -248,7 +250,34 @@ pnpm run continue       # 恢复上次会话
 | `--no-color`           | 关闭 ANSI 语法高亮和颜色输出                               |
 | `--debug`              | 显示启动诊断信息，包括 Prompt Pipe 和工具加载概览        |
 
-发布产物使用薄入口启动：`help` / `version` 只加载颜色环境、argv 解析和帮助/版本格式化后立即退出；`update`、`audit`、`init`、`eval`、`dashboard` 与主交互循环按需动态加载各自模块，避免互相支付依赖成本。主交互路径也只在确认进入 TUI 时动态加载 Ink/React；非 TTY、`--classic` 或 `Q_CODE_TUI=0` 会回退到传统 readline，且不会加载 TUI 运行时。TUI 会先渲染会话和输入界面，再继续完成 Custom Tools、Hooks、Skills、Agents、MCP、runtime context 与项目指令预热；如果用户在预热完成前提交会触发 Agent 或依赖预热状态的命令，ready gate 会显示“正在完成启动预热...”并在能力完整后自动继续。需要观察阶段耗时时，可设置 `Q_CODE_STARTUP_TRACE=true` 或使用 `--debug`，输出形如 `[Startup] bootstrap 12ms` 的阶段计时，不包含 API key、token 或工具输出。
+发布产物使用薄入口启动：`help` / `version` 只加载颜色环境、argv 解析和帮助/版本格式化后立即退出；`update`、`audit`、`init`、`eval`、`dashboard`、`exec` 与主交互循环按需动态加载各自模块，避免互相支付依赖成本。主交互路径也只在确认进入 TUI 时动态加载 Ink/React；非 TTY、`--classic` 或 `Q_CODE_TUI=0` 会回退到传统 readline，且不会加载 TUI 运行时。TUI 会先渲染会话和输入界面，再继续完成 Custom Tools、Hooks、Skills、Agents、MCP、runtime context 与项目指令预热；如果用户在预热完成前提交会触发 Agent 或依赖预热状态的命令，ready gate 会显示“正在完成启动预热...”并在能力完整后自动继续。需要观察阶段耗时时，可设置 `Q_CODE_STARTUP_TRACE=true` 或使用 `--debug`，输出形如 `[Startup] bootstrap 12ms` 的阶段计时，不包含 API key、token 或工具输出。
+
+### Codex CLI 兼容 exec
+
+`q-code exec` 复用交互模式的 Session、Agent Loop、Prompt、Hooks、Skills、MCP、记忆和工具实现，但不启动 Ink/readline。将调用方的 Codex 可执行入口指向 `q-code` 后，可按以下协议启动和续聊：
+
+```bash
+q-code exec --json --full-auto --skip-git-repo-check "检查当前项目"
+q-code exec resume <thread_id> --json --full-auto --skip-git-repo-check "继续处理"
+```
+
+`--json` 的 stdout 每行都是一个 UTF-8 JSON 对象，依次包含 `thread.started`、`turn.started`、工具 `item.started` / `item.completed`、最终 `agent_message` 和 `turn.completed`；失败输出 `error` 或 `turn.failed`。诊断信息只写 stderr，`thread_id` 就是可传给 `exec resume` 的 q-code session id。
+
+| 参数 | 语义 |
+| ---- | ---- |
+| `-C, --cd <DIR>` | 在加载项目配置、AGENTS.md 和 Skills 前切换工作目录 |
+| `-m, --model <MODEL>` | 仅覆盖当前进程模型；恢复会话时不会采用历史模型 |
+| `-i, --image <FILE>` | 附加图片，可重复使用，沿用现有路径和大小限制 |
+| `-o, --output-last-message <FILE>` | 成功后原子写入最后一条 assistant 消息 |
+| `--json` | 输出 Codex 兼容 JSONL；始终不含 ANSI |
+| `--ephemeral` | 仅使用内存会话，不生成可恢复 transcript 或 latest 指针 |
+| `--full-auto` | 兼容 Codex 调用；仍保留 q-code Hooks、危险命令和 cwd 保护 |
+| `--skip-git-repo-check` | 兼容接受；q-code 本身允许在非 Git 目录运行 |
+| `-s, --sandbox read-only` | 只向模型开放现有只读工具 |
+| `-s, --sandbox workspace-write` | 使用 q-code 现有工作区写入和 Shell cwd 边界 |
+| `--color always\|never\|auto` | 兼容接受；文本最终消息不额外着色 |
+
+prompt 缺失或为 `-` 时从 stdin 读取；同时提供位置 prompt 和管道 stdin 时，stdin 会作为附加上下文。`exec resume --last` 恢复目标工作目录最近的有效会话。这里的 sandbox 是工具可见性和路径策略，不是 Codex 的 OS 级隔离；`danger-full-access`、绕过审批与 sandbox、额外目录和配置覆盖等未实现参数会明确报错并以状态码 `2` 退出。
 
 ### Hooks
 
@@ -325,7 +354,12 @@ src/
 ├── index.ts              # 开发态兼容入口，委托给 cli/bootstrap.ts
 ├── cli/
 │   ├── bootstrap.ts      # 薄 CLI 入口：early commands、动态 import 和启动 trace
-│   ├── main.ts           # 主交互循环、模式切换、上下文压缩调度
+│   ├── main.ts           # 交互适配、模式切换、上下文压缩和共享执行流水线
+│   ├── conversation-runtime.ts # 交互/exec 共用的中立会话 Runtime
+│   ├── conversation-events.ts  # Runtime 中立事件契约
+│   ├── exec-args.ts      # Codex 风格 exec/resume 参数解析
+│   ├── exec-cli.ts       # 无头 exec 入口、stdin/cwd/会话和退出码编排
+│   ├── codex-jsonl.ts    # Runtime 事件到 Codex JSONL 的协议映射
 │   └── startup-ready.ts  # 启动预热 ready gate
 ├── agent/
 │   ├── loop.ts           # Agent Loop 核心（ReAct 模式）

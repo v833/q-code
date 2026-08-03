@@ -2,14 +2,14 @@
  * 早期 CLI 子命令路由与版本/帮助文案（不启动 MCP 与会话）。
  *
  * `getEarlyCliCommand` 在 `index.ts` 进入主循环前 short-circuit：
- * help、version、update、audit、init、eval、dashboard。
+ * help、version、update、audit、init、eval、dashboard、exec。
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** 在进入主交互循环前即可处理的子命令。 */
-export type EarlyCliCommand = 'help' | 'version' | 'update' | 'audit' | 'init' | 'eval' | 'dashboard'
+export type EarlyCliCommand = 'help' | 'version' | 'update' | 'audit' | 'init' | 'eval' | 'dashboard' | 'exec'
 
 let cachedPackageVersion: string | undefined
 
@@ -48,6 +48,7 @@ export function getPackageVersion(): string {
  */
 export function getEarlyCliCommand(argv: string[]): EarlyCliCommand | undefined {
   const first = argv[0]
+  if (first === 'exec') return 'exec'
   if (first === 'help' || argv.includes('--help') || argv.includes('-h')) return 'help'
   if (first === 'version' || argv.includes('--version') || argv.includes('-v')) return 'version'
   if (first === 'update') return 'update'
@@ -77,6 +78,8 @@ export function formatCliHelp(version: string): string {
     '  q-code audit tail [--session <id>] [--event <name>] [--follow]',
     '  q-code init [--user|-u] [--local|-l]',
     '  q-code dashboard [--host 127.0.0.1] [--port 48888] [--open]',
+    '  q-code exec [options] [prompt]',
+    '  q-code exec resume [options] <session-id> [prompt]',
     '  q-code eval list [path...]',
     '  q-code eval run [path...] [--tag <tag>] [--mode <mode>] [--max-cases N] [--max-cost-usd N] [--repeat N] [--concurrency N] [--report json,md,junit] [--out <dir>]',
     '                  [--allow-real-model] [--judge] [--langfuse-datasets]',
@@ -95,6 +98,7 @@ export function formatCliHelp(version: string): string {
     '      init --local          Write config to ./.q-code/config.toml',
     '      init --user           Write config to ~/.q-code/config.toml (default)',
     '      dashboard             Start the local-only Web Dashboard',
+    '      exec                  Run q-code non-interactively with Codex-compatible output',
     '      eval list             List eval suites and cases',
     '      eval run              Run deterministic Agent evals and write reports',
     '      eval compare          Compare two eval runs',
@@ -120,7 +124,65 @@ export function formatCliHelp(version: string): string {
     '  q-code --continue',
     '  q-code --session my-task --plan',
     '  q-code dashboard',
+    '  q-code exec --json --full-auto "检查当前项目"',
     '  q-code update'
+  ].join('\n')
+}
+
+/** 生成 Codex 兼容 `exec` / `exec resume` 帮助文本。 */
+export function formatExecHelp(version: string, resume = false): string {
+  if (resume) {
+    return [
+      formatCliVersion(version),
+      '',
+      'Resume a previous q-code session',
+      '',
+      'Usage: q-code exec resume [OPTIONS] [SESSION_ID] [PROMPT]',
+      '',
+      'Options:',
+      '      --last                         Resume the latest session for this project',
+      '  -C, --cd <DIR>                     Set the workspace before loading project config',
+      '  -i, --image <FILE>                 Attach an image to the prompt (repeatable)',
+      '  -m, --model <MODEL>                Override the model for this process',
+      '  -s, --sandbox <MODE>               Tool policy: read-only or workspace-write',
+      '      --full-auto                    Run non-interactively with q-code safeguards',
+      '      --skip-git-repo-check          Accepted for Codex compatibility',
+      '      --json                         Print Codex-compatible JSONL events',
+      '  -o, --output-last-message <FILE>   Write the final response to a file',
+      '      --color <MODE>                  Compatibility: always, never, or auto; JSON is plain',
+      '  -h, --help                         Show help and exit',
+      '  -V, --version                      Show version and exit',
+      '',
+      'Sandbox modes are q-code tool/path policies, not OS-level isolation.',
+    ].join('\n')
+  }
+
+  return [
+    formatCliVersion(version),
+    '',
+    'Run q-code non-interactively',
+    '',
+    'Usage: q-code exec [OPTIONS] [PROMPT]',
+    '       q-code exec resume [OPTIONS] <SESSION_ID> [PROMPT]',
+    '',
+    'Arguments:',
+    '  [PROMPT]                            Read from stdin when omitted or set to -',
+    '',
+    'Options:',
+    '  -C, --cd <DIR>                      Set the workspace before loading project config',
+    '  -i, --image <FILE>                  Attach an image to the prompt (repeatable)',
+    '  -m, --model <MODEL>                 Override the model for this process',
+    '  -s, --sandbox <MODE>                Tool policy: read-only or workspace-write',
+    '      --ephemeral                     Do not persist a resumable transcript',
+    '      --full-auto                    Run non-interactively with q-code safeguards',
+    '      --skip-git-repo-check          Accepted for Codex compatibility',
+    '      --json                         Print Codex-compatible JSONL events',
+    '  -o, --output-last-message <FILE>   Write the final response to a file',
+    '      --color <MODE>                 Compatibility: always, never, or auto; JSON is plain',
+    '  -h, --help                         Show help and exit',
+    '  -V, --version                      Show version and exit',
+    '',
+    'Sandbox modes are q-code tool/path policies, not OS-level isolation.',
   ].join('\n')
 }
 

@@ -23,7 +23,7 @@
 ## 非目标
 
 - 不实现 Codex 的完整配置系统、审批系统或 OS 级 sandbox。
-- 不修改 `C:\Users\25073\Desktop\agent-os`。
+- 不修改调用方的 `agent-os` 仓库。
 - 不提供或覆盖名为 `codex` 的系统可执行文件。
 - 不兼容 `review` 等本次接入不需要的 Codex 子命令。
 
@@ -103,7 +103,7 @@ q-code exec resume --last [OPTIONS] [PROMPT]
 | `-m, --model <MODEL>` | 仅覆盖当前进程使用的模型，不读取历史模型作为执行模型 |
 | `-i, --image <FILE>` | 可重复，复用现有图片路径安全和预算规则 |
 | `-o, --output-last-message <FILE>` | 成功后原子写入最终 assistant 消息 |
-| `--color always\|never\|auto` | 控制文本模式；JSON 模式始终无 ANSI |
+| `--color always\|never\|auto` | 兼容接受；文本最终消息不额外着色，JSON 始终无 ANSI |
 | `--ephemeral` | 使用内存会话，不生成可恢复 transcript 或 latest 指针 |
 | `--full-auto` | 非交互执行，保留 Hooks、危险命令保护和 cwd 边界 |
 | `--skip-git-repo-check` | 安全 no-op；q-code 默认允许非 Git 工作目录 |
@@ -265,4 +265,3 @@ q-code exec resume <thread_id> --json --full-auto --skip-git-repo-check <prompt>
 - `AGENTS.md`：项目概览、CLI 子命令、目录边界与测试策略；
 - `src/runtime/cli-info.ts`：主帮助和 exec 帮助入口；
 - 如未新增环境变量，不修改 `.env.example` 与 runtime config aliases。
-

@@ -52,6 +52,8 @@ export interface SessionStoreOptions {
   sessionDir?: string
   /** 启用 debug 便利映射（等价于 `Q_CODE_DEBUG` 的 session 链接行为）。 */
   debug?: boolean
+  /** 仅在进程内保存 transcript，不创建 metadata 或 latest 指针。 */
+  ephemeral?: boolean
 }
 
 /** 当前会话在磁盘上的路径集合。 */
@@ -211,6 +213,9 @@ export class SessionStore {
   readonly projectKey: string
   readonly paths: SessionPaths
   private readonly existedBeforeInit: boolean
+  private readonly ephemeral: boolean
+  private readonly memoryEntries: TranscriptEntry[] = []
+  private ephemeralMetadata?: SessionMetadata
 
   /**
    * 打开或创建会话；新会话写入 `session_meta` 行并更新 `latest`。
@@ -220,13 +225,19 @@ export class SessionStore {
   constructor(options: SessionStoreOptions | string = {}) {
     const normalizedOptions = normalizeOptions(options)
     const storage = getProjectStorageInfo(normalizedOptions.cwd ?? process.cwd(), normalizedOptions.sessionDir)
+    this.ephemeral = normalizedOptions.ephemeral === true
 
     this.cwd = storage.cwd
     this.projectKey = storage.projectKey
     const requestedSessionId = normalizeSessionId(normalizedOptions.sessionId)
-    const requestedStorage = requestedSessionId ? findActiveSessionStorage(storage, requestedSessionId) : undefined
-    const latestSession = normalizedOptions.continueLatest ? findLatestSession(storage) : undefined
+    const requestedStorage = !this.ephemeral && requestedSessionId
+      ? findActiveSessionStorage(storage, requestedSessionId)
+      : undefined
+    const latestSession = !this.ephemeral && normalizedOptions.continueLatest
+      ? findLatestSession(storage)
+      : undefined
     const legacyDefaultStorage =
+      !this.ephemeral &&
       (normalizedOptions.continueLatest || requestedSessionId === LEGACY_DEFAULT_SESSION_ID) && !latestSession
         ? findLegacyDefaultSessionStorage(storage)
         : undefined
@@ -240,6 +251,19 @@ export class SessionStore {
       requestedStorage ?? latestSession?.storage ?? legacyDefaultStorage ?? storage,
       this.sessionId
     )
+
+    if (this.ephemeral) {
+      this.existedBeforeInit = false
+      this.memoryEntries.push({
+        type: 'session_meta',
+        timestamp: new Date().toISOString(),
+        sessionId: this.sessionId,
+        cwd: this.cwd,
+        projectKey: this.projectKey,
+        schemaVersion: 2
+      })
+      return
+    }
 
     ensureProjectDir(this.paths)
     ensureDebugProjectSessionLink(storage, this.paths, normalizedOptions)
@@ -419,7 +443,11 @@ export class SessionStore {
       ...(patch.tags !== undefined ? { tags: patch.tags.map((tag) => tag.trim()).filter(Boolean) } : {}),
       updatedAt: new Date().toISOString()
     }
-    writeJsonFile(this.paths.metaPath, next)
+    if (this.ephemeral) {
+      this.ephemeralMetadata = next
+    } else {
+      writeJsonFile(this.paths.metaPath, next)
+    }
     return next
   }
 
@@ -466,6 +494,12 @@ export class SessionStore {
   private appendEntries(entries: TranscriptEntry[]): void {
     if (entries.length === 0) return
 
+    if (this.ephemeral) {
+      this.memoryEntries.push(...entries)
+      this.refreshMetadata()
+      return
+    }
+
     // JSONL 选择 append-only 写入：每个事件一行，崩溃时最多损坏末尾一行；
     // 恢复时逐行解析并跳过坏行，比整份 JSON 文件更适合长会话。
     const lines = entries.map((entry) => JSON.stringify(entry)).join('\n') + '\n'
@@ -475,6 +509,7 @@ export class SessionStore {
   }
 
   private readEntries(): TranscriptEntry[] {
+    if (this.ephemeral) return [...this.memoryEntries]
     return readEntriesFromPath(this.paths.transcriptPath)
   }
 
@@ -487,7 +522,7 @@ export class SessionStore {
       transcriptPath: this.paths.transcriptPath,
       entries
     })
-    const previous = readMetadata(this.paths.metaPath)
+    const previous = this.ephemeral ? this.ephemeralMetadata : readMetadata(this.paths.metaPath)
     const metadata = buildMetadata({
       previous,
       summary,
@@ -495,7 +530,11 @@ export class SessionStore {
       cwd: this.cwd,
       projectKey: this.projectKey
     })
-    writeJsonFile(this.paths.metaPath, metadata)
+    if (this.ephemeral) {
+      this.ephemeralMetadata = metadata
+    } else {
+      writeJsonFile(this.paths.metaPath, metadata)
+    }
     return metadata
   }
 }

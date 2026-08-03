@@ -86,6 +86,40 @@ describe('session management', () => {
     )
   })
 
+  it('keeps ephemeral sessions in memory without updating project storage', () => {
+    const store = new SessionStore({
+      cwd: home.cwd,
+      sessionId: 'ephemeral-session',
+      ephemeral: true
+    })
+
+    store.append({ role: 'user', content: 'temporary prompt' })
+    store.append({ role: 'assistant', content: 'temporary answer' })
+    store.appendUsage(
+      { inputTokens: 2, outputTokens: 3, totalTokens: 5 },
+      { inputTokens: 2, outputTokens: 3, totalTokens: 5 }
+    )
+    store.updateMetadata({ model: 'temporary-model' })
+
+    expect(store.exists()).toBe(false)
+    expect(store.load()).toEqual([
+      { role: 'user', content: 'temporary prompt' },
+      { role: 'assistant', content: 'temporary answer' }
+    ])
+    expect(store.getSummary()).toMatchObject({
+      sessionId: 'ephemeral-session',
+      messageCount: 2
+    })
+    expect(store.getMetadata()).toMatchObject({
+      sessionId: 'ephemeral-session',
+      totalTokens: 5,
+      model: 'temporary-model'
+    })
+    expect(existsSync(store.paths.transcriptPath)).toBe(false)
+    expect(existsSync(store.paths.metaPath)).toBe(false)
+    expect(listProjectSessions({ cwd: home.cwd })).toEqual([])
+  })
+
   it('maps project .sessions to the user home session directory in debug mode', () => {
     const store = new SessionStore({
       cwd: home.cwd,

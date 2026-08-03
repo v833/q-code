@@ -38,6 +38,21 @@ export async function bootstrap(argv: string[] = process.argv.slice(2)): Promise
     return 0;
   }
 
+  if (earlyCliCommand === 'exec') {
+    startupTrace.mark('exec-import-start');
+    const { runExecCli } = await import('./exec-cli');
+    startupTrace.mark('exec-import');
+    const code = await runExecCli({
+      argv: argv.slice(1),
+      packageVersion,
+      startupTrace,
+      applyRuntimeConfig: () => applyRuntimeConfigForStartup(startupTrace),
+    });
+    startupTrace.mark('exec');
+    startupTrace.print();
+    return code;
+  }
+
   if (earlyCliCommand === 'update') {
     startupTrace.mark('update-import-start');
     const { runCliUpdate } = await import('../runtime/update');

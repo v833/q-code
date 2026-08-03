@@ -10,7 +10,7 @@
 - **可观测性**：NDJSON 审计日志（默认开启）、本地只读 Web Dashboard、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警、启动时版本更新说明（对比 `~/.q-code/last-version.json` 与包内 `changelog.json`）。
 - **评测**：`q-code eval` 本地优先 Agent 质量平台，覆盖固定任务集、mock/cli/真实模型 runner、LLM judge（opt-in）、工具轨迹、预算/成本、进度、文件副作用、策略安全、JSONL trace、Markdown/JUnit 报告、baseline 对比、趋势看板、定期回归与可选 Langfuse evaluator trace / dataset / scores 导出。
 - **TUI**：基于 Ink 的交互式 TUI（默认）、流式 Markdown 稳定前缀渲染、Markdown 快路径与 LRU parse cache、`--classic` 经典 readline、可经管道/CI 自动降级；主 Agent 默认人格为「小黄鸭」，可用 `/ya` 主动切换到主题鸭「降压鸭」「屁老鸭」。
-- **CLI 子命令**：`q-code help|version|update|audit|init|eval|dashboard`（启动前 short-circuit），其余参数走主交互循环。
+- **CLI 子命令**：`q-code help|version|update|audit|init|eval|dashboard|exec`（启动前 short-circuit）；`exec` 提供 Codex CLI 兼容的无头 JSONL、session resume 和常用参数，其余参数走主交互循环。
 
 ## 环境与工具
 
@@ -76,6 +76,8 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `q-code audit tail [--session <id>] [--event <name>] [--follow]`：按会话/事件过滤查看审计日志。
 - `q-code init [--user|-u] [--local|-l]`：交互式初始化 `config.toml`（默认用户目录；`--local` 写入项目 `.q-code/config.toml`）。
 - `q-code dashboard [--host 127.0.0.1] [--port 48888] [--open] [--session-dir <dir>] [--audit-dir <dir>]`：启动本地只读 Web Dashboard，读取 session、audit、Task V2、SubAgent artifact 和 eval artifact，`--host` 仅允许 loopback 地址，默认摘要脱敏且不上传数据。
+- `q-code exec [--json] [-C|--cd <dir>] [-m|--model <model>] [-i|--image <file>] [-o|--output-last-message <file>] [--ephemeral] [--full-auto] [--skip-git-repo-check] [-s|--sandbox read-only|workspace-write] [prompt]`：以 Codex CLI 兼容协议无头运行一轮；prompt 缺失或为 `-` 时读取 stdin。
+- `q-code exec resume <session-id> [options] [prompt]` / `q-code exec resume --last [options] [prompt]`：只恢复目标工作目录下已有 q-code session；历史 metadata model 不覆盖当前 runtime model。
 - `q-code eval list [path...]`：列出固定 eval case，默认读取 `evals/smoke`。
 - `q-code eval run [path...] [--tag <tag>] [--mode <mode>] [--max-cases N] [--max-total-tokens N] [--max-cost-usd N] [--repeat N] [--concurrency N] [--report json,md,junit] [--out <dir>] [--langfuse|--no-langfuse] [--langfuse-datasets] [--allow-real-model] [--judge]`：运行 Agent eval，输出 `.q-code/evals/runs/<run-id>/` artifact；真实模型和 judge 必须显式 opt-in。
 - `q-code eval compare <baseline-name|baseline-run-dir|run.json> <candidate-run-dir|run.json>`：对比两个 eval run 的通过率、分数、进度、token 和成本变化。
@@ -87,7 +89,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 ## 目录边界
 
 - `src/index.ts`：开发态兼容入口，委托给 `src/cli/bootstrap.ts`。
-- `src/cli/`：薄 CLI 入口（early commands、动态 import、启动 trace）、主交互循环（模式切换、上下文压缩调度和整体编排）与启动预热 ready gate。
+- `src/cli/`：薄 CLI 入口（early commands、动态 import、启动 trace）、主交互适配、共享 `ConversationRuntime` 及中立事件、Codex 风格 exec 参数/JSONL 适配和启动预热 ready gate。
 - `src/agent/`：核心 Agent Loop、重试、循环检测、模型等待心跳与单步模型请求超时。
 - `src/attachments/`：图片附件识别、路径安全校验、大小/数量限制、剪贴板临时文件、多模态 `ModelMessage` 构造和 transcript/audit 脱敏摘要。
 - `src/agents/`：SubAgent、后台 Agent、Agent Teams、worktree、mailbox、notification-store、final output artifact。
@@ -105,7 +107,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `src/evals/`：Agent eval 子系统，包含 case loader、mock/cli-subprocess/real-agent runner、trace recorder、deterministic scorers、LLM judge、报告、Langfuse eval trace/dataset/scores 导出、趋势看板与 `q-code eval` CLI。
 - `src/runtime/`：早期 CLI 子命令识别/帮助文案、`init-cli` 交互式配置向导、通用 reasoning 配置与 DeepSeek reasoning 兼容层、Shell 启动参数与 Windows PowerShell fallback、颜色环境 bootstrap、启动耗时 trace、`getPackageVersion`、`runCliUpdate`、启动更新说明（`changelog.ts`）、`installCrashGuard` 与崩溃报告生成。
 - `src/config/`：`runtime-config.ts` 负责加载 `~/.q-code/config.toml`、`<cwd>/.q-code/config.toml`、`.env`，统一映射到 `process.env`（支持多 section/alias）。
-- `src/session/`：`SessionStore`（默认写 `~/sessions/<projectKey>/`；debug 模式可在项目 `.sessions/projects/<projectKey>` 创建链接映射；JSONL append-only、metadata、trash/restore、export/search、cache 模式与 usage 记录持久化）。
+- `src/session/`：`SessionStore`（默认写 `~/sessions/<projectKey>/`；debug 模式可在项目 `.sessions/projects/<projectKey>` 创建链接映射；JSONL append-only、metadata、trash/restore、export/search、cache 模式与 usage 记录持久化；exec ephemeral 模式仅保存在进程内）。
 - `src/mentions/`：`@file` 文件引用解析、git/递归文件索引、项目级候选缓存与 watcher 刷新 store、fuzzy 排序、路径安全校验、文件内容截断和本轮上下文注入。
 - `src/usage/`：token 归一化、定价、cache 策略、`UsageTracker` 与 `/usage` 渲染。
 - `src/infra/`：企业 AI 基建配置同步（base URL / token / sync 状态 / 知识候选上报）。
@@ -159,6 +161,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - Skills 目录支持 `~/.q-code/skills/<name>/SKILL.md`、`~/.agents/skills/<name>/SKILL.md`、`<cwd>/.q-code/skills/<name>/SKILL.md` 与 `<cwd>/.agents/skills/<name>/SKILL.md`；同名优先级为项目级 `.agents/skills` > 项目级 `.q-code/skills` > 用户级 `.agents/skills` > 用户级 `.q-code/skills`。
 - Output Styles 固定读取 `~/.q-code/output-styles/<name>.md` 与 `<cwd>/.q-code/output-styles/<name>.md`，项目级同名覆盖用户级/内置；active style 写 `settings.json.outputStyle`。风格正文只能作为本轮动态上下文注入，不得进入稳定 system prompt。User Commands 固定读取 `~/.q-code/commands/**/*.md` 与 `<cwd>/.q-code/commands/**/*.md`，子目录映射为 `:` 命名空间；项目级同名覆盖用户级，内置 Slash 命令优先。命令模板只展开 prompt，不执行 shell；`model` 只影响本轮，`allowed-tools` 只能收窄当前可见工具，不能绕过 Hooks、权限或危险命令保护。审计事件只记录命令名、来源、model/allowed-tools 摘要，不记录完整模板正文。
 - 启动性能路径由 `src/cli/bootstrap.ts` 保持薄入口：`help` / `version` 不得静态加载 Ink/React、AI SDK、MCP SDK、Langfuse 或 eval 主模块；TUI 运行时必须通过动态 import 加载，`--classic` / 非 TTY 不应加载 Ink/React。新增启动阶段可用 `Q_CODE_STARTUP_TRACE=true` 或 `--debug` 输出耗时，输出不得包含密钥、token 或工具结果原文。
+- Codex 兼容 `exec` 必须先解析并应用 `-C/--cd`，再加载项目配置、AGENTS.md、Skills 和会话；`--json` stdout 只能包含逐行 JSON 事件，banner、模型等待和启动诊断只能写 stderr。`thread_id` 使用当前项目 q-code session id，resume 不得跨项目静默恢复或创建会话；`--ephemeral` 不得写 transcript、metadata 或 latest 指针。`read-only` / `workspace-write` 只表示现有工具可见性和路径边界，不得宣称 OS 级 sandbox，兼容参数不得绕过 Hooks、危险命令保护或 cwd 限制。
 - 新增 Slash 命令通过 `createSlashCommandRegistry` + `command(...)` 注册（见 `src/cli/main.ts::createBuiltinSlashCommands`），并填好 `category`、`aliases`、`usage`，以便 `/help` 输出友好。
 - Hooks 配置写 `~/.q-code/settings.json` 与 `<cwd>/.q-code/settings.json`，用户级先执行、项目级后执行；command Hook 通过 stdin 接收事件 JSON，stdout 可返回 `continue|warn|block|modify` 决策，也支持退出码 `0` 放行、`2` block、`3` warn、`4` modify。新增 Hook 事件、决策字段或退出码语义时同步更新 `src/hooks/events.ts`、`src/hooks/types.ts`、README、`docs/guide/hooks.md` 与 `tests/unit/hooks.test.ts`，涉及工具结果时同步覆盖 `tests/unit/tool-registry.test.ts`。
 - 新增企业/外部观测相关能力（Infra / GitLab KB / 审计 PII 模式 / Langfuse）必须保持可禁用：环境变量缺省值不能让首次启动失败。Langfuse 默认关闭，且 `Q_CODE_LANGFUSE_RECORD_IO` 默认不得上传 prompt、文件内容、shell 输出或工具结果原文。
@@ -186,6 +189,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - TUI SubAgent Monitor：`vitest run tests/unit/agent-monitor.test.ts tests/unit/terminal.test.ts`
   - TUI 输入历史：`vitest run tests/unit/history-store.test.ts tests/unit/terminal.test.ts tests/integration/history-flow.test.ts`
   - 运行时配置/CLI 子命令：`vitest run tests/unit/runtime-config.test.ts tests/unit/cli-info.test.ts tests/unit/update.test.ts tests/unit/changelog.test.ts tests/unit/init-cli.test.ts`
+  - Codex 兼容 exec / ConversationRuntime / JSONL / ephemeral session：`vitest run tests/unit/exec-args.test.ts tests/unit/exec-cli.test.ts tests/unit/codex-jsonl.test.ts tests/unit/conversation-runtime.test.ts tests/unit/session-management.test.ts tests/unit/cli-info.test.ts tests/integration/exec-cli.test.ts`
   - 鸭子人格 / system prompt / prompt cache / prompt quality：`vitest run tests/unit/duck-persona.test.ts tests/unit/prompt-builder.test.ts tests/unit/prompt-quality.test.ts tests/unit/runtime-context.test.ts tests/unit/usage.test.ts tests/unit/agent-md.test.ts`，必要时运行 `pnpm prompt:cache:verify`、`pnpm prompt:quality:verify`
   - Dashboard：`vitest run tests/unit/dashboard-data.test.ts tests/integration/dashboard-flow.test.ts tests/unit/cli-info.test.ts`
   - 项目记忆：`vitest run tests/unit/memory.test.ts tests/unit/memory-selection.test.ts tests/unit/memory-auto-extract.test.ts tests/unit/prompt-builder.test.ts tests/unit/audit-logger.test.ts`，必要时运行 `pnpm prompt:cache:verify`

@@ -321,6 +321,12 @@ import {
   redactImageMessageForTranscript,
   type ImageAttachment,
 } from '../attachments';
+import {
+  createConversationRuntime,
+  type ConversationRuntime,
+  type ConversationTurnResult,
+} from './conversation-runtime';
+import type { ConversationEventListener } from './conversation-events';
 
 let startupTrace: StartupTrace = createStartupTrace();
 let debugMode = false;
@@ -579,7 +585,24 @@ const EMPTY_AGENTS_BOOTSTRAP: AgentsBootstrapResult = {
  * 主交互循环：会话恢复、工具/MCP/Skills 注册、TUI 或 readline、
  * 用户输入处理、agentLoop、压缩与斜杠命令。
  */
-/** 运行主交互循环。 */
+/** 无头 ConversationRuntime 的单轮输入与事件出口。 */
+export interface RunMainHeadlessOptions {
+  prompt: string;
+  imageAttachments?: ImageAttachment[];
+  modelName?: string;
+  sandboxMode?: 'read-only' | 'workspace-write';
+  ephemeral?: boolean;
+  onEvent?: ConversationEventListener;
+  onDiagnostic?: (text: string) => void;
+  signal?: AbortSignal;
+}
+
+/** 无头主循环的完成结果。 */
+export interface RunMainResult extends ConversationTurnResult {
+  sessionId: string;
+}
+
+/** 运行主交互循环或共享无头 ConversationRuntime。 */
 export async function runMain(options: {
   /** 当前 package 版本，来自薄 bootstrap。 */
   packageVersion: string;
@@ -587,14 +610,18 @@ export async function runMain(options: {
   argv?: string[];
   /** 启动阶段耗时记录器。 */
   startupTrace?: StartupTrace;
-}): Promise<void> {
+  /** 设置后运行单轮无头请求，不创建 Ink/readline。 */
+  headless?: RunMainHeadlessOptions;
+}): Promise<void | RunMainResult> {
   const argv = options.argv ?? process.argv.slice(2);
+  const headless = options.headless;
   startupTrace = options.startupTrace ?? createStartupTrace();
   debugMode = isDebugMode(argv);
   startupTrace.mark('main-import');
   const dumpSystemPrompt = argv.includes('--dump-system-prompt');
   const startInPlanMode = argv.includes('--plan');
   const useTui =
+    !headless &&
     !dumpSystemPrompt &&
     process.stdin.isTTY &&
     process.stdout.isTTY &&
@@ -615,6 +642,8 @@ export async function runMain(options: {
   let rl: ReturnType<typeof createInterface> | null = null;
   let unsubscribeTodos: () => void = () => {};
   let unsubscribeAsyncAgents: () => void = () => {};
+  let conversationRuntime: ConversationRuntime | undefined;
+  const conversationToolInputs = new Map<string, { name: string; input?: unknown }>();
 
   const emitTerminal = (event: TerminalEvent): void => {
     if (terminal) {
@@ -624,6 +653,10 @@ export async function runMain(options: {
     }
   };
   const print = (text = ''): void => {
+    if (headless) {
+      if (text.trim()) headless.onDiagnostic?.(stripAnsi(text));
+      return;
+    }
     if (useTui) {
       emitTerminal({ type: 'message', role: 'system', text: stripAnsi(text) });
     } else {
@@ -677,7 +710,7 @@ export async function runMain(options: {
     setStatus('Interrupting current turn', 'error');
   };
 
-  if (!dumpSystemPrompt && !useTui) console.log(fmtBanner(options.packageVersion));
+  if (!headless && !dumpSystemPrompt && !useTui) console.log(fmtBanner(options.packageVersion));
   const isContinue = argv.includes('--continue');
   const requestedSessionId = getStringArg('--session', argv);
   const initialStore = dumpSystemPrompt
@@ -686,6 +719,7 @@ export async function runMain(options: {
         continueLatest: isContinue,
         sessionId: requestedSessionId,
         debug: debugMode,
+        ephemeral: headless?.ephemeral === true,
       });
   const activeStoreRef: { current?: SessionStore } = { current: initialStore };
   let sessionId = initialStore?.sessionId ?? requestedSessionId ?? 'dump';
@@ -715,7 +749,7 @@ export async function runMain(options: {
   let userCommands: UserCommandConfig[] = [];
   let userCommandWarnings: string[] = [];
   let defaultModelName: string | undefined;
-  let sessionModelOverride: string | undefined;
+  let sessionModelOverride: string | undefined = headless?.modelName;
   const shownSessionModelBoundaryNotices = new Set<string>();
   const currentModelName = (): string => {
     if (!defaultModelName) throw new Error('Model has not been initialized');
@@ -1029,7 +1063,7 @@ export async function runMain(options: {
     teamsEnabled: isAgentTeamsEnabled(),
     duckPersona,
   });
-  if (!dumpSystemPrompt) {
+  if (!dumpSystemPrompt && !headless) {
     await maybeShowChangelogNotice({
       currentVersion: options.packageVersion,
       print: (text) => {
@@ -1127,6 +1161,7 @@ export async function runMain(options: {
   async function startStartupWarmup(): Promise<StartupWarmupResult> {
     startupTrace.mark('warmup-start');
     registry.setCwd(runtimeCwd);
+    registry.setQuiet(Boolean(headless));
 
     const customToolsPromise = (async (): Promise<LoadedCustomToolsResult> => {
       startupTrace.mark('custom-tools-start');
@@ -1255,7 +1290,7 @@ export async function runMain(options: {
       startupTrace.mark('mcp-start');
       try {
         const result = await connectMCP({
-          quiet: dumpSystemPrompt || useTui,
+          quiet: dumpSystemPrompt || useTui || Boolean(headless),
           cwd: runtimeCwd,
         });
         startupTrace.mark('mcp');
@@ -2027,7 +2062,7 @@ export async function runMain(options: {
   if (!useTui) await finishStartupWarmup();
   else finishStartupWarmupInBackground();
 
-  rl = useTui
+  rl = useTui || headless
     ? null
     : createInterface({ input: process.stdin, output: process.stdout });
 
@@ -2059,13 +2094,35 @@ export async function runMain(options: {
     terminal?.instance.unmount();
   }
 
+  conversationRuntime = createConversationRuntime({
+    driver: {
+      initialize: waitForStartupReady,
+      executeTurn: async (input) => executeAgentTurn(
+        input.prompt,
+        input.imageAttachments ?? [],
+        {
+          ...(input.modelName ? { modelName: input.modelName } : {}),
+          ...(input.allowedToolNames ? { allowedToolNames: input.allowedToolNames } : {}),
+        },
+      ),
+      switchSession: async (targetId) => switchSession(targetId),
+      abort: (reason) => {
+        if (!activeTurnAbortController) return;
+        activeTurnAbortController.abort(reason);
+      },
+      close: closeCli,
+      getSessionId: () => sessionId,
+    },
+    onEvent: headless?.onEvent,
+  });
+
   async function handleInput(input: string | TerminalSubmitPayload): Promise<void> {
     const submittedText = typeof input === 'string' ? input : input.text;
     const submittedImages = typeof input === 'string' ? [] : input.imageAttachments ?? [];
     const trimmed = submittedText.trim();
     if ((!trimmed && submittedImages.length === 0) || trimmed === 'exit') {
       print('Bye!');
-      await closeCli();
+      await conversationRuntime?.close();
       return;
     }
 
@@ -2168,13 +2225,34 @@ export async function runMain(options: {
   async function runAgentTurn(
     userContent: string,
     imageAttachments: ImageAttachment[] = [],
-  ): Promise<void> {
+  ): Promise<ConversationTurnResult> {
+    if (!conversationRuntime) throw new Error('ConversationRuntime 尚未初始化');
+    return conversationRuntime.runTurn({
+      prompt: userContent,
+      imageAttachments,
+      requireFinalText: false,
+    });
+  }
+
+  async function executeAgentTurn(
+    userContent: string,
+    imageAttachments: ImageAttachment[] = [],
+    turnOptions: { modelName?: string; allowedToolNames?: Set<string> } = {},
+  ): Promise<ConversationTurnResult> {
     try {
+      if (headless?.signal?.aborted) {
+        throw headless.signal.reason ?? new Error('exec 已取消');
+      }
       const promptHook = await runUserPromptSubmitHook(userContent);
-      if (promptHook.blocked) return;
+      if (promptHook.blocked) throw new Error('用户请求被 Hook 阻止');
       const effectiveUserContent =
         typeof promptHook.prompt === 'string' ? promptHook.prompt : userContent;
-      await runExpandedAgentTurn(effectiveUserContent, promptHook.appendContext, {}, imageAttachments);
+      return await runExpandedAgentTurn(
+        effectiveUserContent,
+        promptHook.appendContext,
+        turnOptions,
+        imageAttachments,
+      );
     } finally {
       cleanupClipboardImages(sessionId);
     }
@@ -2185,7 +2263,7 @@ export async function runMain(options: {
     hookAppendContext?: string,
     turnOptions: { modelName?: string; allowedToolNames?: Set<string> } = {},
     imageAttachments: ImageAttachment[] = [],
-  ): Promise<void> {
+  ): Promise<ConversationTurnResult> {
     const mentionExpansion = expandFileMentions(userContent, {
       cwd: activeStore.cwd,
     });
@@ -2245,7 +2323,7 @@ export async function runMain(options: {
 
     const userMsg = createUserMessageWithImages(imageExpansion.prompt, mergedImages.attachments);
     const persistedUserMsg = redactImageMessageForTranscript(userMsg);
-    await runAgentTurnWithMessages(
+    return runAgentTurnWithMessages(
       [userMsg],
       [persistedUserMsg],
       userContent,
@@ -2516,7 +2594,7 @@ export async function runMain(options: {
     userQuery: string,
     hookAppendContext?: string,
     turnOptions: { modelName?: string; allowedToolNames?: Set<string> } = {},
-  ): Promise<void> {
+  ): Promise<ConversationTurnResult> {
     await waitForStartupReady();
     injectPendingTaskNotifications();
     await injectPlanModeMessages();
@@ -2570,8 +2648,13 @@ export async function runMain(options: {
     }
     setStatus('Thinking', 'thinking');
     const turnAbortController = new AbortController();
+    if (headless?.signal?.aborted) {
+      turnAbortController.abort(headless.signal.reason ?? new Error('exec 已取消'));
+    }
     activeTurnAbortController = turnAbortController;
     activeTurnInFlight = true;
+    conversationToolInputs.clear();
+    let completedTurnUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
     const selectedMemoryContext = await consumeSelectedMemoryContext(userQuery);
     const turnTransientMessages = [
       ...buildTurnContextTransientMessages(turnPrompt.promptCtx, userQuery, selectedMemoryContext),
@@ -2596,7 +2679,7 @@ export async function runMain(options: {
             maxOutputTokens: defaultMaxOutputTokens,
             escalatedMaxOutputTokens,
             transientMessages: turnTransientMessages,
-            quiet: useTui,
+            quiet: useTui || Boolean(headless),
             modelName: turnModelName,
             modelWaitHeartbeatMs,
             modelSlowRequestWarnMs,
@@ -2650,6 +2733,7 @@ export async function runMain(options: {
             },
             onUsage: (turnUsage, totalUsage) => {
               langfuseTurn.onUsage(turnUsage, totalUsage);
+              completedTurnUsage = totalUsage;
               latestTotalUsage = totalUsage;
               activeStore.appendUsage(turnUsage, totalUsage);
               emitTerminal({ type: 'usage', turnUsage, totalUsage });
@@ -2672,7 +2756,9 @@ export async function runMain(options: {
             },
             onModelWait: (event) => {
               langfuseTurn.onModelWait(event);
-              if (useTui) {
+              if (headless) {
+                headless.onDiagnostic?.(event.message);
+              } else if (useTui) {
                 setStatus(event.message, 'thinking');
               } else {
                 process.stderr.write(`\n  [Model] ${event.message}\n`);
@@ -2681,7 +2767,7 @@ export async function runMain(options: {
             onToolProgress: (event) => {
               langfuseTurn.onToolProgress(event);
               if (event.type !== 'shell_output' || !event.text) return;
-              if (!useTui) print(`\n${event.text}`);
+              if (!useTui && !headless) print(`\n${event.text}`);
               emitTerminal({ type: 'jit_context', text: event.text });
             },
             onToolEvent: (event) => {
@@ -2693,6 +2779,18 @@ export async function runMain(options: {
                   ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
                 };
                 const tool = registry.get(event.name);
+                if (event.toolCallId) {
+                  conversationToolInputs.set(event.toolCallId, {
+                    name: event.name,
+                    ...(event.input !== undefined ? { input: event.input } : {}),
+                  });
+                  conversationRuntime?.publish({
+                    type: 'tool_started',
+                    toolCallId: event.toolCallId,
+                    name: event.name,
+                    ...(event.input !== undefined ? { input: event.input } : {}),
+                  });
+                }
                 emitTerminal({
                   type: 'tool_call',
                   name: event.name,
@@ -2705,6 +2803,22 @@ export async function runMain(options: {
             },
             onToolResult: (event) => {
               langfuseTurn.onToolResult(event);
+              if (event.toolCallId) {
+                const started = conversationToolInputs.get(event.toolCallId);
+                conversationRuntime?.publish({
+                  type: 'tool_completed',
+                  toolCallId: event.toolCallId,
+                  name: started?.name ?? event.name,
+                  ...(started?.input !== undefined
+                    ? { input: started.input }
+                    : event.input !== undefined
+                      ? { input: event.input }
+                      : {}),
+                  output: event.output,
+                  isError: event.isError === true,
+                });
+                conversationToolInputs.delete(event.toolCallId);
+              }
               emitTerminal({
                 type: 'tool_result',
                 name: event.name,
@@ -2773,10 +2887,17 @@ export async function runMain(options: {
       );
       if (stopHook.blocked) {
         setStatus('Blocked by hook', 'error');
-        return;
+        throw new Error('本轮完成被 stop Hook 阻止');
       }
       if (pendingPlanApproval) await printPlanApprovalHint();
       setStatus('Ready');
+      return {
+        finalText: extractFinalAssistantText(loopResult.newMessages),
+        usage: {
+          inputTokens: completedTurnUsage.inputTokens,
+          outputTokens: completedTurnUsage.outputTokens,
+        },
+      };
     } finally {
       activeTurnInFlight = false;
       if (activeTurnAbortController === turnAbortController) {
@@ -4878,6 +4999,34 @@ export async function runMain(options: {
     });
   }
 
+  if (headless) {
+    if (!conversationRuntime) throw new Error('ConversationRuntime 尚未初始化');
+    const allowedToolNames = headless.sandboxMode === 'read-only'
+      ? new Set(
+          registry.getAll()
+            .filter((tool) => tool.isReadOnly === true)
+            .map((tool) => tool.name),
+        )
+      : undefined;
+    const abortFromSignal = (): void => {
+      conversationRuntime?.abort(headless.signal?.reason ?? new Error('exec 已取消'));
+    };
+    headless.signal?.addEventListener('abort', abortFromSignal, { once: true });
+    try {
+      if (headless.signal?.aborted) throw headless.signal.reason ?? new Error('exec 已取消');
+      const result = await conversationRuntime.runTurn({
+        prompt: headless.prompt,
+        imageAttachments: headless.imageAttachments ?? [],
+        ...(headless.modelName ? { modelName: headless.modelName } : {}),
+        ...(allowedToolNames ? { allowedToolNames } : {}),
+      });
+      return { sessionId, ...result };
+    } finally {
+      headless.signal?.removeEventListener('abort', abortFromSignal);
+      await conversationRuntime.close();
+    }
+  }
+
   if (!useTui) {
     console.log(`\n${startupDuckBanner}\n`);
   }
@@ -4934,4 +5083,29 @@ function truncateTerminalAgentText(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   const keepChars = Math.max(0, maxChars - 32);
   return `${text.slice(0, keepChars)}\n... truncated ${text.length - keepChars} chars`;
+}
+
+/** 从本轮新增消息中提取最后一条非空 assistant 文本。 */
+function extractFinalAssistantText(messages: ModelMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== 'assistant') continue;
+    const text = extractMessageText(message.content).trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function extractMessageText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (!part || typeof part !== 'object') return '';
+      const record = part as Record<string, unknown>;
+      return record.type === 'text' && typeof record.text === 'string' ? record.text : '';
+    })
+    .filter(Boolean)
+    .join('\n');
 }

@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import {
   formatCliHelp,
   formatCliVersion,
+  formatExecHelp,
   getEarlyCliCommand,
   isDebugMode
 } from '../../src/runtime/cli-info'
@@ -44,6 +45,12 @@ describe('cli info', () => {
   it('detects dashboard command', () => {
     expect(getEarlyCliCommand(['dashboard'])).toBe('dashboard')
     expect(getEarlyCliCommand(['dashboard', '--port', '0'])).toBe('dashboard')
+  })
+
+  it('routes exec before nested help flags', () => {
+    expect(getEarlyCliCommand(['exec', '--json', 'prompt'])).toBe('exec')
+    expect(getEarlyCliCommand(['exec', '--help'])).toBe('exec')
+    expect(getEarlyCliCommand(['exec', 'resume', '--help'])).toBe('exec')
   })
 
   it('leaves interactive flags alone', () => {
@@ -110,6 +117,7 @@ describe('cli info', () => {
     expect(bootstrap).not.toContain("from 'ai'")
     expect(bootstrap).not.toContain("from '@ai-sdk/openai'")
     expect(bootstrap).toContain("await import('./main')")
+    expect(bootstrap).toContain("await import('./exec-cli')")
     expect(bootstrap).toContain("await import('../evals')")
     expect(bootstrap).toContain("await import('../dashboard')")
   })
@@ -203,10 +211,18 @@ describe('cli info', () => {
     expect(help).toContain('--max-cost-usd')
     expect(help).toContain('--allow-real-model')
     expect(help).toContain('q-code eval trend')
+    expect(help).toContain('q-code exec')
     expect(help).toContain('--continue')
     expect(help).toContain('Shift+Tab')
     expect(help).toContain('--no-color')
     expect(help).toContain('--debug')
     expect(help).toContain('~/.q-code/config.toml')
+  })
+
+  it('formats exec and resume help', () => {
+    expect(formatExecHelp('1.2.3')).toContain('q-code exec [OPTIONS] [PROMPT]')
+    expect(formatExecHelp('1.2.3')).toContain('--sandbox <MODE>')
+    expect(formatExecHelp('1.2.3', true)).toContain('q-code exec resume')
+    expect(formatExecHelp('1.2.3', true)).toContain('--last')
   })
 })
