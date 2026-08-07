@@ -19,7 +19,7 @@ const IMAGE_AT_TOKEN_RE = /@image:(?:"([^"]+)"|'([^']+)'|(\S+))/g
 
 export interface ImageAttachment {
   id: string
-  source: 'clipboard' | 'path' | 'mention'
+  source: 'clipboard' | 'path' | 'mention' | 'acp'
   path: string
   displayName: string
   mediaType: string
@@ -114,6 +114,48 @@ export function prepareImageAttachment(
     displayInput,
     source: options.source
   })
+}
+
+/** 从 ACP 等外部协议提供的 base64 数据构造内存图片附件，不落盘。 */
+export function createImageAttachmentFromData(
+  data: string,
+  options: { mediaType: string; displayName?: string; source?: 'acp' }
+): ImageAttachment {
+  const normalizedData = data.trim()
+  if (!normalizedData) throw new Error('图片数据不能为空')
+  const compactData = normalizedData.replace(/\s+/g, '')
+  if (!/^[a-zA-Z0-9+/]*={0,2}$/.test(compactData) || compactData.length % 4 === 1) {
+    throw new Error('图片数据不是有效的 base64')
+  }
+  const bytes = Buffer.from(compactData, 'base64')
+  if (bytes.length === 0) throw new Error('图片数据不是有效的 base64')
+  const canonical = bytes.toString('base64').replace(/=+$/, '')
+  if (canonical !== compactData.replace(/=+$/, '')) {
+    throw new Error('图片数据不是有效的 base64')
+  }
+  if (bytes.length > IMAGE_ATTACHMENT_SINGLE_MAX_BYTES) {
+    throw new Error(
+      `图片超过单图上限 ${formatBytes(IMAGE_ATTACHMENT_SINGLE_MAX_BYTES)}: ${formatBytes(bytes.length)}`
+    )
+  }
+
+  const detectedMediaType = detectImageMediaType(bytes) ??
+    (options.mediaType === 'image/svg+xml' && looksLikeSvg(bytes) ? 'image/svg+xml' : undefined)
+  if (!detectedMediaType || detectedMediaType !== options.mediaType) {
+    throw new Error(`图片 media type 与内容不匹配: ${options.mediaType}`)
+  }
+  const sha256 = createHash('sha256').update(bytes).digest('hex')
+  const displayName = options.displayName?.trim() || `acp-${sha256.slice(0, 12)}`
+  return {
+    id: sha256.slice(0, 12),
+    source: options.source ?? 'acp',
+    path: `acp://${sha256.slice(0, 16)}/${displayName}`,
+    displayName,
+    mediaType: detectedMediaType,
+    bytes: bytes.length,
+    sha256,
+    data: normalizedData
+  }
 }
 
 /** 异步读取本地图片文件，适合 TUI 输入路径等交互热路径。 */
@@ -469,6 +511,11 @@ function isWebp(data: Uint8Array): boolean {
     String.fromCharCode(...data.slice(0, 4)) === 'RIFF' &&
     String.fromCharCode(...data.slice(8, 12)) === 'WEBP'
   )
+}
+
+function looksLikeSvg(data: Uint8Array): boolean {
+  const prefix = Buffer.from(data.slice(0, 1024)).toString('utf8')
+  return /<svg(?:\s|>)/i.test(prefix)
 }
 
 function isImagePart(part: unknown): part is ImagePart {

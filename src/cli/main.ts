@@ -593,6 +593,8 @@ export interface RunMainHeadlessOptions {
   sandboxMode?: 'read-only' | 'workspace-write';
   ephemeral?: boolean;
   onEvent?: ConversationEventListener;
+  onText?: (text: string) => void;
+  onReasoning?: (text: string) => void;
   onDiagnostic?: (text: string) => void;
   signal?: AbortSignal;
 }
@@ -2752,7 +2754,11 @@ export async function runMain(options: {
             },
             onText: (text) => {
               langfuseTurn.onText(text);
+              headless?.onText?.(text);
               emitTerminal({ type: 'assistant_delta', text });
+            },
+            onReasoning: (text) => {
+              headless?.onReasoning?.(text);
             },
             onModelWait: (event) => {
               langfuseTurn.onModelWait(event);

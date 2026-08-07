@@ -53,6 +53,21 @@ export async function bootstrap(argv: string[] = process.argv.slice(2)): Promise
     return code;
   }
 
+  if (earlyCliCommand === 'acp') {
+    startupTrace.mark('acp-import-start');
+    const { runAcpCli } = await import('./acp-cli');
+    startupTrace.mark('acp-import');
+    const code = await runAcpCli({
+      argv: argv.slice(1),
+      packageVersion,
+      startupTrace,
+      applyRuntimeConfig: () => applyRuntimeConfigForStartup(startupTrace),
+    });
+    startupTrace.mark('acp');
+    startupTrace.print();
+    return code;
+  }
+
   if (earlyCliCommand === 'update') {
     startupTrace.mark('update-import-start');
     const { runCliUpdate } = await import('../runtime/update');

@@ -164,6 +164,7 @@ export interface AgentLoopOptions {
   onStepUsage?: (stepUsage: AgentStepUsage) => void
   onStepMetrics?: (event: AgentStepMetricEvent) => void
   onText?: (text: string) => void
+  onReasoning?: (text: string) => void
   onModelWait?: (event: AgentModelWaitEvent) => void
   onToolEvent?: (event: AgentToolEvent) => void
   onToolResult?: (event: AgentToolResultEvent) => void
@@ -431,6 +432,7 @@ export async function agentLoop(
                   part.providerMetadata
                 )
                 reasoningPart.text += part.text
+                options.onReasoning?.(part.text)
                 break
               }
 

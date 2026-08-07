@@ -53,6 +53,11 @@ describe('cli info', () => {
     expect(getEarlyCliCommand(['exec', 'resume', '--help'])).toBe('exec')
   })
 
+  it('routes ACP before nested help flags', () => {
+    expect(getEarlyCliCommand(['acp'])).toBe('acp')
+    expect(getEarlyCliCommand(['acp', '--help'])).toBe('acp')
+  })
+
   it('leaves interactive flags alone', () => {
     expect(getEarlyCliCommand(['--continue'])).toBeUndefined()
     expect(getEarlyCliCommand(['--session', 'demo'])).toBeUndefined()
@@ -212,6 +217,8 @@ describe('cli info', () => {
     expect(help).toContain('--allow-real-model')
     expect(help).toContain('q-code eval trend')
     expect(help).toContain('q-code exec')
+    expect(help).toContain('q-code acp')
+    expect(help).toContain('Agent Client Protocol')
     expect(help).toContain('--continue')
     expect(help).toContain('Shift+Tab')
     expect(help).toContain('--no-color')

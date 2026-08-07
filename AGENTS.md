@@ -6,11 +6,11 @@
 
 - **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、文件历史快照与 `/rewind` 按轮次回滚内置写工具改动、TUI `/agents` SubAgent Monitor（同步与后台 SubAgent，completed 默认隐藏并可清理，忙碌等待期间可用 `Ctrl+A` 查看）、只读同步 SubAgent 动态并行调度、SubAgent 长 final output artifact/preview 回传、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、`@image:<path>` / TUI 图片附件多模态输入、文件派项目记忆（headers 精选、预算化正文注入、年龄提示）、Skills、SubAgent、Agent Teams、Worktree 隔离。
 - **工具执行**：文件/搜索工具、可配置超时与 spill 的 Shell 工具（Windows 优先 PowerShell7，缺失时回退 Windows PowerShell 5.1）、后台 Shell job（`f_status` / `f_tail` / `f_kill` / `f_list`）。
-- **集成扩展**：MCP server、Hooks（生命周期事件、pre/post tool-use 决策、prompt/context 注入、退出码协议）、Slash 命令注册表、Output Styles、Markdown User Commands、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
+- **集成扩展**：MCP server、ACP v1 stdio Agent 接入、Hooks（生命周期事件、pre/post tool-use 决策、prompt/context 注入、退出码协议）、Slash 命令注册表、Output Styles、Markdown User Commands、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
 - **可观测性**：NDJSON 审计日志（默认开启）、本地只读 Web Dashboard、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警、启动时版本更新说明（对比 `~/.q-code/last-version.json` 与包内 `changelog.json`）。
 - **评测**：`q-code eval` 本地优先 Agent 质量平台，覆盖固定任务集、mock/cli/真实模型 runner、LLM judge（opt-in）、工具轨迹、预算/成本、进度、文件副作用、策略安全、JSONL trace、Markdown/JUnit 报告、baseline 对比、趋势看板、定期回归与可选 Langfuse evaluator trace / dataset / scores 导出。
 - **TUI**：基于 Ink 的交互式 TUI（默认）、流式 Markdown 稳定前缀渲染、Markdown 快路径与 LRU parse cache、`--classic` 经典 readline、可经管道/CI 自动降级；主 Agent 默认人格为「小黄鸭」，可用 `/ya` 主动切换到主题鸭「降压鸭」「屁老鸭」。
-- **CLI 子命令**：`q-code help|version|update|audit|init|eval|dashboard|exec`（启动前 short-circuit）；`exec` 提供 Codex CLI 兼容的无头 JSONL、session resume 和常用参数，其余参数走主交互循环。
+- **CLI 子命令**：`q-code help|version|update|audit|init|eval|dashboard|exec|acp`（启动前 short-circuit）；`exec` 提供 Codex CLI 兼容的无头 JSONL、session resume 和常用参数；`acp` 以 ACP v1 stdio Agent 身份提供 session/prompt；其余参数走主交互循环。
 
 ## 环境与工具
 
@@ -35,6 +35,7 @@ pnpm typecheck              # tsc --noEmit
 pnpm test                   # vitest run（unit + integration）
 pnpm test:unit              # vitest run tests/unit
 pnpm test:integration       # vitest run tests/integration
+pnpm test:acp               # ACP 参数、内容转换和 stdio 握手测试
 pnpm test:watch             # vitest watch
 pnpm test:coverage          # vitest run --coverage
 
@@ -78,6 +79,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `q-code dashboard [--host 127.0.0.1] [--port 48888] [--open] [--session-dir <dir>] [--audit-dir <dir>]`：启动本地只读 Web Dashboard，读取 session、audit、Task V2、SubAgent artifact 和 eval artifact，`--host` 仅允许 loopback 地址，默认摘要脱敏且不上传数据。
 - `q-code exec [--json] [-C|--cd <dir>] [-m|--model <model>] [-i|--image <file>] [-o|--output-last-message <file>] [--ephemeral] [--full-auto] [--skip-git-repo-check] [-s|--sandbox read-only|workspace-write] [prompt]`：以 Codex CLI 兼容协议无头运行一轮；prompt 缺失或为 `-` 时读取 stdin。
 - `q-code exec resume <session-id> [options] [prompt]` / `q-code exec resume --last [options] [prompt]`：只恢复目标工作目录下已有 q-code session；历史 metadata model 不覆盖当前 runtime model。
+- `q-code acp [--cd <dir>]`：通过 stdin/stdout 的 ACP v1 JSON-RPC 为其他产品提供 Agent session；stdout 不得混入诊断文本。
 - `q-code eval list [path...]`：列出固定 eval case，默认读取 `evals/smoke`。
 - `q-code eval run [path...] [--tag <tag>] [--mode <mode>] [--max-cases N] [--max-total-tokens N] [--max-cost-usd N] [--repeat N] [--concurrency N] [--report json,md,junit] [--out <dir>] [--langfuse|--no-langfuse] [--langfuse-datasets] [--allow-real-model] [--judge]`：运行 Agent eval，输出 `.q-code/evals/runs/<run-id>/` artifact；真实模型和 judge 必须显式 opt-in。
 - `q-code eval compare <baseline-name|baseline-run-dir|run.json> <candidate-run-dir|run.json>`：对比两个 eval run 的通过率、分数、进度、token 和成本变化。
@@ -90,6 +92,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 
 - `src/index.ts`：开发态兼容入口，委托给 `src/cli/bootstrap.ts`。
 - `src/cli/`：薄 CLI 入口（early commands、动态 import、启动 trace）、主交互适配、共享 `ConversationRuntime` 及中立事件、Codex 风格 exec 参数/JSONL 适配和启动预热 ready gate。
+- `src/acp/`：ACP v1 Agent 服务器、session 生命周期和 prompt 内容/图片转换；协议层不得绕过现有 Agent Loop、Hooks、工具注册与路径策略。
 - `src/agent/`：核心 Agent Loop、重试、循环检测、模型等待心跳与单步模型请求超时。
 - `src/attachments/`：图片附件识别、路径安全校验、大小/数量限制、剪贴板临时文件、多模态 `ModelMessage` 构造和 transcript/audit 脱敏摘要。
 - `src/agents/`：SubAgent、后台 Agent、Agent Teams、worktree、mailbox、notification-store、final output artifact。

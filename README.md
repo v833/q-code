@@ -8,7 +8,7 @@
   基于 AI SDK 的命令行 Agent 框架
 </p>
 
-基于 AI SDK 的命令行 Agent 框架，支持工具调用、可后台运行的 Shell 长任务、Plan Mode、Task V2 持久化任务图、上下文自动压缩、会话持久化、Codex CLI 兼容的无头 `exec`、`@file` 文件引用、跨对话项目记忆、Skills 渐进式披露、后台 SubAgent、Worktree 隔离、Agent Teams 多智能体协作、MCP 扩展和本地 Web Dashboard。
+基于 AI SDK 的命令行 Agent 框架，支持工具调用、可后台运行的 Shell 长任务、Plan Mode、Task V2 持久化任务图、上下文自动压缩、会话持久化、Codex CLI 兼容的无头 `exec`、ACP v1 stdio 接入、`@file` 文件引用、跨对话项目记忆、Skills 渐进式披露、后台 SubAgent、Worktree 隔离、Agent Teams 多智能体协作、MCP 扩展和本地 Web Dashboard。
 
 ## 技术栈
 
@@ -17,6 +17,7 @@
 | 运行时   | Node.js ≥ 22 + TypeScript               |
 | AI SDK   | `ai` (Vercel AI SDK) + `@ai-sdk/openai` |
 | MCP 协议 | `@modelcontextprotocol/sdk`             |
+| ACP 协议 | `@agentclientprotocol/sdk`              |
 | 包管理   | pnpm / npm                              |
 | 运行方式 | npm CLI 包                              |
 
@@ -236,6 +237,7 @@ pnpm run continue       # 恢复上次会话
 | `dashboard`            | 启动本地只读 Web Dashboard，默认绑定 `127.0.0.1:48888`   |
 | `exec [options] [prompt]` | 以 Codex CLI 兼容协议运行一轮无头 Agent                |
 | `exec resume <id> [prompt]` | 恢复 `thread_id` 对应的 q-code 会话并继续执行       |
+| `acp [options]`          | 以 ACP v1 stdio Agent 服务接收其他产品的会话请求       |
 | `eval list [path...]`  | 列出固定 Agent eval case，默认读取 `evals/smoke`          |
 | `eval run [path...]`   | 运行 deterministic Agent eval，输出本地报告和 trace       |
 | `eval compare <a> <b>` | 对比两个 eval run 的通过率、分数、进度、token 和成本变化  |
@@ -278,6 +280,26 @@ q-code exec resume <thread_id> --json --full-auto --skip-git-repo-check "继续�
 | `--color always\|never\|auto` | 兼容接受；文本最终消息不额外着色 |
 
 prompt 缺失或为 `-` 时从 stdin 读取；同时提供位置 prompt 和管道 stdin 时，stdin 会作为附加上下文。`exec resume --last` 恢复目标工作目录最近的有效会话。这里的 sandbox 是工具可见性和路径策略，不是 Codex 的 OS 级隔离；`danger-full-access`、绕过审批与 sandbox、额外目录和配置覆盖等未实现参数会明确报错并以状态码 `2` 退出。
+
+### ACP v1 接入
+
+`q-code acp` 以 ACP Agent 身份运行，其他产品（例如 IDE 或桌面端）作为 ACP Client 通过 stdin/stdout 的 NDJSON JSON-RPC 接入。协议输出只写 stdout，诊断只写 stderr；当前工作目录由 `--cd` 固定，session 请求必须使用同一 workspace。
+
+```bash
+q-code acp --cd /path/to/workspace
+```
+
+客户端启动配置只需指向该命令：
+
+```json
+{
+  "name": "q-code",
+  "command": "q-code",
+  "args": ["acp", "--cd", "${workspaceRoot}"]
+}
+```
+
+当前支持 `initialize`、`session/new`、`session/prompt`、`session/cancel` 和 `session/close`，并通过 `session/update` 推送文本增量、推理增量、工具调用和工具结果。图片、文本和 workspace 内 `resource_link` 可作为 prompt 内容；ACP 会话传入的 MCP server、embedded resource 和 audio 暂未支持，请使用 q-code 项目配置中的 `mcpServers`。
 
 ### Hooks
 
@@ -359,6 +381,8 @@ src/
 │   ├── conversation-events.ts  # Runtime 中立事件契约
 │   ├── exec-args.ts      # Codex 风格 exec/resume 参数解析
 │   ├── exec-cli.ts       # 无头 exec 入口、stdin/cwd/会话和退出码编排
+│   ├── acp-args.ts       # ACP 子命令参数解析与帮助
+│   ├── acp-cli.ts        # ACP stdio 入口
 │   ├── codex-jsonl.ts    # Runtime 事件到 Codex JSONL 的协议映射
 │   └── startup-ready.ts  # 启动预热 ready gate
 ├── agent/
@@ -386,6 +410,9 @@ src/
 │       └── selection.ts  # 记忆精选、预算注入和年龄提示
 ├── session/
 │   └── store.ts          # JSONL 会话持久化
+├── acp/
+│   ├── server.ts         # ACP v1 Agent 与 session 生命周期
+│   └── content.ts        # ACP prompt 内容与附件转换
 ├── mentions/             # @file 文件引用解析、索引缓存/刷新、fuzzy 补全和上下文注入
 ├── skills/               # SKILL.md 加载、渐进式披露、条件激活
 ├── agents/
@@ -1440,6 +1467,7 @@ src/evals/                    # q-code eval 本地评测框架
 | `pnpm test:coverage`    | 生成 v8 覆盖率报告（HTML + lcov）             |
 | `pnpm test:unit`        | 仅跑 `tests/unit`                             |
 | `pnpm test:integration` | 仅跑 `tests/integration`                      |
+| `pnpm test:acp`         | ACP 参数、内容转换和 stdio 握手测试          |
 | `pnpm test:legacy`      | 跑 `src/scripts/test-*.ts` 全套端到端脚本     |
 | `pnpm test:all`         | vitest + legacy 全部                          |
 | `pnpm typecheck`        | `tsc --noEmit` 全项目类型检查                 |
