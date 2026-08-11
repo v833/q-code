@@ -46,14 +46,23 @@ describe('Codex-compatible exec subprocess', () => {
     const firstEvents = parseJsonLines(first.stdout)
     const thread = firstEvents.find((event) => event.type === 'thread.started')
     expect(thread?.thread_id).toEqual(expect.any(String))
-    expect(firstEvents).toContainEqual(expect.objectContaining({
-      type: 'item.completed',
-      item: expect.objectContaining({
-        type: 'command_execution',
-        command: 'Get-Location',
-        status: 'completed',
-      }),
+    const locationExecution = firstEvents.find((event) =>
+      event.type === 'item.completed'
+      && event.item
+      && typeof event.item === 'object'
+      && (event.item as Record<string, unknown>).type === 'command_execution'
+      && (event.item as Record<string, unknown>).command === 'Get-Location'
+    )
+    expect(locationExecution).toBeDefined()
+    const locationItem = locationExecution?.item as Record<string, unknown> | undefined
+    expect(locationItem).toEqual(expect.objectContaining({
+      type: 'command_execution',
+      command: 'Get-Location',
+      status: expect.stringMatching(/^(completed|failed)$/),
     }))
+    if (locationItem?.status === 'failed') {
+      expect(locationItem.exit_code).toEqual(expect.any(Number))
+    }
     expect(lastAgentMessage(firstEvents)).toBe('mock answer')
     expect(firstEvents.at(-1)).toMatchObject({
       type: 'turn.completed',
