@@ -6,7 +6,7 @@
 
 - **Agent / 任务**：Agent Loop、Plan Mode（自然语言审批、智能进入与 Shift+Tab 切换）、Task V2、TodoWrite、上下文压缩、会话持久化与 TUI `/sessions` 管理、文件历史快照与 `/rewind` 按轮次回滚内置写工具改动、TUI `/agents` SubAgent Monitor（同步与后台 SubAgent，completed 默认隐藏并可清理，忙碌等待期间可用 `Ctrl+A` 查看）、只读同步 SubAgent 动态并行调度、SubAgent 长 final output artifact/preview 回传、TUI 输入历史跨进程持久化、`@file` 文件引用注入与候选索引缓存/监听刷新、`@image:<path>` / TUI 图片附件多模态输入、文件派项目记忆（headers 精选、预算化正文注入、年龄提示）、Skills、SubAgent、Agent Teams、Worktree 隔离。
 - **工具执行**：文件/搜索工具、可配置超时与 spill 的 Shell 工具（Windows 优先 PowerShell7，缺失时回退 Windows PowerShell 5.1）、后台 Shell job（`f_status` / `f_tail` / `f_kill` / `f_list`）。
-- **集成扩展**：MCP server、ACP v1 stdio Agent 接入、Hooks（生命周期事件、pre/post tool-use 决策、prompt/context 注入、退出码协议）、Slash 命令注册表、Output Styles、Markdown User Commands、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
+- **集成扩展**：进程内 SDK（`@q-code-cli/q-code/sdk` 的 `createQCodeSession`）、MCP server、ACP v1 stdio Agent 接入、Hooks（生命周期事件、pre/post tool-use 决策、prompt/context 注入、退出码协议）、Slash 命令注册表、Output Styles、Markdown User Commands、企业 AI 基建同步（Infra）、GitLab Wiki 知识库。
 - **可观测性**：NDJSON 审计日志（默认开启）、本地只读 Web Dashboard、模型等待心跳、`ttftMs`/`elapsedMs`/TPS step 诊断、可选 Langfuse/OpenTelemetry trace 导出、崩溃保护（crash guard，默认开启）与 crash report、Usage / Cache / 成本统计、上下文占用预警、启动时版本更新说明（对比 `~/.q-code/last-version.json` 与包内 `changelog.json`）。
 - **评测**：`q-code eval` 本地优先 Agent 质量平台，覆盖固定任务集、mock/cli/真实模型 runner、LLM judge（opt-in）、工具轨迹、预算/成本、进度、文件副作用、策略安全、JSONL trace、Markdown/JUnit 报告、baseline 对比、趋势看板、定期回归与可选 Langfuse evaluator trace / dataset / scores 导出。
 - **TUI**：基于 Ink 的交互式 TUI（默认）、流式 Markdown 稳定前缀渲染、Markdown 快路径与 LRU parse cache、`--classic` 经典 readline、可经管道/CI 自动降级；主 Agent 默认人格为「小黄鸭」，可用 `/ya` 主动切换到主题鸭「降压鸭」「屁老鸭」。
@@ -93,6 +93,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - `src/index.ts`：开发态兼容入口，委托给 `src/cli/bootstrap.ts`。
 - `src/cli/`：薄 CLI 入口（early commands、动态 import、启动 trace）、主交互适配、共享 `ConversationRuntime` 及中立事件、Codex 风格 exec 参数/JSONL 适配和启动预热 ready gate。
 - `src/acp/`：ACP v1 Agent 服务器、session 生命周期和 prompt 内容/图片转换；协议层不得绕过现有 Agent Loop、Hooks、工具注册与路径策略。
+- `src/sdk/`：进程内 SDK 入口，复用无头 `runMain` 的 `turns` 输入流，对外暴露 `createQCodeSession`、轮次结果与中立事件；不得静态导入 `src/cli/bootstrap.ts`（导入即执行 CLI），也不得在 SDK 内复制 Agent Loop 或工具实现。
 - `src/agent/`：核心 Agent Loop、重试、循环检测、模型等待心跳与单步模型请求超时。
 - `src/attachments/`：图片附件识别、路径安全校验、大小/数量限制、剪贴板临时文件、多模态 `ModelMessage` 构造和 transcript/audit 脱敏摘要。
 - `src/agents/`：SubAgent、后台 Agent、Agent Teams、worktree、mailbox、notification-store、final output artifact。
@@ -164,6 +165,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
 - Skills 目录支持 `~/.q-code/skills/<name>/SKILL.md`、`~/.agents/skills/<name>/SKILL.md`、`<cwd>/.q-code/skills/<name>/SKILL.md` 与 `<cwd>/.agents/skills/<name>/SKILL.md`；同名优先级为项目级 `.agents/skills` > 项目级 `.q-code/skills` > 用户级 `.agents/skills` > 用户级 `.q-code/skills`。
 - Output Styles 固定读取 `~/.q-code/output-styles/<name>.md` 与 `<cwd>/.q-code/output-styles/<name>.md`，项目级同名覆盖用户级/内置；active style 写 `settings.json.outputStyle`。风格正文只能作为本轮动态上下文注入，不得进入稳定 system prompt。User Commands 固定读取 `~/.q-code/commands/**/*.md` 与 `<cwd>/.q-code/commands/**/*.md`，子目录映射为 `:` 命名空间；项目级同名覆盖用户级，内置 Slash 命令优先。命令模板只展开 prompt，不执行 shell；`model` 只影响本轮，`allowed-tools` 只能收窄当前可见工具，不能绕过 Hooks、权限或危险命令保护。审计事件只记录命令名、来源、model/allowed-tools 摘要，不记录完整模板正文。
 - 启动性能路径由 `src/cli/bootstrap.ts` 保持薄入口：`help` / `version` 不得静态加载 Ink/React、AI SDK、MCP SDK、Langfuse 或 eval 主模块；TUI 运行时必须通过动态 import 加载，`--classic` / 非 TTY 不应加载 Ink/React。新增启动阶段可用 `Q_CODE_STARTUP_TRACE=true` 或 `--debug` 输出耗时，输出不得包含密钥、token 或工具结果原文。
+- 进程内 SDK 走 `@q-code-cli/q-code/sdk` 子路径，`package.json` 的 `.` 与 `main` 仍指 CLI；`src/sdk/index.ts` 不得静态导入 `src/cli/bootstrap.ts`，构建时必须同时产出 `dist/sdk/index.js` 与 `dist/types/sdk/index.d.ts`。运行时配置、审计日志、MCP 与 crash guard 都是进程级单例，`applyRuntimeConfig` 只首次写入 `process.env`，因此 **一个 Node 进程只能创建一个 Session、一个 cwd**；多项目/多租户并发必须由宿主用子进程隔离，不要在同进程内并发创建不同 cwd 的 Session。headless `turns` 模式与单轮 `exec` 共用同一个 `ConversationRuntime`，改动时必须保证 `exec` 单轮路径行为不变。SDK 的 `abort()` / `close()` 终止整个会话，不提供轮次级取消；工具审批仍依赖 `allowedToolNames`、`sandboxMode` 与 Hooks，尚无异步交互审批通道。
 - Codex 兼容 `exec` 必须先解析并应用 `-C/--cd`，再加载项目配置、AGENTS.md、Skills 和会话；`--json` stdout 只能包含逐行 JSON 事件，banner、模型等待和启动诊断只能写 stderr。`thread_id` 使用当前项目 q-code session id，resume 不得跨项目静默恢复或创建会话；`--ephemeral` 不得写 transcript、metadata 或 latest 指针。`read-only` / `workspace-write` 只表示现有工具可见性和路径边界，不得宣称 OS 级 sandbox，兼容参数不得绕过 Hooks、危险命令保护或 cwd 限制。
 - 新增 Slash 命令通过 `createSlashCommandRegistry` + `command(...)` 注册（见 `src/cli/main.ts::createBuiltinSlashCommands`），并填好 `category`、`aliases`、`usage`，以便 `/help` 输出友好。
 - Hooks 配置写 `~/.q-code/settings.json` 与 `<cwd>/.q-code/settings.json`，用户级先执行、项目级后执行；command Hook 通过 stdin 接收事件 JSON，stdout 可返回 `continue|warn|block|modify` 决策，也支持退出码 `0` 放行、`2` block、`3` warn、`4` modify。新增 Hook 事件、决策字段或退出码语义时同步更新 `src/hooks/events.ts`、`src/hooks/types.ts`、README、`docs/guide/hooks.md` 与 `tests/unit/hooks.test.ts`，涉及工具结果时同步覆盖 `tests/unit/tool-registry.test.ts`。
@@ -193,6 +195,7 @@ pnpm changelog              # 手动从 git tag / conventional commit 生成 CHA
   - TUI 输入历史：`vitest run tests/unit/history-store.test.ts tests/unit/terminal.test.ts tests/integration/history-flow.test.ts`
   - 运行时配置/CLI 子命令：`vitest run tests/unit/runtime-config.test.ts tests/unit/cli-info.test.ts tests/unit/update.test.ts tests/unit/changelog.test.ts tests/unit/init-cli.test.ts`
   - Codex 兼容 exec / ConversationRuntime / JSONL / ephemeral session：`vitest run tests/unit/exec-args.test.ts tests/unit/exec-cli.test.ts tests/unit/codex-jsonl.test.ts tests/unit/conversation-runtime.test.ts tests/unit/session-management.test.ts tests/unit/cli-info.test.ts tests/integration/exec-cli.test.ts`
+  - 进程内 SDK：`vitest run tests/unit/sdk-session.test.ts tests/unit/conversation-runtime.test.ts tests/unit/exec-cli.test.ts`，发布前再跑 `pnpm build` 确认 `dist/sdk/index.js` 可直接导入且不启动 CLI
   - 鸭子人格 / system prompt / prompt cache / prompt quality：`vitest run tests/unit/duck-persona.test.ts tests/unit/prompt-builder.test.ts tests/unit/prompt-quality.test.ts tests/unit/runtime-context.test.ts tests/unit/usage.test.ts tests/unit/agent-md.test.ts`，必要时运行 `pnpm prompt:cache:verify`、`pnpm prompt:quality:verify`
   - Dashboard：`vitest run tests/unit/dashboard-data.test.ts tests/integration/dashboard-flow.test.ts tests/unit/cli-info.test.ts`
   - 项目记忆：`vitest run tests/unit/memory.test.ts tests/unit/memory-selection.test.ts tests/unit/memory-auto-extract.test.ts tests/unit/prompt-builder.test.ts tests/unit/audit-logger.test.ts`，必要时运行 `pnpm prompt:cache:verify`

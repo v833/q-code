@@ -130,7 +130,8 @@ describe('cli info', () => {
   it('keeps the published build split so dynamic imports stay lazy', () => {
     const buildScript = readFileSync(new URL('../../scripts/build.mjs', import.meta.url), 'utf-8')
 
-    expect(buildScript).toContain("entryPoints: ['src/cli/bootstrap.ts']")
+    expect(buildScript).toContain("index: 'src/cli/bootstrap.ts'")
+    expect(buildScript).toContain("'sdk/index': 'src/sdk/index.ts'")
     expect(buildScript).toContain("outdir: 'dist'")
     expect(buildScript).toContain('splitting: true')
     expect(buildScript).not.toContain("outfile: 'dist/index.js'")

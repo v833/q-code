@@ -28,7 +28,10 @@ await rm('dist', { recursive: true, force: true })
 await mkdir('dist', { recursive: true })
 
 await build({
-  entryPoints: ['src/cli/bootstrap.ts'],
+  entryPoints: {
+    index: 'src/cli/bootstrap.ts',
+    'sdk/index': 'src/sdk/index.ts'
+  },
   outdir: 'dist',
   bundle: true,
   splitting: true,
@@ -36,7 +39,6 @@ await build({
   format: 'esm',
   target: 'node22',
   packages: 'external',
-  entryNames: 'index',
   chunkNames: 'chunks/[name]-[hash]'
 })
 
@@ -46,6 +48,13 @@ if (!entryCode.startsWith('#!')) {
   await writeFile(entryPath, `#!/usr/bin/env node\n${entryCode}`)
 }
 await chmod('dist/index.js', 0o755)
+
+const tscResult = spawnSync(
+  process.execPath,
+  [join(ROOT, 'node_modules/typescript/bin/tsc'), '-p', 'tsconfig.build.json'],
+  { cwd: ROOT, stdio: 'inherit' }
+)
+if (tscResult.status !== 0) process.exit(tscResult.status ?? 1)
 
 if (existsSync(CHANGELOG_JSON)) {
   await copyFile(CHANGELOG_JSON, join(ROOT, 'dist/changelog.json'))

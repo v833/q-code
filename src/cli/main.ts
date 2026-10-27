@@ -324,6 +324,7 @@ import {
 import {
   createConversationRuntime,
   type ConversationRuntime,
+  type ConversationTurnInput,
   type ConversationTurnResult,
 } from './conversation-runtime';
 import type { ConversationEventListener } from './conversation-events';
@@ -587,11 +588,18 @@ const EMPTY_AGENTS_BOOTSTRAP: AgentsBootstrapResult = {
  */
 /** 无头 ConversationRuntime 的单轮输入与事件出口。 */
 export interface RunMainHeadlessOptions {
-  prompt: string;
+  /** 单轮模式输入；与 `turns` 二选一。 */
+  prompt?: string;
   imageAttachments?: ImageAttachment[];
   modelName?: string;
   sandboxMode?: 'read-only' | 'workspace-write';
   ephemeral?: boolean;
+  /** 多轮模式输入流；迭代结束后关闭 Runtime（SDK 使用）。 */
+  turns?: AsyncIterable<ConversationTurnInput>;
+  /** 多轮模式下每轮完成后的回调。 */
+  onTurnResult?: (result: RunMainResult) => void;
+  /** 初始化完成后回传当前会话 id。 */
+  onSessionReady?: (sessionId: string) => void;
   onEvent?: ConversationEventListener;
   onText?: (text: string) => void;
   onReasoning?: (text: string) => void;
@@ -5020,6 +5028,22 @@ export async function runMain(options: {
     headless.signal?.addEventListener('abort', abortFromSignal, { once: true });
     try {
       if (headless.signal?.aborted) throw headless.signal.reason ?? new Error('exec 已取消');
+      await conversationRuntime.initialize();
+      headless.onSessionReady?.(sessionId);
+      if (headless.turns) {
+        for await (const turn of headless.turns) {
+          if (headless.signal?.aborted) {
+            throw headless.signal.reason ?? new Error('exec 已取消');
+          }
+          const input = allowedToolNames && !turn.allowedToolNames
+            ? { ...turn, allowedToolNames }
+            : turn;
+          const result = await conversationRuntime.runTurn(input);
+          headless.onTurnResult?.({ sessionId, ...result });
+        }
+        return;
+      }
+      if (headless.prompt === undefined) throw new Error('无头请求缺少 prompt');
       const result = await conversationRuntime.runTurn({
         prompt: headless.prompt,
         imageAttachments: headless.imageAttachments ?? [],

@@ -301,6 +301,36 @@ q-code acp --cd /path/to/workspace
 
 当前支持 `initialize`、`session/new`、`session/prompt`、`session/cancel` 和 `session/close`，并通过 `session/update` 推送文本增量、推理增量、工具调用和工具结果。图片、文本和 workspace 内 `resource_link` 可作为 prompt 内容；ACP 会话传入的 MCP server、embedded resource 和 audio 暂未支持，请使用 q-code 项目配置中的 `mcpServers`。
 
+### 进程内 SDK
+
+`@q-code-cli/q-code/sdk` 把无头 Agent 直接嵌入 Node/TypeScript 进程，复用同一套 Session、Agent Loop、工具、Skills 与 Hooks，不需要子进程或 TUI：
+
+```ts
+import { createQCodeSession } from '@q-code-cli/q-code/sdk'
+
+const session = await createQCodeSession({
+  cwd: process.cwd(),
+  onEvent: (event) => {
+    if (event.type === 'tool_started') console.log('tool', event.name)
+  },
+})
+
+const result = await session.run('检查当前项目的测试失败原因')
+console.log(result.finalText, result.usage)
+
+await session.run('继续修复')
+await session.close()
+```
+
+`createQCodeSession` 返回 `{ sessionId, run, abort, close }`：`run()` 串行执行一轮并返回 `finalText`、`usage` 和 `sessionId`，`onEvent` 透传 `turn_started`、`tool_started`、`tool_completed`、`assistant_completed` 等中立事件。`sessionId` 可以传给 `q-code exec resume`，也可以在下次用 `createQCodeSession({ sessionId })` 恢复。
+
+使用限制：
+
+- 一个 Node 进程只能创建一个 Session 和一个工作目录；运行时配置、审计日志、MCP 和崩溃保护都是进程级单例。服务端多租户并发请为每个租户启动独立子进程。
+- `abort()` 和 `close()` 终止整个会话，暂不提供轮次级取消。
+- 无头模式没有交互式工具审批；请用 `sandboxMode: 'read-only'`、`run()` 的 `allowedToolNames` 或 Hooks 做策略控制。
+- 导入 SDK 不会启动 CLI，CLI 仍通过 `q-code` 可执行文件运行。
+
 ### Hooks
 
 Hooks 用来把安全检查、审计、质量门控和上下文注入从“提示词提醒”变成确定性的生命周期步骤。配置写在 `~/.q-code/settings.json` 或 `<项目>/.q-code/settings.json`，用户级先执行，项目级后执行。
